@@ -32,7 +32,7 @@ This repository uses **`specs/`** as the source of truth for product intent and 
 1. **Small diffs** — one logical change per PR/commit when possible.
 2. **Tests** — add unit tests for **pure** logic (loop bounds, BPM math, XML validation helpers). E2E when the project has harness set up.
 3. **Types** — `strict` TypeScript; avoid `any`; if unavoidable, comment **why** briefly.
-4. **Comments** — explain **why** and tradeoffs, not what the code literally does.
+4. **Comments and human-readable docs** — Explain **why** something exists, **what constraints or invariants** matter, and **tradeoffs**, not a play-by-play of what each line does. When you change behavior, public contracts, or operational boundaries, **update the docs that future readers rely on** in the same change (especially **`specs/`** when product or architecture intent shifts; short README or module-level notes when setup or integration context would otherwise be tribal knowledge). Prefer one clear paragraph over scattered obvious comments; skip duplicating spec prose inside code unless a local pointer saves repeated confusion.
 5. **Secrets** — never commit Supabase service keys; use env / local config templates only.
 6. **Ambiguity** — if specs conflict with reality (OSMD API limits, etc.), **prefer updating `specs/` in the same change** with a short note rather than silent drift.
 
