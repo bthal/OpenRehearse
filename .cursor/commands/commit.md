@@ -54,7 +54,26 @@ Review what changed in the current work session, update all affected documentati
 2. **Read affected files** — Never edit blind.
 3. **Draft changes** — Per file: what changes and why; get user approval if not already given.
 4. **Apply** — Write doc edits.
-5. **Commit** — Follow **Git commit** below (required end step for this command).
+5. **Quality gate** — Follow **Quality gate** below when applicable.
+6. **Commit** — Follow **Git commit** below (required end step for this command).
+
+## Quality gate
+
+Run before staging when the session touched **`client/`** code, tests, or config that affects lint/typecheck/test (e.g. `eslint`, `tsconfig`, Jest).
+
+From the **repository root**:
+
+```bash
+cd client && npm run ci
+```
+
+1. Fix failures; re-run until clean.
+2. `npm run ci` includes **`npm run format`** (writes). If Prettier changed files, include them in the commit.
+3. Optional Docker parity: `docker compose run --rm ci` (same script; use when local Node differs from CI).
+
+**Skip** when the commit is **docs-only** under `specs/`, `compound-docs/`, `README.md`, `client/docs/`, or `AGENTS.md` with **no** `client/` source changes — unless the user asks to run CI anyway.
+
+Do not commit with a failing quality gate.
 
 ## Git commit
 
