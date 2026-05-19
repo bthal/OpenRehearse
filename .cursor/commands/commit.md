@@ -91,30 +91,53 @@ Do **not** stage or commit secrets (`.env`, credentials, keys). Warn the user if
 
 ### Commit message (commitlint / Husky)
 
-[Conventional Commits](https://www.conventionalcommits.org/) — enforced by `commitlint.config.cjs` at repo root.
+[Conventional Commits](https://www.conventionalcommits.org/) — enforced by `commitlint.config.cjs` at repo root (extends `@commitlint/config-conventional`).
 
 **Format:** `type: subject` or `type(scope): subject`
 
 - **Allowed types** (lowercase only): `wip`, `feat`, `fix`, `chore`, `docs`, `refactor`, `test`, `perf`, `specs`, `build`, `ci`
 - **Subject:** imperative, concise, no trailing period; start lowercase after the colon space
-- **Header max length:** 100 characters (entire first line)
-- **Body** (optional): blank line after header; each body line max **100** characters
+- **Header (first line) max length:** **100 characters** total (including `type: ` or `type(scope): `)
 - **Pick type by dominant change:**
   - `specs/` only or mainly → `specs:`
   - `compound-docs/`, `README.md`, `client/docs/`, `AGENTS.md` → `docs:`
   - Code + docs in one logical change → primary type (`feat:`, `fix:`, …) with subject covering the feature/fix; mention docs in body if needed
   - Tooling/scripts/CI only → `chore:`, `build:`, or `ci:`
 
-If the header would exceed 100 characters, shorten the subject or use a scope; put detail in the body (wrapped at 100 chars per line).
+**Examples (header only):** `feat: add MusicXML import`, `specs: clarify offline storage`, `docs: document OSMD cursor landmine`
 
-**Examples:** `feat: add MusicXML import`, `specs: clarify offline storage`, `docs: document OSMD cursor landmine`
+#### Body line length (hook fails often — read this)
+
+Commitlint rule **`body-max-line-length`**: **every line of the commit body** must be **≤ 100 characters**. This includes **each** `-m` paragraph on PowerShell, footer lines, and `Co-authored-by:` if present. One long paragraph in a single `-m` **will fail** even if the header is fine.
+
+**Before `git commit`, draft the body as separate short lines** (aim for **≤ 80 characters** per line so you stay safe). Do **not** paste a single multi-sentence paragraph into one `-m`.
+
+**Wrong** (one `-m`, ~200+ characters — rejected):
+
+```powershell
+git commit -m "feat(playview): add speed picker" -m "Replace the vertical speed stack with a speedometer that opens a portaled sliding row over the score and pauses on open."
+```
+
+**Right** (header + several short `-m` lines, each ≤ 100 characters):
+
+```powershell
+git commit -m "feat(playview): add two-step speed picker overlay on web" `
+  -m "Replace the vertical speed stack with a portaled speedometer control." `
+  -m "Opening pauses transport; speed choice slides closed without resume." `
+  -m "Add S and C shortcuts; closed cell shows current speed label."
+```
+
+On PowerShell: use **multiple `-m "..."` flags** (one short sentence each). **Do not use heredocs** (`<<'EOF'`) — they are unreliable. **Do not use one long second `-m`** for the whole body.
+
+If the hook reports `body-max-line-length`, split the offending line into more `-m` flags or shorten sentences; then run a **new** `git commit` (do not `--amend` unless amend rules apply).
 
 ### Commit steps (sequential)
 
 1. Stage only relevant files (code + doc updates for this session). Omit unrelated untracked noise unless the user asked to include it.
-2. Commit with the drafted message. On Windows PowerShell use `git commit -m "header"` and, if needed, additional `-m "body paragraph"` flags (heredocs are unreliable in PowerShell).
-3. `git status` after commit to confirm success.
-4. If the **commit-msg hook rejects** the message, fix the message and create a **new** commit attempt — do not `--amend` unless amend rules apply.
+2. **Draft the full message in the reply** (header + body lines with character counts ≤ 100) so mistakes are visible before the hook runs.
+3. Commit using the PowerShell pattern above (header + one `-m` per body line).
+4. `git status` after commit to confirm success.
+5. If the **commit-msg hook rejects** the message, fix line length and create a **new** commit attempt — do not `--amend` unless amend rules apply.
 
 Focus the message on **why**, not a file list.
 
