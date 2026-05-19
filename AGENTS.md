@@ -65,7 +65,7 @@ Setup, scripts, Node version, Docker CI | `README.md`
 Offline / static-export QA steps | `client/docs/offline-qa.md`
 Agent routing, non-negotiables, required reading | This file (`AGENTS.md`)
 
-Use the **update-docs** Cursor command (`.cursor/commands/update-docs.md`) for a guided pass: assess scope → read files → **propose edits → apply after user approval**.
+Use the **commit** Cursor command (`.cursor/commands/commit.md`) for a guided pass: assess scope → read files → **propose edits → apply after user approval** → **git commit** (Conventional Commits + commitlint at repo root).
 
 ## Non-negotiables from specs
 
