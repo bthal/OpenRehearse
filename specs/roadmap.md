@@ -4,9 +4,9 @@ Phases are **sequential**; within a phase, items can be parallelized when they d
 
 ## Phase 0 — Repository & quality baseline
 
-- [ ] Initialize **React Native** TypeScript project (Android target first; keep iOS-capable structure).
-- [ ] **NativeWind** configured; **ESLint** + **Prettier** + strict TS; CI or local script to `lint` / `format:check`.
-- [ ] Document dev workflow (emulator, physical device) in root README (short pointer to specs).
+- [x] Initialize **React Native** TypeScript project (Android target first; keep iOS-capable structure).
+- [x] **NativeWind** configured; **ESLint** + **Prettier** + strict TS; CI or local script to `lint` / `format:check`.
+- [x] Document dev workflow (emulator, physical device) in root README (short pointer to specs).
 
 ## Phase 1 — Local pieces (no auth)
 

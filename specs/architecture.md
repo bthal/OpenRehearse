@@ -21,9 +21,12 @@
 
 | Area | Responsibility |
 |------|----------------|
-| `domain/` | Piece, Bit, musical time (measure/beat or OSMD timestamps), loop validation, tempo |
-| `native/` | RN screens (Dashboard, PlayView), navigation, file pickers, local DB |
-| `score-web/` | OSMD + synth bundle, message protocol `{ type, payload }` |
+| `client/src/domain/` | Pure TS: Piece, Bit, musical time, loop validation, tempo |
+| `client/src/data/` | LocalPieceRepository, file pickers, XML cache |
+| `client/src/state/` | Zustand stores (piecesStore, playViewStore) |
+| `client/app/` | Expo Router screens (Dashboard, PlayView) |
+| `client/components/` | Shared UI — NativeWind + MDI icons |
+| `client/score-web/` | OSMD + Tone.js bundle, message protocol `{ type, payload }` |
 
 ## Message protocol (illustrative)
 
