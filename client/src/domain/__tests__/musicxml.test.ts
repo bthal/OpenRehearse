@@ -117,4 +117,47 @@ describe('scrapeMusicXmlMetadata', () => {
     const xml = '﻿' + makeScoreWithMeta({ workTitle: 'Prelude', composer: 'Bach' });
     expect(scrapeMusicXmlMetadata(xml)).toEqual({ title: 'Prelude', composer: 'Bach' });
   });
+
+  // Credit-based scraping (MuseScore and most engraving tools)
+
+  test('explicit credit-type title and composer', () => {
+    const xml = makeScore(
+      '4.0',
+      'score-partwise',
+      `<credit page="1"><credit-type>title</credit-type>` +
+        `<credit-words justify="center" valign="top" font-size="24">Turkish March</credit-words></credit>` +
+        `<credit page="1"><credit-type>composer</credit-type>` +
+        `<credit-words justify="right" valign="bottom" font-size="12">W.A. Mozart</credit-words></credit>`,
+    );
+    expect(scrapeMusicXmlMetadata(xml)).toEqual({
+      title: 'Turkish March',
+      composer: 'W.A. Mozart',
+    });
+  });
+
+  test('credit heuristic: center/top = title, right = composer (no credit-type)', () => {
+    const xml = makeScore(
+      '3.1',
+      'score-partwise',
+      `<credit page="1"><credit-words justify="center" valign="top" font-size="24">Prelude I</credit-words></credit>` +
+        `<credit page="1"><credit-words justify="right" valign="top" font-size="12">J.S. Bach</credit-words></credit>`,
+    );
+    expect(scrapeMusicXmlMetadata(xml)).toEqual({ title: 'Prelude I', composer: 'J.S. Bach' });
+  });
+
+  test('work-title wins over credit title', () => {
+    const xml = makeScore(
+      '4.0',
+      'score-partwise',
+      `<work><work-title>From Work Tag</work-title></work>` +
+        `<credit page="1"><credit-type>title</credit-type>` +
+        `<credit-words justify="center" valign="top" font-size="24">From Credit</credit-words></credit>`,
+    );
+    expect(scrapeMusicXmlMetadata(xml)).toMatchObject({ title: 'From Work Tag' });
+  });
+
+  test('no metadata at all → empty title, null composer', () => {
+    const xml = makeScore('2.0', 'score-partwise');
+    expect(scrapeMusicXmlMetadata(xml)).toEqual({ title: '', composer: null });
+  });
 });

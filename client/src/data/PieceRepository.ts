@@ -10,6 +10,8 @@ export interface PieceRepository {
   get(id: string): Promise<Piece | null>;
   /** Persists piece metadata and its XML content to device storage. */
   save(piece: Piece, xmlContent: string): Promise<void>;
+  /** Updates title and composer only — never touches the XML file. */
+  update(piece: Piece): Promise<void>;
   delete(id: string): Promise<void>;
   /** Returns the XML content for a piece previously saved via save(). */
   readXml(piece: Piece): Promise<string>;

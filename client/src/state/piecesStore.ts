@@ -29,6 +29,7 @@ interface PiecesState {
 
   loadPieces: () => Promise<void>;
   importPiece: (file: PickedFile, fallbackTitle: string) => Promise<string | null>;
+  updatePiece: (id: string, updates: { title: string; composer: string | null }) => Promise<void>;
   deletePiece: (id: string) => Promise<void>;
   clearImportError: () => void;
 }
@@ -85,6 +86,15 @@ export const usePiecesStore = create<PiecesState>()((set, get) => ({
       isLoading: false,
     });
     return id;
+  },
+
+  updatePiece: async (id, updates) => {
+    const { piecesById } = get();
+    const existing = piecesById[id];
+    if (!existing) return;
+    const updated: Piece = { ...existing, ...updates };
+    await pieceRepository.update(updated);
+    set({ piecesById: { ...piecesById, [id]: updated } });
   },
 
   deletePiece: async (id) => {

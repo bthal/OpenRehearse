@@ -96,6 +96,16 @@ export class ExpoLocalPieceRepository implements PieceRepository {
     }
   }
 
+  async update(piece: Piece): Promise<void> {
+    const db = await this.getDb();
+    await db.runAsync(
+      'UPDATE pieces SET title = ?, composer = ? WHERE id = ?',
+      piece.title,
+      piece.composer ?? null,
+      piece.id,
+    );
+  }
+
   async delete(id: string): Promise<void> {
     const db = await this.getDb();
     const piece = await this.get(id);

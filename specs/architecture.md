@@ -21,7 +21,7 @@
 
 | Area | Responsibility |
 |------|----------------|
-| `client/src/domain/` | Pure TS: Piece, Bit, musical time, loop validation, tempo |
+| `client/src/domain/` | Pure TS: Pieces, Bits, musical time, loop validation, tempo |
 | `client/src/data/` | LocalPieceRepository, file pickers, XML cache |
 | `client/src/state/` | Zustand stores (piecesStore, playViewStore) |
 | `client/app/` | Expo Router screens (Dashboard, PlayView) |

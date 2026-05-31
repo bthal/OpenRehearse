@@ -8,5 +8,6 @@ module.exports = {
     '^@data/(.*)$': '<rootDir>/src/data/$1',
     '^@state/(.*)$': '<rootDir>/src/state/$1',
     '^@components/(.*)$': '<rootDir>/components/$1',
+    '^@theme/(.*)$': '<rootDir>/src/theme/$1',
   },
 };

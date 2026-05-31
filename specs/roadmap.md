@@ -1,3 +1,4 @@
+
 # Roadmap
 
 Phases are **sequential**; within a phase, items can be parallelized when they do not block each other.
@@ -25,7 +26,7 @@ Phases are **sequential**; within a phase, items can be parallelized when they d
 - [ ] Wire **OSMD standard cursor** to playback — **smooth continuous movement**.
 - [ ] **Adjustable tempo (BPM)** from UI; applies to synth + cursor from first shippable slice.
 
-## Phase 4 — Single active loop ("bit")
+## Phase 4 — Single active loop
 
 - [ ] Loop start/end handles are **continuously draggable** along the score timeline.
 - [ ] **Immediate jump** on loop wrap; only **one** active loop at a time.

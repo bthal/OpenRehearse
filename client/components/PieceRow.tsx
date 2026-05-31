@@ -1,39 +1,50 @@
-import { mdiMusicNote } from '@mdi/js';
-import { Text, TouchableOpacity, View } from 'react-native';
+import { mdiPencil } from '@mdi/js';
+import { Pressable, Text, View } from 'react-native';
 
 import type { Piece } from '@domain/piece';
+import { Colors } from '@theme/colors';
 import { AppIcon } from './AppIcon';
 
 interface PieceRowProps {
   piece: Piece;
   onPress: () => void;
+  onEdit: () => void;
 }
 
-export function PieceRow({ piece, onPress }: PieceRowProps) {
-  const date = new Date(piece.importedAt).toLocaleDateString();
-
+export function PieceRow({ piece, onPress, onEdit }: PieceRowProps) {
   return (
-    <TouchableOpacity
+    <Pressable
       onPress={onPress}
-      className="flex-row items-center gap-3 px-4 py-3 border-b border-gray-100"
-      activeOpacity={0.6}
+      className="flex-row items-center border-b border-ash-grey-500/35 py-3.5 pl-2 pr-1 active:bg-ash-grey-500/12"
     >
-      <View className="w-10 h-10 rounded-full bg-blue-50 items-center justify-center shrink-0">
-        <AppIcon path={mdiMusicNote} size={22} color="#3B82F6" />
-      </View>
+      <View className="flex-1">
+        {/* Title row + edit pencil */}
+        <View className="flex-row items-center gap-1.5 self-start">
+          <Text className="shrink text-lg font-semibold text-ash-grey-950" numberOfLines={2}>
+            {piece.title}
+          </Text>
+          <Pressable
+            onPress={(e) => {
+              e.stopPropagation?.();
+              onEdit();
+            }}
+            hitSlop={6}
+            className="p-0.5"
+          >
+            <AppIcon path={mdiPencil} size={14} color={Colors.tabIconDefault} />
+          </Pressable>
+        </View>
 
-      <View className="flex-1 min-w-0">
-        <Text className="text-base font-semibold text-gray-900" numberOfLines={1}>
-          {piece.title}
-        </Text>
-        {piece.composer !== null && (
-          <Text className="text-sm text-gray-500 italic" numberOfLines={1}>
+        {/* Composer */}
+        {piece.composer ? (
+          <Text className="mt-0.5 text-sm opacity-[0.85] text-ash-grey-950" numberOfLines={1}>
             {piece.composer}
           </Text>
-        )}
+        ) : null}
       </View>
 
-      <Text className="text-xs text-gray-400 shrink-0">{date}</Text>
-    </TouchableOpacity>
+      {/* Chevron */}
+      <Text className="pl-3 pr-4 text-[28px] opacity-[0.45] text-ash-grey-950">›</Text>
+    </Pressable>
   );
 }

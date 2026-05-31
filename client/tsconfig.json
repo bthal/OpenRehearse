@@ -8,7 +8,8 @@
       "@domain/*": ["./src/domain/*"],
       "@data/*": ["./src/data/*"],
       "@state/*": ["./src/state/*"],
-      "@components/*": ["./components/*"]
+      "@components/*": ["./components/*"],
+      "@theme/*": ["./src/theme/*"]
     }
   },
   "include": ["**/*.ts", "**/*.tsx", ".expo/types/**/*.d.ts", "nativewind-env.d.ts"]
