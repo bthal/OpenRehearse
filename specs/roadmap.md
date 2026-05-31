@@ -10,9 +10,9 @@ Phases are **sequential**; within a phase, items can be parallelized when they d
 
 ## Phase 1 — Local pieces (no auth)
 
-- [ ] **On-device storage** abstraction for imported pieces (metadata + XML path or content).
-- [ ] **Dashboard**: list pieces, empty state, navigate to PlayView.
-- [ ] **Import**: file picker, accept **`.xml` MusicXML 2.x–4.x** only; validate/reject with clear errors; scrape title + composer.
+- [x] **On-device storage** abstraction for imported pieces (metadata + XML path or content).
+- [x] **Dashboard**: list pieces, empty state, navigate to PlayView.
+- [x] **Import**: file picker, accept **`.xml` MusicXML 2.x–4.x** only; validate/reject with clear errors; scrape title + composer.
 
 ## Phase 2 — PlayView shell + WebView OSMD
 
