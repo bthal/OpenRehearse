@@ -70,6 +70,7 @@ Use the **commit** Cursor command (`.cursor/commands/commit.md`) for a guided pa
 - **Cursor**: **OSMD standard cursor**, **smooth continuous movement** — prefer OSMD APIs over custom overlays.
 - **Tempo**: user-adjustable **from the first PlayView slice** that includes playback.
 - **State**: **Zustand** (not TanStack Query) unless specs are formally amended.
+- **Orientation**: **landscape only** — `app.json` locks to landscape; do not add portrait support.
 - **Styling**: **NativeWind** throughout; **light mode only** — dark mode is a non-goal.
 - **Icons**: **MDI only** — no other icon libraries.
 - **Auth**: **non-goal for MVP** — no Supabase, no login flow.

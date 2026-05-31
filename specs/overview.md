@@ -21,6 +21,7 @@
 - **Audio**: **Synthesized from the score** (not user-provided MP3). Same clock/timeline as cursor where technically feasible.
 - **Offline**: **Good offline support** — pieces and playback should work without network once imported; see `features/offline-storage.md`.
 - **Scores on server**: **Not in MVP** — store scores **locally on the device** only; **no cross-device sync** of sheet files for now.
+- **Orientation**: **Landscape only** — the entire app is locked to landscape. Sheet music needs horizontal space; portrait is a non-goal.
 - **Styling**: **NativeWind** (Tailwind for React Native) throughout. **Light mode only**; dark mode is a non-goal.
 - **Icons**: **MDI** (Material Design Icons) only.
 - **Title display**: scrape title from MusicXML metadata on import; engrave it in PlayView via OSMD.
