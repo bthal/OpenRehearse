@@ -9,5 +9,6 @@ module.exports = {
     '^@state/(.*)$': '<rootDir>/src/state/$1',
     '^@components/(.*)$': '<rootDir>/components/$1',
     '^@theme/(.*)$': '<rootDir>/src/theme/$1',
+    '^@score-web/(.*)$': '<rootDir>/src/score-web/$1',
   },
 };

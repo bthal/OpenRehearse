@@ -1,0 +1,16 @@
+{
+  "name": "score-web",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node build.mjs"
+  },
+  "dependencies": {
+    "opensheetmusicdisplay": "^1.9.9"
+  },
+  "devDependencies": {
+    "esbuild": "^0.28.0",
+    "typescript": "~6.0.3"
+  }
+}

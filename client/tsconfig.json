@@ -9,8 +9,10 @@
       "@data/*": ["./src/data/*"],
       "@state/*": ["./src/state/*"],
       "@components/*": ["./components/*"],
-      "@theme/*": ["./src/theme/*"]
+      "@theme/*": ["./src/theme/*"],
+      "@score-web/*": ["./src/score-web/*"]
     }
   },
-  "include": ["**/*.ts", "**/*.tsx", ".expo/types/**/*.d.ts", "nativewind-env.d.ts"]
+  "include": ["**/*.ts", "**/*.tsx", ".expo/types/**/*.d.ts", "nativewind-env.d.ts"],
+  "exclude": ["score-web/**", "node_modules"]
 }

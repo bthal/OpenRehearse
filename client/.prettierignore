@@ -2,3 +2,5 @@ node_modules/
 dist/
 .expo/
 nativewind-env.d.ts
+score-web/
+src/score-web/html.ts

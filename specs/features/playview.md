@@ -34,9 +34,9 @@ Suggested slices: `activePieceId`, `playback` (`isPlaying`, `position`), `tempoB
 
 ## Acceptance criteria
 
-- [ ] Opening a piece shows rendered notation with piece title in score header.
-- [ ] OSMD cursor moves smoothly with playback — no discrete per-note jumping.
-- [ ] Play/pause drives **synth + OSMD cursor** without obvious systematic drift under normal scores.
-- [ ] Changing BPM updates playback speed and cursor alignment.
-- [ ] User can set **one** loop by dragging handles; playback wraps with **immediate jump**.
-- [ ] Works **offline** once the piece is loaded from local storage.
+- [x] Opening a piece shows rendered notation with piece title in score header. *(Phase 2)*
+- [ ] OSMD cursor moves smoothly with playback — no discrete per-note jumping. *(Phase 3)*
+- [ ] Play/pause drives **synth + OSMD cursor** without obvious systematic drift under normal scores. *(Phase 3)*
+- [ ] Changing BPM updates playback speed and cursor alignment. *(Phase 3)*
+- [ ] User can set **one** loop by dragging handles; playback wraps with **immediate jump**. *(Phase 4)*
+- [x] Works **offline** once the piece is loaded from local storage. *(Phase 2)*

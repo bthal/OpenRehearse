@@ -17,8 +17,8 @@ Phases are **sequential**; within a phase, items can be parallelized when they d
 
 ## Phase 2 — PlayView shell + WebView OSMD
 
-- [ ] WebView bundle: load XML, render with **OSMD**, expose `LOAD_XML` / `ERROR`.
-- [ ] **PlayView** screen: pass XML to WebView; display piece title via OSMD; basic zoom/scroll if OSMD provides; loading/error UI.
+- [x] WebView bundle: load XML, render with **OSMD**, expose `LOAD_XML` / `ERROR`.
+- [x] **PlayView** screen: pass XML to WebView; display piece title via OSMD; basic zoom/scroll if OSMD provides; loading/error UI.
 
 ## Phase 3 — Cursor + synthesized audio + tempo
 

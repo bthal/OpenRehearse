@@ -5,7 +5,7 @@
   "dependencies": {
     "@mdi/js": "^7.4.47",
     "babel-preset-expo": "^56.0.14",
-    "expo": "~56.0.8",
+    "expo": "~56.0.11",
     "expo-constants": "^17.0.8",
     "expo-crypto": "~14.0.0",
     "expo-document-picker": "~56.0.0",
@@ -22,6 +22,7 @@
     "react-native-safe-area-context": "^5.8.0",
     "react-native-screens": "^4.25.2",
     "react-native-svg": "^15.15.5",
+    "react-native-webview": "^13.16.1",
     "react-native-worklets": "^0.9.1",
     "tailwindcss": "^3.4.19",
     "zustand": "^5.0.14"
@@ -43,8 +44,10 @@
     "typescript": "~6.0.3"
   },
   "scripts": {
+    "build:score-web": "cd score-web && npm ci && node build.mjs",
     "start": "expo start",
     "android": "expo start --android",
+    "clear": "expo start --android -- --clear",
     "ios": "expo start --ios",
     "web": "expo start --web",
     "lint": "eslint .",
