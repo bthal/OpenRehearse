@@ -20,5 +20,5 @@ Play **audio derived from the score** (not external recordings) so that **notati
 
 ## Acceptance criteria
 
-- [ ] Note onsets audibly align with cursor for representative scores (manual QA checklist in repo optional).
-- [ ] Tempo change does not leave orphan scheduled events (no stuck notes after pause/stop).
+- [x] Note onsets audibly align with cursor for representative scores (manual QA checklist in repo optional).
+- [x] Tempo change does not leave orphan scheduled events (no stuck notes after pause/stop).

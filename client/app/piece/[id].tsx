@@ -1,4 +1,11 @@
-import { mdiAlertCircleOutline, mdiArrowLeft, mdiMusicNoteOutline } from '@mdi/js';
+import {
+  mdiAlertCircleOutline,
+  mdiArrowLeft,
+  mdiMusicNoteOutline,
+  mdiPause,
+  mdiPlay,
+  mdiStop,
+} from '@mdi/js';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useCallback, useEffect, useRef } from 'react';
 import { ActivityIndicator, Text, TouchableOpacity, View } from 'react-native';
@@ -10,7 +17,13 @@ import { pieceRepository } from '@data/index';
 import { SCORE_WEB_HTML } from '@score-web/html';
 import type { WebToNativeMessage } from '@score-web/messageProtocol';
 import { usePiecesStore } from '@state/piecesStore';
-import { usePlayViewStore } from '@state/playViewStore';
+import { TEMPO_MULTIPLIERS, type TempoMultiplier, usePlayViewStore } from '@state/playViewStore';
+
+const MULTIPLIER_LABEL: Record<number, string> = {
+  0.5: '×0.5',
+  0.75: '×0.75',
+  1: '×1.0',
+};
 
 export default function PlayView() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -19,14 +32,30 @@ export default function PlayView() {
   const webViewReady = usePlayViewStore((s) => s.webViewReady);
   const isLoadingScore = usePlayViewStore((s) => s.isLoadingScore);
   const scoreError = usePlayViewStore((s) => s.scoreError);
+  const isPlaying = usePlayViewStore((s) => s.isPlaying);
+  const scoreBpm = usePlayViewStore((s) => s.scoreBpm);
+  const tempoMultiplier = usePlayViewStore((s) => s.tempoMultiplier);
+
   const setWebViewReady = usePlayViewStore((s) => s.setWebViewReady);
   const setLoadingScore = usePlayViewStore((s) => s.setLoadingScore);
   const setScoreError = usePlayViewStore((s) => s.setScoreError);
+  const setPlaying = usePlayViewStore((s) => s.setPlaying);
+  const setScoreBpm = usePlayViewStore((s) => s.setScoreBpm);
+  const setTempoMultiplier = usePlayViewStore((s) => s.setTempoMultiplier);
   const reset = usePlayViewStore((s) => s.reset);
 
   const webViewRef = useRef<WebView>(null);
+  // Refs so the message handler and multiplier handler always see the latest values
+  // without recreating callbacks on every state change.
+  const scoreBpmRef = useRef(120);
+  const tempoMultiplierRef = useRef<TempoMultiplier>(1.0);
+  useEffect(() => {
+    scoreBpmRef.current = scoreBpm;
+  }, [scoreBpm]);
+  useEffect(() => {
+    tempoMultiplierRef.current = tempoMultiplier;
+  }, [tempoMultiplier]);
 
-  // Reset store on unmount so stale state doesn't persist between navigations.
   useEffect(() => () => reset(), [reset]);
 
   const sendXml = useCallback(async () => {
@@ -35,8 +64,7 @@ export default function PlayView() {
     setScoreError(null);
     try {
       const xml = await pieceRepository.readXml(piece);
-      // injectJavaScript is the correct native→web channel; postMessage() on the
-      // ref is web→native only (see compound-docs/osmd-webview.md).
+      // injectJavaScript is the correct native→web channel; see compound-docs/osmd-webview.md
       webViewRef.current?.injectJavaScript(`window.__rn_load_xml(${JSON.stringify(xml)});void 0;`);
     } catch (err) {
       setLoadingScore(false);
@@ -57,6 +85,15 @@ export default function PlayView() {
         return;
       }
       switch (msg.type) {
+        case 'SCORE_BPM':
+          setScoreBpm(msg.payload);
+          // Transport BPM is already set in the WebView by initPlayback at this value.
+          // No need to re-send unless the user has a non-1.0 multiplier selected already.
+          if (tempoMultiplierRef.current !== 1.0) {
+            const bpm = Math.round(msg.payload * tempoMultiplierRef.current);
+            webViewRef.current?.injectJavaScript(`window.__rn_set_tempo(${bpm});void 0;`);
+          }
+          break;
         case 'LOADED':
           setLoadingScore(false);
           break;
@@ -67,10 +104,40 @@ export default function PlayView() {
         case 'DEBUG':
           console.log('[score-web]', msg.payload);
           break;
+        case 'PLAYBACK_STATE':
+          setPlaying(msg.payload === 'playing');
+          break;
+        case 'PLAYBACK_END':
+          setPlaying(false);
+          break;
       }
     },
-    [setLoadingScore, setScoreError],
+    [setScoreBpm, setLoadingScore, setScoreError, setPlaying],
   );
+
+  const handlePlayPause = useCallback(() => {
+    if (isPlaying) {
+      webViewRef.current?.injectJavaScript('window.__rn_pause();void 0;');
+    } else {
+      webViewRef.current?.injectJavaScript('window.__rn_play();void 0;');
+    }
+  }, [isPlaying]);
+
+  const handleStop = useCallback(() => {
+    webViewRef.current?.injectJavaScript('window.__rn_stop();void 0;');
+  }, []);
+
+  const handleMultiplierChange = useCallback(
+    (m: TempoMultiplier) => {
+      setTempoMultiplier(m);
+      const bpm = Math.round(scoreBpmRef.current * m);
+      webViewRef.current?.injectJavaScript(`window.__rn_set_tempo(${bpm});void 0;`);
+    },
+    [setTempoMultiplier],
+  );
+
+  const effectiveBpm = Math.round(scoreBpm * tempoMultiplier);
+  const scoreReady = webViewReady && !isLoadingScore && !scoreError;
 
   if (!piece) {
     return (
@@ -104,19 +171,22 @@ export default function PlayView() {
 
       {/* Score area */}
       <View className="flex-1">
-        {/* baseUrl is required on Android — see compound-docs/osmd-webview.md */}
+        {/* baseUrl required on Android for large inline HTML; allowUniversalAccessFromFileURLs
+            lets the file:// origin fetch HTTPS audio samples — see compound-docs */}
         <WebView
           ref={webViewRef}
           source={{ html: SCORE_WEB_HTML, baseUrl: 'file:///android_asset/' }}
           originWhitelist={['*']}
+          allowUniversalAccessFromFileURLs={true}
           onLoadEnd={() => setWebViewReady(true)}
           onMessage={handleMessage}
           scrollEnabled={true}
           javaScriptEnabled={true}
+          mediaPlaybackRequiresUserAction={false}
           style={{ flex: 1 }}
         />
 
-        {/* Overlay: WebView loaded but OSMD not yet initialised */}
+        {/* Overlay: WebView not yet loaded */}
         {!webViewReady && !scoreError && (
           <View className="absolute inset-0 items-center justify-center bg-white">
             <AppIcon path={mdiMusicNoteOutline} size={48} color="#D1D5DB" />
@@ -124,7 +194,7 @@ export default function PlayView() {
           </View>
         )}
 
-        {/* Overlay: XML sent, waiting for OSMD LOADED */}
+        {/* Overlay: XML sent, OSMD rendering */}
         {isLoadingScore && (
           <View className="absolute inset-0 items-center justify-center bg-white/80">
             <ActivityIndicator size="large" color="#4B7A6E" />
@@ -149,6 +219,44 @@ export default function PlayView() {
           </View>
         )}
       </View>
+
+      {/* Transport toolbar — visible once score is fully loaded */}
+      {scoreReady && (
+        <View className="flex-row items-center justify-between px-4 py-2 border-t border-gray-100 bg-white">
+          {/* Stop */}
+          <TouchableOpacity onPress={handleStop} hitSlop={8} className="p-2">
+            <AppIcon path={mdiStop} size={26} color="#374151" />
+          </TouchableOpacity>
+
+          {/* Play / Pause */}
+          <TouchableOpacity onPress={handlePlayPause} hitSlop={8} className="p-1">
+            <AppIcon path={isPlaying ? mdiPause : mdiPlay} size={36} color="#4B7A6E" />
+          </TouchableOpacity>
+
+          {/* Speed selector: ×0.5 | ×0.75 | ×1.0 */}
+          <View className="flex-col items-end gap-0.5">
+            <Text className="text-xs text-gray-400">{effectiveBpm} BPM</Text>
+            <View className="flex-row border border-gray-200 rounded-lg overflow-hidden">
+              {TEMPO_MULTIPLIERS.map((m) => {
+                const isActive = tempoMultiplier === m;
+                return (
+                  <TouchableOpacity
+                    key={m}
+                    onPress={() => handleMultiplierChange(m)}
+                    className={`px-3 py-1.5 ${isActive ? 'bg-seagrass-600' : 'bg-white'}`}
+                  >
+                    <Text
+                      className={`text-xs font-semibold ${isActive ? 'text-white' : 'text-gray-600'}`}
+                    >
+                      {MULTIPLIER_LABEL[m]}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+          </View>
+        </View>
+      )}
     </SafeAreaView>
   );
 }

@@ -1,15 +1,26 @@
 import { create } from 'zustand';
 
+export type TempoMultiplier = 0.5 | 0.75 | 1.0;
+export const TEMPO_MULTIPLIERS: TempoMultiplier[] = [0.5, 0.75, 1.0];
+
 interface PlayViewState {
   activePieceId: string | null;
   webViewReady: boolean;
   isLoadingScore: boolean;
   scoreError: string | null;
+  isPlaying: boolean;
+  /** BPM marked in the score; updated by SCORE_BPM message after each load. */
+  scoreBpm: number;
+  /** User-selected speed fraction; applied as scoreBpm × tempoMultiplier. */
+  tempoMultiplier: TempoMultiplier;
 
   setActivePieceId: (id: string | null) => void;
   setWebViewReady: (ready: boolean) => void;
   setLoadingScore: (loading: boolean) => void;
   setScoreError: (error: string | null) => void;
+  setPlaying: (playing: boolean) => void;
+  setScoreBpm: (bpm: number) => void;
+  setTempoMultiplier: (m: TempoMultiplier) => void;
   reset: () => void;
 }
 
@@ -18,6 +29,9 @@ const initial = {
   webViewReady: false,
   isLoadingScore: false,
   scoreError: null,
+  isPlaying: false,
+  scoreBpm: 120,
+  tempoMultiplier: 1.0 as TempoMultiplier,
 };
 
 export const usePlayViewStore = create<PlayViewState>()((set) => ({
@@ -26,5 +40,8 @@ export const usePlayViewStore = create<PlayViewState>()((set) => ({
   setWebViewReady: (ready) => set({ webViewReady: ready }),
   setLoadingScore: (loading) => set({ isLoadingScore: loading }),
   setScoreError: (error) => set({ scoreError: error }),
+  setPlaying: (playing) => set({ isPlaying: playing }),
+  setScoreBpm: (bpm) => set({ scoreBpm: bpm }),
+  setTempoMultiplier: (m) => set({ tempoMultiplier: m }),
   reset: () => set(initial),
 }));

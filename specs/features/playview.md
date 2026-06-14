@@ -13,7 +13,10 @@ Single screen where the user **reads**, **hears** (synthesized), and **practices
 ## Playback & tempo
 
 - Audio is **synthesized from the score** (same musical source as notation).
-- **Tempo** is user-adjustable in **BPM** from the first shippable PlayView slice; applies globally to the current transport for that session (respect score tempo changes later if needed; MVP may use **global BPM multiplier** or **absolute BPM** — pick one and document in code).
+- **Score BPM** is read from the MusicXML (`cursor.Iterator.CurrentBpm`; fallback 120). The user
+  adjusts speed via a **×0.5 / ×0.75 / ×1.0 multiplier selector** — effective BPM is shown above
+  the selector. Chosen approach: multiplier over arbitrary BPM input (simpler UX, directly tied
+  to the composer's intent).
 
 ## Loop ("bit") — MVP rules
 
@@ -23,20 +26,24 @@ Single screen where the user **reads**, **hears** (synthesized), and **practices
 
 ## Native UI (shell)
 
-- Transport: **play / pause** (and **seek** if trivial with synth).
-- **Tempo** control (slider or stepper + numeric BPM).
+- Transport: **play / pause / stop**.
+- **Speed selector**: ×0.5 / ×0.75 / ×1.0 segmented control; effective BPM shown above it.
 - Loop controls: draggable start/end handles; clear loop button.
 - Error states: corrupt XML, unsupported constructs — user-visible message + retry.
 
 ## State (Zustand)
 
-Suggested slices: `activePieceId`, `playback` (`isPlaying`, `position`), `tempoBpm`, `loop: { start, end } | null`, `webViewReady`.
+Slices: `activePieceId`, `webViewReady`, `isLoadingScore`, `scoreError`, `isPlaying`,
+`scoreBpm` (from MusicXML), `tempoMultiplier` (×0.5/×0.75/×1.0), `loop: { start, end } | null`.
 
 ## Acceptance criteria
 
 - [x] Opening a piece shows rendered notation with piece title in score header. *(Phase 2)*
-- [ ] OSMD cursor moves smoothly with playback — no discrete per-note jumping. *(Phase 3)*
-- [ ] Play/pause drives **synth + OSMD cursor** without obvious systematic drift under normal scores. *(Phase 3)*
-- [ ] Changing BPM updates playback speed and cursor alignment. *(Phase 3)*
+- [x] OSMD cursor moves smoothly with playback — no discrete per-note jumping. *(Phase 3)*
+- [x] Play/pause drives **synth + OSMD cursor** without obvious systematic drift under normal scores. *(Phase 3)*
+- [x] Changing tempo updates playback speed and cursor alignment. *(Phase 3)*
+- [x] Realistic piano audio (Salamander Grand Piano via CDN; cached offline after first play). *(Phase 3b)*
+- [x] Score BPM read from MusicXML; speed selector ×0.5/×0.75/×1.0 applied as multiplier. *(Phase 3b)*
+- [x] Cursor visible at position 0 after load and after stop; smooth left-slide between beats. *(Phase 3b)*
 - [ ] User can set **one** loop by dragging handles; playback wraps with **immediate jump**. *(Phase 4)*
 - [x] Works **offline** once the piece is loaded from local storage. *(Phase 2)*

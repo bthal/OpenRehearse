@@ -7,7 +7,8 @@
     "build": "node build.mjs"
   },
   "dependencies": {
-    "opensheetmusicdisplay": "^1.9.9"
+    "opensheetmusicdisplay": "^1.9.9",
+    "tone": "^14.7.77"
   },
   "devDependencies": {
     "esbuild": "^0.28.0",

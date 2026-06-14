@@ -22,9 +22,9 @@ Phases are **sequential**; within a phase, items can be parallelized when they d
 
 ## Phase 3 — Cursor + synthesized audio + tempo
 
-- [ ] Integrate **synthesized playback** from score in WebView; single transport.
-- [ ] Wire **OSMD standard cursor** to playback — **smooth continuous movement**.
-- [ ] **Adjustable tempo (BPM)** from UI; applies to synth + cursor from first shippable slice.
+- [x] Integrate **synthesized playback** from score in WebView; single transport.
+- [x] Wire **OSMD standard cursor** to playback — **smooth continuous movement**.
+- [x] **Adjustable tempo (BPM)** from UI; applies to synth + cursor from first shippable slice.
 
 ## Phase 4 — Single active loop
 

@@ -9,7 +9,7 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
 <html><head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <style>body { margin: 0; background: white; } #osmd { width: 100%; }</style>
+  <style>body { margin: 0; background: white; } #osmd { width: 100%; position: relative; }</style>
 </head><body>
   <div id="osmd"></div>
   <script>
@@ -30,6 +30,11 @@ const result = await esbuild.build({
   minify: true,
   write: false,
   platform: 'browser',
+  // Prefer the ESM 'module' field over the 'browser' field.
+  // Tone.js sets browser=build/Tone.js (UMD, no named exports) but
+  // module=build/esm/index.js (ESM, named exports). esbuild's default
+  // platform:browser ordering picks the UMD bundle, breaking imports.
+  mainFields: ['module', 'main'],
   treeShaking: true,
   logLevel: 'info',
 });
