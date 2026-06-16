@@ -13,6 +13,8 @@ interface PlayViewState {
   scoreBpm: number;
   /** User-selected speed fraction; applied as scoreBpm × tempoMultiplier. */
   tempoMultiplier: TempoMultiplier;
+  /** Whether a loop region is currently active in the WebView. */
+  loopActive: boolean;
 
   setActivePieceId: (id: string | null) => void;
   setWebViewReady: (ready: boolean) => void;
@@ -21,6 +23,7 @@ interface PlayViewState {
   setPlaying: (playing: boolean) => void;
   setScoreBpm: (bpm: number) => void;
   setTempoMultiplier: (m: TempoMultiplier) => void;
+  setLoopActive: (v: boolean) => void;
   reset: () => void;
 }
 
@@ -32,6 +35,7 @@ const initial = {
   isPlaying: false,
   scoreBpm: 120,
   tempoMultiplier: 1.0 as TempoMultiplier,
+  loopActive: false,
 };
 
 export const usePlayViewStore = create<PlayViewState>()((set) => ({
@@ -43,5 +47,6 @@ export const usePlayViewStore = create<PlayViewState>()((set) => ({
   setPlaying: (playing) => set({ isPlaying: playing }),
   setScoreBpm: (bpm) => set({ scoreBpm: bpm }),
   setTempoMultiplier: (m) => set({ tempoMultiplier: m }),
+  setLoopActive: (v) => set({ loopActive: v }),
   reset: () => set(initial),
 }));

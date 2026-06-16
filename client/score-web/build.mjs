@@ -9,9 +9,36 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
 <html><head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <style>body { margin: 0; background: white; } #osmd { width: 100%; position: relative; }</style>
+  <style>
+    html, body { margin: 0; overflow: hidden; width: 100%; height: 100%; background: white; }
+    #cursor-line {
+      position: fixed; left: 50%; top: 0; height: 100%; width: 2px;
+      background: #4B7A6E; pointer-events: none; z-index: 20;
+      transform: translateX(-50%);
+    }
+    #osmd-wrapper {
+      position: fixed; top: 0; left: 0; width: 100%; height: 100%; overflow: hidden;
+    }
+    #osmd { position: absolute; top: 0; left: 0; will-change: transform; }
+    #loop-shade {
+      position: absolute; top: 0;
+      background: rgba(100,149,237,0.20); pointer-events: none; display: none;
+    }
+    .loop-handle {
+      position: absolute; top: 0; width: 14px;
+      background: rgba(75,122,110,0.75); cursor: ew-resize;
+      touch-action: none; display: none; z-index: 10;
+    }
+  </style>
 </head><body>
-  <div id="osmd"></div>
+  <div id="cursor-line"></div>
+  <div id="osmd-wrapper">
+    <div id="osmd">
+      <div id="loop-shade"></div>
+      <div id="loop-handle-a" class="loop-handle"></div>
+      <div id="loop-handle-b" class="loop-handle"></div>
+    </div>
+  </div>
   <script>
     window.onerror = function(msg, _src, line, col) {
       window.ReactNativeWebView && window.ReactNativeWebView.postMessage(

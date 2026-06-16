@@ -28,15 +28,14 @@ Phases are **sequential**; within a phase, items can be parallelized when they d
 
 ## Phase 4 — Single active loop
 
-- [ ] Loop start/end handles are **continuously draggable** along the score timeline.
-- [ ] **Immediate jump** on loop wrap; only **one** active loop at a time.
-- [ ] UI to set/adjust/clear loop; visual indication of loop region per OSMD capabilities.
+- [x] Loop start/end handles are **continuously draggable** along the score timeline.
+- [x] **Immediate jump** on loop wrap; only **one** active loop at a time.
+- [x] UI to set/adjust/clear loop; visual indication of loop region per OSMD capabilities.
 
 ## Phase 5 — Hardening & Android release prep
 
 - [ ] Offline regression pass (airplane mode).
 - [ ] Large-score performance smoke tests; memory caps / friendly failure.
-- [ ] Play Store checklist (if distributing).
 
 ## Later (post-MVP backlog)
 

@@ -5,10 +5,6 @@ import type { OutboundMessage } from './types';
 // Matches Tone.js default PPQ; must stay in sync with Tone.Transport.PPQ.
 const TONE_PPQ = 192;
 
-// Minimal Salamander Grand Piano sample set. Tone.Sampler pitch-shifts between
-// adjacent samples so the full piano range sounds convincing. Files live at the
-// Tone.js team's CDN; on first load the browser fetches and caches them — all
-// subsequent offline plays use the WebView HTTP cache.
 const PIANO_URLS: Record<string, string> = {
   A0: 'A0.mp3',
   C1: 'C1.mp3',
@@ -44,14 +40,26 @@ const PIANO_URLS: Record<string, string> = {
 
 const SALAMANDER_BASE_URL = 'https://tonejs.github.io/audio/salamander/';
 
+const LOOP_MIN_GAP_PX = 40;
+const LOOP_DEFAULT_PX = 200;
+const EDGE_ZONE = 60;
+
 interface NoteEvent {
-  time: string; // e.g. "384i" — tick-based, tempo-relative
+  time: string;
   midi: number;
-  durQ: number; // duration in quarter notes; converted to seconds at fire time
+  durQ: number;
 }
 
 interface CursorStep {
-  quarters: number; // beat position from start (quarter notes)
+  quarters: number;
+  pxLeft: number; // exact value of cursorElement.style.left at this step
+}
+
+interface LoopRegion {
+  aPx: number;
+  bPx: number;
+  aTicks: number;
+  bTicks: number;
 }
 
 function postToNative(msg: OutboundMessage): void {
@@ -68,49 +76,59 @@ let totalQuarters = 0;
 let animFrameId: number | null = null;
 let osmdRef: OpenSheetMusicDisplay | null = null;
 
+let osmdEl: HTMLElement | null = null;
+let handleAEl: HTMLElement | null = null;
+let handleBEl: HTMLElement | null = null;
+let shadeEl: HTMLElement | null = null;
+let scrollOffsetPx = 0;
+let scoreWidth = 0;
+let viewportWidth = 0;
+let touchHandlersAttached = false;
+let loopRegion: LoopRegion | null = null;
+
+// ─── Cursor element access ────────────────────────────────────────────────────
+
+function cursorEl(): HTMLImageElement | undefined {
+  return (osmdRef?.cursor as unknown as { cursorElement?: HTMLImageElement } | undefined)
+    ?.cursorElement;
+}
+
+// ─── Build timelines ──────────────────────────────────────────────────────────
+
 function buildTimelines(osmd: OpenSheetMusicDisplay): {
   noteEvents: NoteEvent[];
-  steps: CursorStep[];
   scoreBpm: number;
 } {
   const noteEvents: NoteEvent[] = [];
   const steps: CursorStep[] = [];
 
   osmd.cursor.reset();
+  osmd.cursor.show();
+  const el = cursorEl();
 
-  // Read the score's indicated tempo before iterating (iterator is at the start).
   const rawBpm = osmd.cursor.Iterator.CurrentBpm;
   const scoreBpm = rawBpm > 0 && rawBpm < 400 ? rawBpm : 120;
 
-  // OSMD Fraction.RealValue uses whole notes as its base unit (1.0 = one whole note).
-  // Tone.js PPQ uses quarter notes. Multiply by 4 to convert.
   const WHOLE_TO_QUARTER = 4;
-
   let lastQuarters = 0;
 
   while (!osmd.cursor.Iterator.EndReached) {
-    // CurrentEnrolledTimestamp is the unrolled playback position (accounts for repeats).
-    // currentTimeStamp / CurrentSourceTimestamp is the printed score position, which
-    // is identical on both passes through a repeated section — wrong for scheduling.
     const quarters = osmd.cursor.Iterator.CurrentEnrolledTimestamp.RealValue * WHOLE_TO_QUARTER;
     lastQuarters = quarters;
-    steps.push({ quarters });
+    // Use style.left (exact value OSMD sets) rather than offsetLeft (integer, may round).
+    const pxLeft = parseFloat(el?.style.left ?? '0');
+    steps.push({ quarters, pxLeft });
 
     try {
       const notes = osmd.cursor.NotesUnderCursor();
       for (const note of notes) {
         if (note.isRest() || note.IsGraceNote) continue;
-        // Skip tie continuations — only the first note of a tie produces a new attack.
         if (note.NoteTie && note.NoteTie.StartNote !== note) continue;
         const midi = note.halfTone;
         if (midi <= 0 || midi > 127) continue;
         const durQ = note.Length.RealValue * WHOLE_TO_QUARTER;
         if (durQ <= 0) continue;
-        noteEvents.push({
-          time: `${Math.round(quarters * TONE_PPQ)}i`,
-          midi,
-          durQ,
-        });
+        noteEvents.push({ time: `${Math.round(quarters * TONE_PPQ)}i`, midi, durQ });
       }
     } catch {
       // skip position if note extraction fails
@@ -119,61 +137,83 @@ function buildTimelines(osmd: OpenSheetMusicDisplay): {
     osmd.cursor.next();
   }
 
-  // +1 quarter buffer so end-detection fires cleanly after the final note
   totalQuarters = lastQuarters + 1;
-  osmd.cursor.reset(); // leave at position 0; initPlayback will show it
+  cursorSteps = steps;
+  osmd.cursor.reset();
 
-  return { noteEvents, steps, scoreBpm };
+  return { noteEvents, scoreBpm };
 }
 
-function cursorEl(): HTMLImageElement | undefined {
-  return (osmdRef?.cursor as unknown as { cursorElement?: HTMLImageElement } | undefined)
-    ?.cursorElement;
+// ─── Score translation ────────────────────────────────────────────────────────
+
+function clampTranslate(px: number): number {
+  return Math.max(viewportWidth - scoreWidth, Math.min(0, px));
 }
 
-function setCursorStep(targetStep: number): void {
+function applyTranslate(px: number): void {
+  scrollOffsetPx = px;
+  if (!osmdEl) return;
+  osmdEl.style.transition = 'none';
+  osmdEl.style.transform = `translateX(${px}px)`;
+}
+
+// ─── OSMD cursor iterator advance (no translate — RAF handles that) ───────────
+
+function advanceCursorTo(targetStep: number): void {
   if (!osmdRef || targetStep === currentCursorStep) return;
-
-  const el = cursorEl();
 
   if (targetStep < 0) {
     osmdRef.cursor.reset();
-    osmdRef.cursor.hide();
+    osmdRef.cursor.show();
     currentCursorStep = -1;
     return;
   }
 
   if (currentCursorStep < 0) {
-    // Starting from hidden state — reset and show instantly, then advance.
-    if (el) el.style.transition = 'none';
     osmdRef.cursor.reset();
     osmdRef.cursor.show();
     for (let i = 0; i < targetStep; i++) osmdRef.cursor.next();
   } else if (targetStep > currentCursorStep) {
-    const stepsToAdvance = targetStep - currentCursorStep;
-    if (el) {
-      if (stepsToAdvance === 1) {
-        // Smooth horizontal slide to the next beat position.
-        // Only 'left' transitions so vertical system-boundary jumps remain instant.
-        const currQ = cursorSteps[currentCursorStep]?.quarters ?? 0;
-        const nextQ = cursorSteps[targetStep]?.quarters ?? currQ;
-        const durSec = Math.max(0.04, ((nextQ - currQ) * 60) / Tone.Transport.bpm.value);
-        el.style.transition = `left ${durSec.toFixed(3)}s linear`;
-      } else {
-        el.style.transition = 'none'; // catch-up jump: skip animation
-      }
-    }
-    for (let i = 0; i < stepsToAdvance; i++) osmdRef.cursor.next();
+    for (let i = 0; i < targetStep - currentCursorStep; i++) osmdRef.cursor.next();
   } else {
-    // Backward seek — instant reset (only happens on stop → replay).
-    if (el) el.style.transition = 'none';
+    // Backward seek (loop wrap or stop → replay).
     osmdRef.cursor.reset();
     osmdRef.cursor.show();
     for (let i = 0; i < targetStep; i++) osmdRef.cursor.next();
   }
-
   currentCursorStep = targetStep;
 }
+
+// ─── Binary search helpers ────────────────────────────────────────────────────
+
+function nearestStepToPx(px: number): number {
+  let lo = 0, hi = cursorSteps.length - 1, best = 0;
+  while (lo <= hi) {
+    const mid = (lo + hi) >> 1;
+    const step = cursorSteps[mid];
+    if (step !== undefined && step.pxLeft <= px) { best = mid; lo = mid + 1; }
+    else hi = mid - 1;
+  }
+  return best;
+}
+
+function ticksToStep(ticks: number): number {
+  const q = ticks / TONE_PPQ;
+  let lo = 0, hi = cursorSteps.length - 1, best = 0;
+  while (lo <= hi) {
+    const mid = (lo + hi) >> 1;
+    const step = cursorSteps[mid];
+    if (step !== undefined && step.quarters <= q) { best = mid; lo = mid + 1; }
+    else hi = mid - 1;
+  }
+  return best;
+}
+
+function pxToTicks(px: number): number {
+  return Math.round((cursorSteps[nearestStepToPx(px)]?.quarters ?? 0) * TONE_PPQ);
+}
+
+// ─── RAF animation loop ───────────────────────────────────────────────────────
 
 function animateCursorLoop(): void {
   if (Tone.Transport.state !== 'started') {
@@ -183,23 +223,35 @@ function animateCursorLoop(): void {
 
   const quartersElapsed = Tone.Transport.ticks / TONE_PPQ;
 
-  // Binary search for the last cursor step whose beat position ≤ current transport position
-  let lo = 0;
-  let hi = cursorSteps.length - 1;
-  let targetStep = 0;
-
+  // Binary search for the last cursor step whose beat position ≤ current transport ticks.
+  let lo = 0, hi = cursorSteps.length - 1, targetStep = 0;
   while (lo <= hi) {
     const mid = (lo + hi) >> 1;
     const step = cursorSteps[mid];
-    if (step !== undefined && step.quarters <= quartersElapsed) {
-      targetStep = mid;
-      lo = mid + 1;
-    } else {
-      hi = mid - 1;
-    }
+    if (step !== undefined && step.quarters <= quartersElapsed) { targetStep = mid; lo = mid + 1; }
+    else hi = mid - 1;
   }
 
-  setCursorStep(targetStep);
+  // Advance OSMD iterator when step changes (keeps it in sync for note highlighting).
+  if (targetStep !== currentCursorStep) {
+    advanceCursorTo(targetStep);
+  }
+
+  // Interpolate position between current step and the next for smooth scrolling.
+  // The interpolated px is used for BOTH the score translation AND the cursor element's
+  // left position so they always align on the center line.
+  const currPx = cursorSteps[targetStep]?.pxLeft ?? 0;
+  const nextPx = cursorSteps[targetStep + 1]?.pxLeft ?? currPx;
+  const currQ = cursorSteps[targetStep]?.quarters ?? 0;
+  const nextQ = cursorSteps[targetStep + 1]?.quarters ?? (currQ + 1);
+  const fraction = nextQ > currQ ? Math.min(1, (quartersElapsed - currQ) / (nextQ - currQ)) : 0;
+  const interpolatedPx = currPx + fraction * (nextPx - currPx);
+
+  // Move OSMD cursor element to interpolated position so it stays on the center line.
+  const el = cursorEl();
+  if (el) el.style.left = `${interpolatedPx}px`;
+
+  applyTranslate(viewportWidth / 2 - interpolatedPx);
 
   if (quartersElapsed >= totalQuarters && totalQuarters > 0) {
     _stopInternal();
@@ -210,38 +262,224 @@ function animateCursorLoop(): void {
   animFrameId = requestAnimationFrame(animateCursorLoop);
 }
 
+// ─── Internal stop ────────────────────────────────────────────────────────────
+
 function _stopInternal(): void {
   Tone.Transport.stop();
   if (animFrameId !== null) {
     cancelAnimationFrame(animFrameId);
     animFrameId = null;
   }
-  // Return cursor to position 0 (visible, no transition) so the score stays
-  // navigable after stop without needing to press play first.
+  // Reset OSMD cursor and score to position 0.
   if (osmdRef) {
-    const el = cursorEl();
-    if (el) el.style.transition = 'none';
     osmdRef.cursor.reset();
     osmdRef.cursor.show();
   }
   currentCursorStep = 0;
+  const px0 = cursorSteps[0]?.pxLeft ?? 0;
+  const el = cursorEl();
+  if (el) el.style.left = `${px0}px`;
+  applyTranslate(viewportWidth / 2 - px0);
 }
+
+// ─── Touch: manual score pan ──────────────────────────────────────────────────
+
+function initTouchHandlers(): void {
+  if (touchHandlersAttached) return;
+  touchHandlersAttached = true;
+
+  const wrapper = document.getElementById('osmd-wrapper');
+  if (!wrapper) return;
+
+  let startX = 0;
+  let startOffset = 0;
+  let dragging = false;
+
+  wrapper.addEventListener('touchstart', (e) => {
+    if ((e.target as Element).closest('.loop-handle')) return;
+    dragging = true;
+    startX = e.touches[0]?.clientX ?? 0;
+    startOffset = scrollOffsetPx;
+    if (Tone.Transport.state === 'started') pausePlayback();
+  }, { passive: true });
+
+  wrapper.addEventListener('touchmove', (e) => {
+    if (!dragging) return;
+    const dx = (e.touches[0]?.clientX ?? 0) - startX;
+    applyTranslate(clampTranslate(startOffset + dx));
+  }, { passive: true });
+
+  wrapper.addEventListener('touchend', () => {
+    if (!dragging) return;
+    dragging = false;
+    // Update cursor step and Transport position to the score position now at center.
+    const centerInScore = viewportWidth / 2 - scrollOffsetPx;
+    const step = nearestStepToPx(centerInScore);
+    currentCursorStep = step;
+    Tone.Transport.ticks = Math.round((cursorSteps[step]?.quarters ?? 0) * TONE_PPQ);
+    // Move OSMD cursor element to match.
+    const el = cursorEl();
+    if (el) el.style.left = `${cursorSteps[step]?.pxLeft ?? 0}px`;
+  }, { passive: true });
+}
+
+// ─── Loop handle dragging ─────────────────────────────────────────────────────
+
+function autoScrollForDrag(clientX: number): void {
+  const min = viewportWidth - scoreWidth;
+  if (clientX < EDGE_ZONE) applyTranslate(Math.min(0, scrollOffsetPx + 8));
+  else if (clientX > viewportWidth - EDGE_ZONE) applyTranslate(Math.max(min, scrollOffsetPx - 8));
+}
+
+function updateLoopOverlay(): void {
+  if (!loopRegion) return;
+  if (handleAEl) handleAEl.style.left = `${loopRegion.aPx}px`;
+  if (handleBEl) handleBEl.style.left = `${loopRegion.bPx}px`;
+  if (shadeEl) {
+    shadeEl.style.left = `${loopRegion.aPx}px`;
+    shadeEl.style.width = `${loopRegion.bPx - loopRegion.aPx}px`;
+  }
+}
+
+function initLoopHandles(): void {
+  function makeDrag(which: 'a' | 'b'): void {
+    const el = which === 'a' ? handleAEl : handleBEl;
+    if (!el) return;
+    let startTouchX = 0;
+    let startPx = 0;
+
+    el.addEventListener('touchstart', (e) => {
+      e.stopPropagation();
+      startTouchX = e.touches[0]?.clientX ?? 0;
+      startPx = which === 'a' ? (loopRegion?.aPx ?? 0) : (loopRegion?.bPx ?? 0);
+    }, { passive: false });
+
+    el.addEventListener('touchmove', (e) => {
+      e.preventDefault();
+      if (!loopRegion) return;
+      const dx = (e.touches[0]?.clientX ?? 0) - startTouchX;
+      let newPx = startPx + dx;
+
+      if (which === 'a') {
+        newPx = Math.max(0, Math.min(loopRegion.bPx - LOOP_MIN_GAP_PX, newPx));
+        loopRegion.aPx = newPx;
+        loopRegion.aTicks = pxToTicks(newPx);
+        Tone.Transport.loopStart = `${loopRegion.aTicks}i`;
+      } else {
+        newPx = Math.max(loopRegion.aPx + LOOP_MIN_GAP_PX, Math.min(scoreWidth, newPx));
+        loopRegion.bPx = newPx;
+        loopRegion.bTicks = pxToTicks(newPx);
+        Tone.Transport.loopEnd = `${loopRegion.bTicks}i`;
+      }
+
+      updateLoopOverlay();
+      autoScrollForDrag(e.touches[0]?.clientX ?? 0);
+    }, { passive: false });
+  }
+
+  makeDrag('a');
+  makeDrag('b');
+}
+
+// ─── Loop create / clear ──────────────────────────────────────────────────────
+
+function setOverlayBounds(top: number, height: number): void {
+  for (const el of [handleAEl, handleBEl, shadeEl]) {
+    if (!el) continue;
+    el.style.top = `${top}px`;
+    el.style.height = `${height}px`;
+  }
+}
+
+function createLoop(): void {
+  const step = cursorSteps[currentCursorStep < 0 ? 0 : currentCursorStep];
+  if (!step) return;
+  const aPx = step.pxLeft;
+  const bPx = Math.min(aPx + LOOP_DEFAULT_PX, scoreWidth);
+  const aTicks = pxToTicks(aPx);
+  const bTicks = pxToTicks(bPx);
+  loopRegion = { aPx, bPx, aTicks, bTicks };
+  Tone.Transport.loop = true;
+  Tone.Transport.loopStart = `${aTicks}i`;
+  Tone.Transport.loopEnd = `${bTicks}i`;
+  if (handleAEl) handleAEl.style.display = 'block';
+  if (handleBEl) handleBEl.style.display = 'block';
+  if (shadeEl) shadeEl.style.display = 'block';
+  updateLoopOverlay();
+  postToNative({ type: 'LOOP_STATE', payload: true });
+}
+
+function clearLoop(): void {
+  loopRegion = null;
+  Tone.Transport.loop = false;
+  if (handleAEl) handleAEl.style.display = 'none';
+  if (handleBEl) handleBEl.style.display = 'none';
+  if (shadeEl) shadeEl.style.display = 'none';
+  postToNative({ type: 'LOOP_STATE', payload: false });
+}
+
+export function toggleLoop(): void {
+  if (loopRegion) clearLoop();
+  else createLoop();
+}
+
+// ─── Public API ───────────────────────────────────────────────────────────────
 
 export function initPlayback(osmd: OpenSheetMusicDisplay): void {
   osmdRef = osmd;
   disposePlayback();
 
-  const { noteEvents, steps, scoreBpm } = buildTimelines(osmd);
-  cursorSteps = steps;
+  const { noteEvents, scoreBpm } = buildTimelines(osmd);
 
-  // Show cursor at position 0 immediately after load (no animation yet).
-  const el = cursorEl();
-  if (el) el.style.transition = 'none';
+  osmdEl = document.getElementById('osmd');
+  handleAEl = document.getElementById('loop-handle-a');
+  handleBEl = document.getElementById('loop-handle-b');
+  shadeEl = document.getElementById('loop-shade');
+  scoreWidth = osmdEl?.scrollWidth ?? 0;
+  viewportWidth = window.innerWidth;
+
+  // Size the overlay elements to the rendered system.
+  // OSMD sets img.height (the HTMLImageElement height IDL attribute) for the cursor height.
+  // style.top and style.left are set via style. Use the IDL .height for the system height
+  // to avoid CSS-computed values that may reflect the parent container height instead.
   osmd.cursor.show();
+  const cEl = cursorEl();
+  let systemTop = 0;
+  let systemH = 0;
+  if (cEl) {
+    // style.top is reliable (OSMD sets it explicitly in pixels).
+    systemTop = parseFloat(cEl.style.top || '0');
+    // img.height (IDL) is the CSS rendered height — may be overridden by CSS.
+    // Use the HTML attribute value directly since OSMD sets `img.height = px` as the attribute.
+    const attrH = parseInt(cEl.getAttribute('height') ?? '0', 10);
+    const idlH = (cEl as HTMLImageElement).height;
+    const bcrH = Math.round(cEl.getBoundingClientRect().height);
+    systemH = attrH || idlH || bcrH;
+    postToNative({
+      type: 'DEBUG',
+      payload: `overlay: styleTop=${cEl.style.top} attrH=${attrH} idlH=${idlH} bcrH=${bcrH} => top=${systemTop} h=${systemH}`,
+    });
+  }
+  setOverlayBounds(systemTop, systemH);
+
+  // Center the staff system vertically in the viewport.
+  // OSMD renders title/composer above the system (hence systemTop > 0); since the native
+  // header already shows piece title/composer, we slide #osmd up so the staff system is
+  // centered. OSMD's title region moves off the top of the viewport — acceptable.
+  const viewportHeight = window.innerHeight;
+  const centeredTop = Math.round((viewportHeight - systemH) / 2);
+  if (osmdEl) osmdEl.style.top = `${centeredTop - systemTop}px`;
+
+  // Cursor is already shown above; reset to step 0 for debugging.
+  osmd.cursor.reset();
   currentCursorStep = 0;
 
-  // Set transport to the score's indicated tempo. The native side will receive
-  // SCORE_BPM and may later adjust via SET_TEMPO_BPM (multiplier buttons).
+  // Snap score to position 0 at center.
+  const px0 = cursorSteps[0]?.pxLeft ?? 0;
+  const el = cursorEl();
+  if (el) el.style.left = `${px0}px`;
+  applyTranslate(viewportWidth / 2 - px0);
+
   Tone.Transport.bpm.value = scoreBpm;
   postToNative({ type: 'SCORE_BPM', payload: scoreBpm });
 
@@ -249,7 +487,6 @@ export function initPlayback(osmd: OpenSheetMusicDisplay): void {
     urls: PIANO_URLS,
     release: 1,
     baseUrl: SALAMANDER_BASE_URL,
-    // onerror is intentionally omitted; missing samples play silence (no crash)
   }).toDestination();
 
   const samplerRef = sampler;
@@ -257,7 +494,6 @@ export function initPlayback(osmd: OpenSheetMusicDisplay): void {
     (time, event) => {
       try {
         const noteName = Tone.Frequency(event.midi, 'midi').toNote();
-        // Duration in seconds from quarter-note length + BPM at schedule time.
         const durSec = Math.max(0.05, (event.durQ * 60) / Tone.Transport.bpm.value);
         samplerRef.triggerAttackRelease(noteName, durSec, time);
       } catch {
@@ -267,20 +503,34 @@ export function initPlayback(osmd: OpenSheetMusicDisplay): void {
     noteEvents,
   );
   part.start(0);
+
+  initTouchHandlers();
+  initLoopHandles();
 }
 
 export async function startPlayback(): Promise<void> {
   if (!sampler || !part) return;
+
+  // If a loop is active and transport is outside [aTicks, bTicks], seek to A.
+  if (loopRegion) {
+    const ticks = Tone.Transport.ticks;
+    if (ticks < loopRegion.aTicks || ticks >= loopRegion.bTicks) {
+      Tone.Transport.ticks = loopRegion.aTicks;
+      const targetStep = ticksToStep(loopRegion.aTicks);
+      advanceCursorTo(targetStep);
+      const px = cursorSteps[targetStep]?.pxLeft ?? 0;
+      const el = cursorEl();
+      if (el) el.style.left = `${px}px`;
+      applyTranslate(viewportWidth / 2 - px);
+    }
+  }
+
   try {
-    await Tone.start(); // resume AudioContext (required by autoplay policy)
-    // 8s timeout so a CDN failure doesn't block playback indefinitely
+    await Tone.start();
     await Promise.race([Tone.loaded(), new Promise<void>((r) => setTimeout(r, 8000))]);
   } catch {
-    // non-fatal: play with whatever samples have loaded
+    // non-fatal
   }
-  // No offset: Transport.state becomes 'started' immediately, which is required
-  // for animateCursorLoop's state check to pass on the first RAF frame.
-  // Tone.js's built-in 100ms lookahead pre-schedules tick-0 events correctly.
   Tone.Transport.start();
   animFrameId = requestAnimationFrame(animateCursorLoop);
   postToNative({ type: 'PLAYBACK_STATE', payload: 'playing' });
@@ -317,4 +567,6 @@ export function disposePlayback(): void {
   cursorSteps = [];
   currentCursorStep = -1;
   totalQuarters = 0;
+  loopRegion = null;
+  Tone.Transport.loop = false;
 }

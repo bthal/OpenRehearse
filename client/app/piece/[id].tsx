@@ -1,10 +1,11 @@
 import {
   mdiAlertCircleOutline,
   mdiArrowLeft,
+  mdiClose,
   mdiMusicNoteOutline,
   mdiPause,
   mdiPlay,
-  mdiStop,
+  mdiRepeat,
 } from '@mdi/js';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useCallback, useEffect, useRef } from 'react';
@@ -35,6 +36,7 @@ export default function PlayView() {
   const isPlaying = usePlayViewStore((s) => s.isPlaying);
   const scoreBpm = usePlayViewStore((s) => s.scoreBpm);
   const tempoMultiplier = usePlayViewStore((s) => s.tempoMultiplier);
+  const loopActive = usePlayViewStore((s) => s.loopActive);
 
   const setWebViewReady = usePlayViewStore((s) => s.setWebViewReady);
   const setLoadingScore = usePlayViewStore((s) => s.setLoadingScore);
@@ -42,6 +44,7 @@ export default function PlayView() {
   const setPlaying = usePlayViewStore((s) => s.setPlaying);
   const setScoreBpm = usePlayViewStore((s) => s.setScoreBpm);
   const setTempoMultiplier = usePlayViewStore((s) => s.setTempoMultiplier);
+  const setLoopActive = usePlayViewStore((s) => s.setLoopActive);
   const reset = usePlayViewStore((s) => s.reset);
 
   const webViewRef = useRef<WebView>(null);
@@ -110,9 +113,12 @@ export default function PlayView() {
         case 'PLAYBACK_END':
           setPlaying(false);
           break;
+        case 'LOOP_STATE':
+          setLoopActive(msg.payload);
+          break;
       }
     },
-    [setScoreBpm, setLoadingScore, setScoreError, setPlaying],
+    [setScoreBpm, setLoadingScore, setScoreError, setPlaying, setLoopActive],
   );
 
   const handlePlayPause = useCallback(() => {
@@ -123,10 +129,6 @@ export default function PlayView() {
     }
   }, [isPlaying]);
 
-  const handleStop = useCallback(() => {
-    webViewRef.current?.injectJavaScript('window.__rn_stop();void 0;');
-  }, []);
-
   const handleMultiplierChange = useCallback(
     (m: TempoMultiplier) => {
       setTempoMultiplier(m);
@@ -135,6 +137,10 @@ export default function PlayView() {
     },
     [setTempoMultiplier],
   );
+
+  const handleLoopToggle = useCallback(() => {
+    webViewRef.current?.injectJavaScript('window.__rn_toggle_loop();void 0;');
+  }, []);
 
   const effectiveBpm = Math.round(scoreBpm * tempoMultiplier);
   const scoreReady = webViewReady && !isLoadingScore && !scoreError;
@@ -169,7 +175,7 @@ export default function PlayView() {
         </View>
       </View>
 
-      {/* Score area */}
+      {/* Score area — WebView fills remaining space, toolbar floats over it */}
       <View className="flex-1">
         {/* baseUrl required on Android for large inline HTML; allowUniversalAccessFromFileURLs
             lets the file:// origin fetch HTTPS audio samples — see compound-docs */}
@@ -180,11 +186,64 @@ export default function PlayView() {
           allowUniversalAccessFromFileURLs={true}
           onLoadEnd={() => setWebViewReady(true)}
           onMessage={handleMessage}
-          scrollEnabled={true}
+          scrollEnabled={false}
           javaScriptEnabled={true}
           mediaPlaybackRequiresUserAction={false}
           style={{ flex: 1 }}
         />
+
+        {/* Vertical toolbar — left-side overlay, visible once score is fully loaded */}
+        {scoreReady && (
+          <View
+            className="absolute left-0 bg-white/90 rounded-r-xl py-3 px-2 items-center gap-4"
+            style={{
+              top: '25%',
+              elevation: 4,
+              shadowColor: '#000',
+              shadowOpacity: 0.12,
+              shadowRadius: 6,
+              shadowOffset: { width: 2, height: 0 },
+            }}
+          >
+            {/* Loop toggle */}
+            <TouchableOpacity onPress={handleLoopToggle} hitSlop={8} className="p-1.5">
+              <AppIcon
+                path={loopActive ? mdiClose : mdiRepeat}
+                size={26}
+                color={loopActive ? '#9C6B8A' : '#374151'}
+              />
+            </TouchableOpacity>
+
+            {/* Play / Pause */}
+            <TouchableOpacity onPress={handlePlayPause} hitSlop={8} className="p-1">
+              <AppIcon path={isPlaying ? mdiPause : mdiPlay} size={36} color="#4B7A6E" />
+            </TouchableOpacity>
+
+            {/* Speed selector: ×0.5 | ×0.75 | ×1.0 */}
+            <View className="items-center gap-0.5">
+              <Text className="text-xs text-gray-400">{effectiveBpm}</Text>
+              <Text className="text-xs text-gray-300">BPM</Text>
+              <View className="flex-col border border-gray-200 rounded-lg overflow-hidden mt-1">
+                {TEMPO_MULTIPLIERS.map((m) => {
+                  const isActive = tempoMultiplier === m;
+                  return (
+                    <TouchableOpacity
+                      key={m}
+                      onPress={() => handleMultiplierChange(m)}
+                      className={`px-2 py-1.5 ${isActive ? 'bg-seagrass-600' : 'bg-white'}`}
+                    >
+                      <Text
+                        className={`text-xs font-semibold ${isActive ? 'text-white' : 'text-gray-600'}`}
+                      >
+                        {MULTIPLIER_LABEL[m]}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+            </View>
+          </View>
+        )}
 
         {/* Overlay: WebView not yet loaded */}
         {!webViewReady && !scoreError && (
@@ -219,44 +278,6 @@ export default function PlayView() {
           </View>
         )}
       </View>
-
-      {/* Transport toolbar — visible once score is fully loaded */}
-      {scoreReady && (
-        <View className="flex-row items-center justify-between px-4 py-2 border-t border-gray-100 bg-white">
-          {/* Stop */}
-          <TouchableOpacity onPress={handleStop} hitSlop={8} className="p-2">
-            <AppIcon path={mdiStop} size={26} color="#374151" />
-          </TouchableOpacity>
-
-          {/* Play / Pause */}
-          <TouchableOpacity onPress={handlePlayPause} hitSlop={8} className="p-1">
-            <AppIcon path={isPlaying ? mdiPause : mdiPlay} size={36} color="#4B7A6E" />
-          </TouchableOpacity>
-
-          {/* Speed selector: ×0.5 | ×0.75 | ×1.0 */}
-          <View className="flex-col items-end gap-0.5">
-            <Text className="text-xs text-gray-400">{effectiveBpm} BPM</Text>
-            <View className="flex-row border border-gray-200 rounded-lg overflow-hidden">
-              {TEMPO_MULTIPLIERS.map((m) => {
-                const isActive = tempoMultiplier === m;
-                return (
-                  <TouchableOpacity
-                    key={m}
-                    onPress={() => handleMultiplierChange(m)}
-                    className={`px-3 py-1.5 ${isActive ? 'bg-seagrass-600' : 'bg-white'}`}
-                  >
-                    <Text
-                      className={`text-xs font-semibold ${isActive ? 'text-white' : 'text-gray-600'}`}
-                    >
-                      {MULTIPLIER_LABEL[m]}
-                    </Text>
-                  </TouchableOpacity>
-                );
-              })}
-            </View>
-          </View>
-        </View>
-      )}
     </SafeAreaView>
   );
 }

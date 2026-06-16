@@ -3,7 +3,8 @@ export type InboundMessage =
   | { type: 'PLAY' }
   | { type: 'PAUSE' }
   | { type: 'STOP' }
-  | { type: 'SET_TEMPO_BPM'; payload: number };
+  | { type: 'SET_TEMPO_BPM'; payload: number }
+  | { type: 'TOGGLE_LOOP' };
 
 export type OutboundMessage =
   | { type: 'LOADED' }
@@ -11,4 +12,5 @@ export type OutboundMessage =
   | { type: 'DEBUG'; payload: string }
   | { type: 'SCORE_BPM'; payload: number }
   | { type: 'PLAYBACK_STATE'; payload: 'playing' | 'paused' | 'stopped' }
-  | { type: 'PLAYBACK_END' };
+  | { type: 'PLAYBACK_END' }
+  | { type: 'LOOP_STATE'; payload: boolean };

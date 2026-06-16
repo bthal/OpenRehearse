@@ -4,6 +4,23 @@
 
 Single screen where the user **reads**, **hears** (synthesized), and **practices** a piece with **one active loop** and **adjustable tempo**.
 
+## Score display modes
+
+Two display modes are defined; **MVP implements one-line mode only** (no UI toggle yet — it is a global preference for future exposure).
+
+### Standard mode (backlog)
+OSMD renders the piece across multiple systems, laid out vertically. Score scrolls vertically with playback. This is OSMD's default rendering.
+
+### One-line mode (MVP)
+The entire piece is rendered in a **single horizontal line** — all measures laid out left-to-right on one infinite row (OSMD configured for single-system layout).
+
+- **Cursor is pinned to the horizontal center** of the screen at all times.
+- During playback the score scrolls horizontally so the cursor stays at the correct position.
+- **Manual horizontal scroll**: the score moves with the finger; vertical scroll is not possible.
+  - Manual scroll **stops playback**.
+  - The cursor stays centered and corresponds to the scrolled-to position in the piece.
+  - On next **play**: if no loop is set, playback resumes from the cursor's current position; if a loop is set, the cursor smoothly scrolls to the loop start and playback begins from there.
+
 ## Rendering
 
 - **OpenSheetMusicDisplay** inside **WebView** (see `architecture.md`).
@@ -20,21 +37,32 @@ Single screen where the user **reads**, **hears** (synthesized), and **practices
 
 ## Loop ("bit") — MVP rules
 
-- **Exactly one** active loop at a time; defining a new loop **replaces** the previous.
-- Loop handles (start and end) are **continuously draggable** — smooth drag to any position along the score timeline; no forced snap to note boundaries in MVP.
-- On reaching the **end** of the bit during playback: **immediate jump** to the **start** of the bit (no ritardando across wrap; wrap is transport-level).
+- **Exactly one** active loop at a time.
+- **Creating a loop**: tap the loop button in the toolbar. A loop is immediately placed starting at the **current cursor position**, extending a fixed pixel span forward (constant `LOOP_DEFAULT_PX`). The loop button icon changes to **×** while a loop is active.
+- **Deleting a loop**: tap the loop button again (showing ×). The loop is removed entirely.
+- **Visual representation**:
+  - Both handles (A = start, B = end) render as draggable markers on the score.
+  - The region between A and B is shaded.
+- **Handle dragging**:
+  - Handles can be placed at **any continuous position** within the piece — no snap to beats or measures.
+  - A may not be dragged past B; B may not be dragged past A. A **minimum pixel gap** (`LOOP_MIN_GAP_PX`, constant) is enforced between the two handles.
+  - While dragging a handle, the score **scrolls to follow** the handle being dragged so it stays visible.
+- **Playback wrap**: on reaching B, playback **immediately jumps** to A (no fade or ritardando).
 
-## Native UI (shell)
+## Toolbar
 
-- Transport: **play / pause / stop**.
-- **Speed selector**: ×0.5 / ×0.75 / ×1.0 segmented control; effective BPM shown above it.
-- Loop controls: draggable start/end handles; clear loop button.
-- Error states: corrupt XML, unsupported constructs — user-visible message + retry.
+- Positioned **vertically on the left side** of the PlayView screen.
+- Styled to match the toolbar on the `main` branch.
+- Controls (top to bottom):
+  - Loop button (icon: loop-icon when inactive; × when a loop is active)
+  - Play / Pause
+  - Speed selector: ×0.5 / ×0.75 / ×1.0; effective BPM shown alongside
 
 ## State (Zustand)
 
 Slices: `activePieceId`, `webViewReady`, `isLoadingScore`, `scoreError`, `isPlaying`,
-`scoreBpm` (from MusicXML), `tempoMultiplier` (×0.5/×0.75/×1.0), `loop: { start, end } | null`.
+`scoreBpm` (from MusicXML), `tempoMultiplier` (×0.5/×0.75/×1.0), `loop: { start, end } | null`,
+`displayMode: 'one-line' | 'standard'` (global preference; `'one-line'` in MVP, no UI to change it yet).
 
 ## Acceptance criteria
 
@@ -45,5 +73,11 @@ Slices: `activePieceId`, `webViewReady`, `isLoadingScore`, `scoreError`, `isPlay
 - [x] Realistic piano audio (Salamander Grand Piano via CDN; cached offline after first play). *(Phase 3b)*
 - [x] Score BPM read from MusicXML; speed selector ×0.5/×0.75/×1.0 applied as multiplier. *(Phase 3b)*
 - [x] Cursor visible at position 0 after load and after stop; smooth left-slide between beats. *(Phase 3b)*
-- [ ] User can set **one** loop by dragging handles; playback wraps with **immediate jump**. *(Phase 4)*
-- [x] Works **offline** once the piece is loaded from local storage. *(Phase 2)*
+- [x] Score renders in one-line mode (single horizontal system; cursor pinned to center). *(Phase 4)*
+- [x] Manual horizontal scroll pauses playback; play resumes from scrolled position, or from loop start if a loop is active. *(Phase 4)*
+- [x] Toolbar renders vertically on the left. *(Phase 4)*
+- [x] Tapping loop button creates loop at cursor with fixed pixel span (`LOOP_DEFAULT_PX`); tapping again (× icon) removes it. *(Phase 4)*
+- [x] Loop handles are continuously draggable; A/B minimum gap (`LOOP_MIN_GAP_PX`) enforced. *(Phase 4)*
+- [x] Dragging a handle auto-scrolls the view to keep the active handle visible. *(Phase 4)*
+- [x] Playback wraps from B to A with immediate jump. *(Phase 4)*
+- [ ] Works **offline** once the piece is loaded from local storage. *(Phase 2)*

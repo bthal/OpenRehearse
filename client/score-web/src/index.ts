@@ -6,6 +6,7 @@ import {
   stopPlayback,
   setTempoBpm,
   disposePlayback,
+  toggleLoop,
 } from './playback';
 import type { OutboundMessage } from './types';
 
@@ -29,8 +30,23 @@ w.__rn_load_xml = async (xml: string) => {
   }
   disposePlayback();
   try {
+    // Force single-system (one-line) layout.
+    // PageWidth = 10000 prevents automatic line wrapping.
+    // The XML-attribute flags stop MusicXML <print new-system/new-page> markers from
+    // overriding our layout (these are the cause of mid-score system breaks).
+    // RenderSingleHorizontalStaffline tells OSMD's own layout engine to do the same.
+    osmd.EngravingRules.PageWidth = 10000;
+    osmd.EngravingRules.NewSystemAtXMLNewSystemAttribute = false;
+    osmd.EngravingRules.NewSystemAtXMLNewPageAttribute = false;
+    osmd.EngravingRules.RenderSingleHorizontalStaffline = true;
+    const container = document.getElementById('osmd')!;
+    container.style.width = '10000px';
     await osmd.load(xml);
     osmd.render();
+    // Trim container to the SVG's actual rendered width (container.scrollWidth would
+    // still be 10000px since we set it before render; query the SVG directly).
+    const svgEl = container.querySelector('svg');
+    container.style.width = `${svgEl ? svgEl.scrollWidth : container.scrollWidth}px`;
     initPlayback(osmd);
     postToNative({ type: 'LOADED' });
   } catch (err) {
@@ -54,17 +70,21 @@ w.__rn_set_tempo = (bpm: number) => {
   setTempoBpm(bpm);
 };
 
+w.__rn_toggle_loop = () => {
+  toggleLoop();
+};
+
 const container = document.getElementById('osmd');
 if (!container) {
   postToNative({ type: 'ERROR', payload: '#osmd container not found' });
 } else {
   try {
     osmd = new OpenSheetMusicDisplay(container, {
-      autoResize: true,
+      autoResize: false, // PageWidth is set manually before each load for one-line layout
       backend: 'svg',
       drawTitle: true,
       drawComposer: true,
-      followCursor: true,
+      followCursor: false, // we control scrolling via translateX
     });
     postToNative({ type: 'DEBUG', payload: 'OSMD ready' });
   } catch (err) {

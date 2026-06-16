@@ -191,30 +191,48 @@ Tone.Transport.start(); // state becomes 'started' immediately
 Tone.js's built-in 100 ms lookahead pre-schedules tick-0 events before they need to fire, so
 removing the explicit offset does not cause missed notes.
 
-## Cursor smooth movement via CSS `left` transition
+## Cursor smooth movement: interpolation-based RAF (Phase 4)
 
-**PATTERN:** OSMD's cursor element (`Cursor.cursorElement: HTMLImageElement`) uses
-`position: absolute` with `style.left` and `style.top`. Applying a CSS transition on `left`
-before each `cursor.next()` call produces smooth horizontal movement without custom animation:
+**PATTERN (replaces CSS `left` transition):** The CSS `left` transition approach causes visible
+misalignment in one-line mode: OSMD's cursor element jumps to the next beat position instantly
+(since `cursor.next()` updates `style.left` immediately), while the CSS transition animates the
+element over the next beat duration. In one-line mode the fixed `#cursor-line` div is always at
+screen center, so the cursor element must stay there too — any lag is immediately obvious.
+
+**Fix:** Use a 60fps RAF loop that interpolates between beat positions each frame, then sets
+BOTH the cursor element's `style.left` AND the score's `translateX` to the same interpolated
+pixel value:
 
 ```typescript
-// before calling cursor.next() for a single-step advance:
-const durSec = Math.max(0.04, (deltaQuarters * 60) / Tone.Transport.bpm.value);
-cursorElement.style.transition = `left ${durSec.toFixed(3)}s linear`;
-cursor.next(); // OSMD sets the new left; CSS transitions from old → new
+function animateCursorLoop(): void {
+  const quartersElapsed = Tone.Transport.ticks / TONE_PPQ;
+  // binary-search cursorSteps[] for the current beat
+  const step = findStep(quartersElapsed);
+  const currPx = cursorSteps[step].pxLeft;
+  const nextPx = cursorSteps[step + 1]?.pxLeft ?? currPx;
+  const fraction = (quartersElapsed - cursorSteps[step].quarters)
+                 / (cursorSteps[step + 1]?.quarters - cursorSteps[step].quarters);
+  const px = currPx + Math.min(1, fraction) * (nextPx - currPx);
+
+  // Both the cursor element and the score translate to the same px — they stay aligned.
+  cursorElement.style.left = `${px}px`;
+  osmdEl.style.transform = `translateX(${viewportWidth / 2 - px}px)`;
+
+  animFrameId = requestAnimationFrame(animateCursorLoop);
+}
 ```
 
-Only transition `left` — leave `top` untransitioned so the cursor jumps instantly when moving to
-a new staff line (system boundary). Multi-step catch-up advances (when the transport skips ahead)
-use `transition: none` for an instant jump.
+Key points:
+- `cursorSteps[i].pxLeft` is captured at build time via `parseFloat(el.style.left || '0')`,
+  **not** `el.offsetLeft` (which returns integers and rounds).
+- OSMD iterator advancement (`cursor.next()`) is kept separate from translation; call it only
+  when the step index changes.
+- Never use `osmdEl.style.transition` for the score translateX — that re-introduces lag.
 
-Access the element via:
+Access the cursor element:
 ```typescript
 const el = (osmd.cursor as unknown as { cursorElement?: HTMLImageElement }).cursorElement;
 ```
-
-`Cursor.cursorElement` is public in OSMD's type declarations but may require a cast depending on
-how the types are imported.
 
 ## OSMD tied notes: skip continuation notes — only the start note triggers an attack
 
@@ -261,3 +279,89 @@ target, this is O(N). In practice, backward seeks happen only on stop/replay (ta
 If large-score performance becomes a concern (e.g. re-seeking mid-piece), pre-build a list of
 GraphicalNote DOM positions and use CSS `transform` to animate a custom caret instead of calling
 `cursor.next()`. That approach requires an ADR (see `specs/features/playview.md`).
+
+## One-line OSMD layout: `PageWidth` alone is not enough (Phase 4)
+
+**LANDMINE:** Setting `osmd.EngravingRules.PageWidth = 10000` prevents automatic line wrapping
+based on measure widths, but **MusicXML `<print new-system="yes"/>` and `<print new-page="yes"/>`
+attributes still force system/page breaks** at mid-score. Pieces like Bach Prelude I (m.28) and
+Mozart Rondo alla Turca (m.60) exhibit this.
+
+**Fix:** Set all three rules before every `osmd.load()`:
+
+```typescript
+osmd.EngravingRules.PageWidth = 10000;
+osmd.EngravingRules.NewSystemAtXMLNewSystemAttribute = false;  // ignore <print new-system>
+osmd.EngravingRules.NewSystemAtXMLNewPageAttribute = false;    // ignore <print new-page>
+osmd.EngravingRules.RenderSingleHorizontalStaffline = true;    // OSMD's own layout enforcer
+```
+
+All three must be set on every `__rn_load_xml` call (not just once at construction) because
+`disposePlayback()` may reset rendering state between loads.
+
+## OSMD cursor element dimensions: read `getAttribute('height')`, not `style.height` (Phase 4)
+
+**LANDMINE:** In `Cursor.updateWidthAndStyle`, OSMD sets the cursor element's height as:
+```javascript
+r.height = 10 * systemHeightInUnits * zoom;  // sets the img IDL attribute, NOT style.height
+```
+`style.height` is never set. Reading `parseFloat(cEl.style.height || '0')` always returns 0.
+`cEl.offsetHeight` and `getBoundingClientRect().height` both return the CSS-computed height,
+which may reflect the parent container height rather than the staff system height if any
+ancestor has an explicit height.
+
+**Fix:** Read the HTML attribute value directly:
+```typescript
+const systemH = parseInt(cEl.getAttribute('height') ?? '0', 10);
+```
+This bypasses CSS-computed height and returns exactly what OSMD wrote.
+
+Also: `style.top` IS set by OSMD (as `10 * y * zoom + "px"`), so `parseFloat(cEl.style.top)`
+reliably gives the system's Y offset within the container.
+
+## Vertical score positioning: OSMD title/composer offsets the system (Phase 4)
+
+**LANDMINE:** OSMD renders title, composer, and subtitle above the staff system with top margins.
+The cursor element's `style.top` gives the system Y offset (e.g. 179px for Prelude I, 600px+ for
+scores with more metadata). Without correcting for this, the staff system can appear near the
+bottom of the viewport or scroll off-screen entirely for metadata-heavy scores.
+
+**Fix:** After `initPlayback` measures `systemTop` and `systemH`, vertically center the staff:
+
+```typescript
+const viewportHeight = window.innerHeight;
+const centeredTop = Math.round((viewportHeight - systemH) / 2);
+if (osmdEl) osmdEl.style.top = `${centeredTop - systemTop}px`;
+```
+
+This slides `#osmd` up so the staff system appears at `centeredTop` from the WebView top,
+regardless of how much title/composer space OSMD allocated. The native header already displays
+piece title and composer, so OSMD's title region scrolling off the top is acceptable.
+
+Elements inside `#osmd` (loop handles, shade, OSMD cursor) are positioned relative to `#osmd`
+and auto-correct without additional adjustment. The horizontal `translateX` on `#osmd` (for
+score scrolling) is independent of `style.top` and is not affected.
+
+## Loop overlay sizing: use cursor element, not `#osmd.offsetHeight` (Phase 4)
+
+**LANDMINE:** The loop shade (`#loop-shade`) and handles (`.loop-handle`) are absolutely
+positioned inside `#osmd`. Setting their `height: 100%` in CSS, or reading `#osmd.offsetHeight`
+to set a JS height, both return the full SVG canvas height (viewport-height-sized) rather than
+the staff system height. This makes the loop overlay span the full screen.
+
+**Fix:** Use the cursor element's measurements from `getAttribute('height')` and `style.top`
+for both `height` and `top` on all overlay elements:
+
+```typescript
+const systemTop = parseFloat(cEl.style.top || '0');
+const systemH = parseInt(cEl.getAttribute('height') ?? '0', 10);
+for (const el of [handleAEl, handleBEl, shadeEl]) {
+  if (!el) continue;
+  el.style.top = `${systemTop}px`;
+  el.style.height = `${systemH}px`;
+}
+```
+
+Set these in `initPlayback` immediately after `cursor.show()` (which triggers
+`updateWidthAndStyle` internally and populates the cursor element's position data).
+Do **not** set `height` in CSS — leave it unset so the JS values are unambiguous.
