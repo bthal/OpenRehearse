@@ -22,3 +22,5 @@ Play **audio derived from the score** (not external recordings) so that **notati
 
 - [x] Note onsets audibly align with cursor for representative scores (manual QA checklist in repo optional).
 - [x] Tempo change does not leave orphan scheduled events (no stuck notes after pause/stop).
+- [x] Tied notes produce a single sustained sound (no double-attack at tie boundary).
+- [x] Repeat barlines are honored: playback cycles through the repeated section.

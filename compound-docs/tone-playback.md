@@ -164,12 +164,14 @@ speed.
 
 ```typescript
 const WHOLE_TO_QUARTER = 4;
-const quarters = osmd.cursor.Iterator.currentTimeStamp.RealValue * WHOLE_TO_QUARTER;
+const quarters = osmd.cursor.Iterator.CurrentEnrolledTimestamp.RealValue * WHOLE_TO_QUARTER;
 const durQ     = note.Length.RealValue * WHOLE_TO_QUARTER;
 const ticks    = Math.round(quarters * Tone.Transport.PPQ); // correct tick position
 ```
 
 This applies everywhere OSMD `Fraction.RealValue` feeds Tone.js scheduling or cursor sync math.
+See also: **OSMD repeats** section below for why `CurrentEnrolledTimestamp` is used instead of
+`currentTimeStamp`.
 
 ## `Transport.start(offset)` leaves state `'stopped'` during the offset window
 
@@ -213,6 +215,41 @@ const el = (osmd.cursor as unknown as { cursorElement?: HTMLImageElement }).curs
 
 `Cursor.cursorElement` is public in OSMD's type declarations but may require a cast depending on
 how the types are imported.
+
+## OSMD tied notes: skip continuation notes — only the start note triggers an attack
+
+**LANDMINE:** `cursor.NotesUnderCursor()` returns ALL notes at the cursor position, including the
+second (and later) notes of a tie. Scheduling a new `triggerAttackRelease` on a tie continuation
+produces a double-attack — the note re-strikes audibly mid-sustain.
+
+**Fix:** Skip any note whose tie's start note is not itself:
+
+```typescript
+if (note.NoteTie && note.NoteTie.StartNote !== note) continue;
+```
+
+`Tie.StartNote` is a public getter on OSMD's `Tie` class. `note.NoteTie` is falsy (null/undefined)
+for non-tied notes despite being typed as `Tie` (not `Tie | undefined`), so the `&&` guard is
+required.
+
+## OSMD repeats: use `CurrentEnrolledTimestamp`, not `currentTimeStamp`
+
+**LANDMINE:** `Iterator.currentTimeStamp` is an alias for `CurrentSourceTimestamp` — the note's
+position in the **printed score**. On the second pass through a repeated section the source
+timestamp is identical to the first pass. Scheduling with it causes both passes to fire at the same
+Tone.js tick; the repeat sounds identical to no repeat at all.
+
+`Iterator.CurrentEnrolledTimestamp` is the **unrolled** playback timeline (increases monotonically
+across back-jumps). Use it for both note scheduling and cursor step timing:
+
+```typescript
+const quarters = osmd.cursor.Iterator.CurrentEnrolledTimestamp.RealValue * WHOLE_TO_QUARTER;
+```
+
+OSMD's cursor iterator follows repeats by default (`EngravingRules.CursorIgnoreRepetitions = false`).
+`cursor.next()` performs back-jumps automatically; the enrolled timestamp correctly reflects the
+resulting linear timeline offset so `Tone.Part` events and cursor steps are both sequenced
+correctly.
 
 ## `cursor.reset()` + repeated `cursor.next()` for backward seeks
 

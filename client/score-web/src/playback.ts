@@ -89,7 +89,10 @@ function buildTimelines(osmd: OpenSheetMusicDisplay): {
   let lastQuarters = 0;
 
   while (!osmd.cursor.Iterator.EndReached) {
-    const quarters = osmd.cursor.Iterator.currentTimeStamp.RealValue * WHOLE_TO_QUARTER;
+    // CurrentEnrolledTimestamp is the unrolled playback position (accounts for repeats).
+    // currentTimeStamp / CurrentSourceTimestamp is the printed score position, which
+    // is identical on both passes through a repeated section — wrong for scheduling.
+    const quarters = osmd.cursor.Iterator.CurrentEnrolledTimestamp.RealValue * WHOLE_TO_QUARTER;
     lastQuarters = quarters;
     steps.push({ quarters });
 
@@ -97,6 +100,8 @@ function buildTimelines(osmd: OpenSheetMusicDisplay): {
       const notes = osmd.cursor.NotesUnderCursor();
       for (const note of notes) {
         if (note.isRest() || note.IsGraceNote) continue;
+        // Skip tie continuations — only the first note of a tie produces a new attack.
+        if (note.NoteTie && note.NoteTie.StartNote !== note) continue;
         const midi = note.halfTone;
         if (midi <= 0 || midi > 127) continue;
         const durQ = note.Length.RealValue * WHOLE_TO_QUARTER;
