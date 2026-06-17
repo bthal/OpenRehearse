@@ -15,6 +15,8 @@ interface PlayViewState {
   tempoMultiplier: TempoMultiplier;
   /** Whether a loop region is currently active in the WebView. */
   loopActive: boolean;
+  /** Whether the metronome click is enabled. */
+  metronomeOn: boolean;
 
   setActivePieceId: (id: string | null) => void;
   setWebViewReady: (ready: boolean) => void;
@@ -24,6 +26,7 @@ interface PlayViewState {
   setScoreBpm: (bpm: number) => void;
   setTempoMultiplier: (m: TempoMultiplier) => void;
   setLoopActive: (v: boolean) => void;
+  setMetronomeOn: (v: boolean) => void;
   reset: () => void;
 }
 
@@ -36,6 +39,7 @@ const initial = {
   scoreBpm: 120,
   tempoMultiplier: 1.0 as TempoMultiplier,
   loopActive: false,
+  metronomeOn: false,
 };
 
 export const usePlayViewStore = create<PlayViewState>()((set) => ({
@@ -48,5 +52,6 @@ export const usePlayViewStore = create<PlayViewState>()((set) => ({
   setScoreBpm: (bpm) => set({ scoreBpm: bpm }),
   setTempoMultiplier: (m) => set({ tempoMultiplier: m }),
   setLoopActive: (v) => set({ loopActive: v }),
+  setMetronomeOn: (v) => set({ metronomeOn: v }),
   reset: () => set(initial),
 }));

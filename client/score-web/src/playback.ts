@@ -70,6 +70,9 @@ function postToNative(msg: OutboundMessage): void {
 
 let sampler: Tone.Sampler | null = null;
 let part: Tone.Part<NoteEvent> | null = null;
+let metronomeEventId: number | null = null;
+let metronomeEnabled = false;
+let downbeatTicks: Set<number> = new Set();
 let cursorSteps: CursorStep[] = [];
 let currentCursorStep = -1;
 let totalQuarters = 0;
@@ -111,10 +114,18 @@ function buildTimelines(osmd: OpenSheetMusicDisplay): {
 
   const WHOLE_TO_QUARTER = 4;
   let lastQuarters = 0;
+  let lastMeasure: unknown = null;
+  downbeatTicks = new Set();
 
   while (!osmd.cursor.Iterator.EndReached) {
     const quarters = osmd.cursor.Iterator.CurrentEnrolledTimestamp.RealValue * WHOLE_TO_QUARTER;
     lastQuarters = quarters;
+
+    const measure = osmd.cursor.Iterator.CurrentMeasure as unknown;
+    if (measure !== lastMeasure) {
+      lastMeasure = measure;
+      downbeatTicks.add(Math.round(quarters * TONE_PPQ));
+    }
     // Use style.left (exact value OSMD sets) rather than offsetLeft (integer, may round).
     const pxLeft = parseFloat(el?.style.left ?? '0');
     steps.push({ quarters, pxLeft });
@@ -423,6 +434,47 @@ export function toggleLoop(): void {
   else createLoop();
 }
 
+// ─── Metronome ────────────────────────────────────────────────────────────────
+
+function startMetronome(): void {
+  if (metronomeEventId !== null) {
+    Tone.Transport.clear(metronomeEventId);
+    metronomeEventId = null;
+  }
+  metronomeEventId = Tone.Transport.scheduleRepeat((time) => {
+    const ctx = Tone.getContext().rawContext as AudioContext;
+
+    // downbeatTicks was built from OSMD measure boundaries — correct for any
+    // time signature and handles mid-score signature changes.
+    const ticks = Tone.Transport.getTicksAtTime(time);
+    const nearestBeat = Math.round(ticks / TONE_PPQ) * TONE_PPQ;
+    const isDownbeat = downbeatTicks.has(nearestBeat);
+
+    const osc = ctx.createOscillator();
+    const gainNode = ctx.createGain();
+    osc.type = 'sine';
+    osc.frequency.value = isDownbeat ? 1500 : 1000;
+    gainNode.gain.setValueAtTime(isDownbeat ? 0.45 : 0.2, time);
+    gainNode.gain.exponentialRampToValueAtTime(0.0001, time + 0.06);
+    osc.connect(gainNode);
+    gainNode.connect(ctx.destination);
+    osc.start(time);
+    osc.stop(time + 0.06);
+  }, '4n', 0);
+}
+
+export function toggleMetronome(): void {
+  metronomeEnabled = !metronomeEnabled;
+  if (metronomeEnabled) {
+    startMetronome();
+  } else {
+    if (metronomeEventId !== null) {
+      Tone.Transport.clear(metronomeEventId);
+      metronomeEventId = null;
+    }
+  }
+}
+
 // ─── Public API ───────────────────────────────────────────────────────────────
 
 export function initPlayback(osmd: OpenSheetMusicDisplay): void {
@@ -506,6 +558,7 @@ export function initPlayback(osmd: OpenSheetMusicDisplay): void {
 
   initTouchHandlers();
   initLoopHandles();
+  if (metronomeEnabled) startMetronome();
 }
 
 export async function startPlayback(): Promise<void> {
@@ -564,6 +617,11 @@ export function disposePlayback(): void {
   part = null;
   sampler?.dispose();
   sampler = null;
+  if (metronomeEventId !== null) {
+    Tone.Transport.clear(metronomeEventId);
+    metronomeEventId = null;
+  }
+  downbeatTicks = new Set();
   cursorSteps = [];
   currentCursorStep = -1;
   totalQuarters = 0;

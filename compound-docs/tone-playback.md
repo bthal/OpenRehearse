@@ -365,3 +365,95 @@ for (const el of [handleAEl, handleBEl, shadeEl]) {
 Set these in `initPlayback` immediately after `cursor.show()` (which triggers
 `updateWidthAndStyle` internally and populates the cursor element's position data).
 Do **not** set `height` in CSS — leave it unset so the JS values are unambiguous.
+
+## LANDMINE: `score-web/src/` edits are invisible until the bundle is rebuilt
+
+`score-web/build.mjs` compiles `src/index.ts` (and its imports: `playback.ts`, `types.ts`) into
+`client/src/score-web/html.ts` — an auto-generated TypeScript module that the React Native app
+embeds in the WebView. **Edits to source files produce no effect in the running app until the
+bundle is rebuilt.**
+
+```bash
+cd client && npm run build:score-web
+```
+
+This is easy to miss because the source files look like live TypeScript. Always add a rebuild
+step to any task that touches `client/score-web/src/**`.
+
+## PATTERN: Metronome via `scheduleRepeat` + raw Web Audio oscillator per tick
+
+Do **not** create a persistent `Tone.Synth` for the metronome. Synth nodes (and any
+`Tone.AudioNode`) created while the `AudioContext` is still `suspended` (before the user's first
+`Tone.start()` call) silently fail to produce sound — the node graph is built against a suspended
+context and does not recover correctly after resume.
+
+**Fix:** create a fresh `OscillatorNode` + `GainNode` pair inside each `scheduleRepeat` callback.
+By the time the callback fires, the transport is running and `AudioContext` is active:
+
+```typescript
+metronomeEventId = Tone.Transport.scheduleRepeat((time) => {
+  const ctx = Tone.getContext().rawContext as AudioContext;
+  const osc = ctx.createOscillator();
+  const gainNode = ctx.createGain();
+  osc.type = 'sine';
+  osc.frequency.value = isDownbeat ? 1500 : 1000;
+  gainNode.gain.setValueAtTime(isDownbeat ? 0.45 : 0.2, time);
+  gainNode.gain.exponentialRampToValueAtTime(0.0001, time + 0.06);
+  osc.connect(gainNode);
+  gainNode.connect(ctx.destination);
+  osc.start(time);
+  osc.stop(time + 0.06);
+}, '4n', 0);
+```
+
+Use `Tone.Transport.clear(id)` to cancel on toggle-off or dispose.
+
+## LANDMINE: `'@4n'` quantize syntax is NOT valid as `scheduleRepeat`'s `startTime`
+
+Tone.js's `'@4n'` notation ("next quarter-note boundary") works for `Transport.schedule()` but
+**silently produces no events when passed as the `startTime` argument to `scheduleRepeat()`**
+while the transport is running. The call appears to succeed (returns an ID) but nothing fires.
+
+**Fix:** always pass `startTime = 0`. `scheduleRepeat` with `startTime = 0` fires at absolute
+transport positions 0, 4n, 8n, … When the transport is already past 0, Tone.js skips all past
+firings and fires at the next interval multiple — so the phase is always locked to the beat grid:
+
+```typescript
+// Transport at position 5.3n → first fire at 8n (next multiple of 4n from 0). ✓
+metronomeEventId = Tone.Transport.scheduleRepeat(callback, '4n', 0);
+```
+
+## PATTERN: Downbeat detection via `Iterator.CurrentMeasure` reference tracking
+
+`Tone.Transport.timeSignature` is always 4/4 by default — it is not read from the MusicXML.
+Do **not** use modulo arithmetic against `timeSignature` to find downbeats; it will be wrong for
+3/4, 6/8, 5/4, and mid-score signature changes.
+
+**Fix:** during `buildTimelines`, compare `osmd.cursor.Iterator.CurrentMeasure` by object
+reference across cursor steps. Each reference change is a new measure boundary; record that tick
+position in a `Set<number>`:
+
+```typescript
+let lastMeasure: unknown = null;
+const downbeatTicks = new Set<number>();
+
+while (!osmd.cursor.Iterator.EndReached) {
+  const quarters = osmd.cursor.Iterator.CurrentEnrolledTimestamp.RealValue * WHOLE_TO_QUARTER;
+  const measure = osmd.cursor.Iterator.CurrentMeasure as unknown;
+  if (measure !== lastMeasure) {
+    lastMeasure = measure;
+    downbeatTicks.add(Math.round(quarters * TONE_PPQ));
+  }
+  // ... rest of walk
+}
+```
+
+In the metronome callback, snap the scheduled tick to the nearest beat and look it up:
+
+```typescript
+const ticks = Tone.Transport.getTicksAtTime(time);
+const nearestBeat = Math.round(ticks / TONE_PPQ) * TONE_PPQ;
+const isDownbeat = downbeatTicks.has(nearestBeat);
+```
+
+Works for any time signature and handles mid-score changes automatically.

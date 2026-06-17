@@ -7,6 +7,7 @@ import {
   setTempoBpm,
   disposePlayback,
   toggleLoop,
+  toggleMetronome,
 } from './playback';
 import type { OutboundMessage } from './types';
 
@@ -72,6 +73,10 @@ w.__rn_set_tempo = (bpm: number) => {
 
 w.__rn_toggle_loop = () => {
   toggleLoop();
+};
+
+w.__rn_toggle_metronome = () => {
+  toggleMetronome();
 };
 
 const container = document.getElementById('osmd');
