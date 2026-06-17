@@ -1,18 +1,17 @@
 import {
   mdiAlertCircleOutline,
   mdiArrowLeft,
-  mdiChevronDown,
-  mdiChevronUp,
   mdiClose,
   mdiMetronome,
   mdiMusicNoteOutline,
   mdiPause,
   mdiPlay,
   mdiRepeat,
+  mdiSpeedometer,
 } from '@mdi/js';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, Text, TouchableOpacity, View } from 'react-native';
+import { Animated, ActivityIndicator, Text, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import WebView, { type WebViewMessageEvent } from 'react-native-webview';
 
@@ -28,6 +27,8 @@ const MULTIPLIER_LABEL: Record<number, string> = {
   0.75: '×0.75',
   1: '×1.0',
 };
+
+const SPEED_PANEL_WIDTH = 132;
 
 export default function PlayView() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -53,7 +54,12 @@ export default function PlayView() {
   const reset = usePlayViewStore((s) => s.reset);
 
   const [speedOpen, setSpeedOpen] = useState(false);
+  const [speedAnim] = useState(() => new Animated.Value(0));
+  const [panelLayout, setPanelLayout] = useState({ top: 0, left: 0 });
 
+  const scoreAreaRef = useRef<View>(null);
+  const speedTriggerRef = useRef<View>(null);
+  const toolbarRef = useRef<View>(null);
   const webViewRef = useRef<WebView>(null);
   // Refs so the message handler and multiplier handler always see the latest values
   // without recreating callbacks on every state change.
@@ -67,6 +73,33 @@ export default function PlayView() {
   }, [tempoMultiplier]);
 
   useEffect(() => () => reset(), [reset]);
+
+  const toggleSpeed = useCallback(() => {
+    const opening = !speedOpen;
+    if (opening) {
+      if (isPlaying) {
+        webViewRef.current?.injectJavaScript('window.__rn_pause();void 0;');
+      }
+      speedTriggerRef.current?.measureLayout(
+        scoreAreaRef.current as never,
+        (_tx, ty, _tw, th) => {
+          toolbarRef.current?.measureLayout(
+            scoreAreaRef.current as never,
+            (_bx, _by, bw) => setPanelLayout({ top: ty + th / 2 - 22, left: bw }),
+            () => {},
+          );
+        },
+        () => {},
+      );
+    }
+    setSpeedOpen(opening);
+    Animated.spring(speedAnim, {
+      toValue: opening ? 1 : 0,
+      useNativeDriver: false,
+      bounciness: 4,
+      speed: 18,
+    }).start();
+  }, [speedOpen, speedAnim, isPlaying]);
 
   const sendXml = useCallback(async () => {
     if (!piece) return;
@@ -138,11 +171,14 @@ export default function PlayView() {
 
   const handleMultiplierChange = useCallback(
     (m: TempoMultiplier) => {
+      if (isPlaying) {
+        webViewRef.current?.injectJavaScript('window.__rn_pause();void 0;');
+      }
       setTempoMultiplier(m);
       const bpm = Math.round(scoreBpmRef.current * m);
       webViewRef.current?.injectJavaScript(`window.__rn_set_tempo(${bpm});void 0;`);
     },
-    [setTempoMultiplier],
+    [setTempoMultiplier, isPlaying],
   );
 
   const handleLoopToggle = useCallback(() => {
@@ -171,7 +207,7 @@ export default function PlayView() {
   return (
     <SafeAreaView className="flex-1 bg-white">
       {/* Score area — WebView fills all space, toolbar floats over it */}
-      <View className="flex-1">
+      <View ref={scoreAreaRef} className="flex-1">
         {/* baseUrl required on Android for large inline HTML; allowUniversalAccessFromFileURLs
             lets the file:// origin fetch HTTPS audio samples — see compound-docs */}
         <WebView
@@ -187,86 +223,124 @@ export default function PlayView() {
           style={{ flex: 1 }}
         />
 
-        {/* Vertical toolbar — left-side overlay, visible once score is fully loaded */}
+        {/* Toolbar — vertically centered, left-side overlay */}
         {scoreReady && (
           <View
-            className="absolute left-0 bg-white/90 rounded-r-xl py-3 px-2 items-center gap-4"
             style={{
-              top: 16,
-              elevation: 4,
-              shadowColor: '#000',
-              shadowOpacity: 0.12,
-              shadowRadius: 6,
-              shadowOffset: { width: 2, height: 0 },
+              position: 'absolute',
+              left: 0,
+              top: 0,
+              bottom: 0,
+              justifyContent: 'center',
             }}
           >
-            {/* Back */}
-            <TouchableOpacity onPress={() => router.back()} hitSlop={12} className="p-1">
-              <AppIcon path={mdiArrowLeft} size={24} color="#374151" />
-            </TouchableOpacity>
+            <View
+              ref={toolbarRef}
+              className="bg-white/90 rounded-r-xl py-3 px-2 items-center gap-4"
+              style={{
+                elevation: 4,
+                shadowColor: '#000',
+                shadowOpacity: 0.12,
+                shadowRadius: 6,
+                shadowOffset: { width: 2, height: 0 },
+              }}
+            >
+              {/* Back */}
+              <TouchableOpacity onPress={() => router.back()} hitSlop={12} className="p-1">
+                <AppIcon path={mdiArrowLeft} size={24} color="#374151" />
+              </TouchableOpacity>
 
-            {/* Loop select / clear */}
-            <TouchableOpacity onPress={handleLoopToggle} hitSlop={8} className="p-1.5">
-              <AppIcon
-                path={loopActive ? mdiClose : mdiRepeat}
-                size={26}
-                color={loopActive ? '#9C6B8A' : '#374151'}
-              />
-            </TouchableOpacity>
-
-            {/* Play / Pause */}
-            <TouchableOpacity onPress={handlePlayPause} hitSlop={8} className="p-1">
-              <AppIcon path={isPlaying ? mdiPause : mdiPlay} size={36} color="#4B7A6E" />
-            </TouchableOpacity>
-
-            {/* Metronome toggle */}
-            <TouchableOpacity onPress={handleMetronomeToggle} hitSlop={8} className="p-1.5">
-              <AppIcon path={mdiMetronome} size={26} color={metronomeOn ? '#4B7A6E' : '#374151'} />
-            </TouchableOpacity>
-
-            {/* Speed selector — expanding */}
-            <View className="items-center">
-              <TouchableOpacity
-                onPress={() => setSpeedOpen(!speedOpen)}
-                hitSlop={8}
-                className="flex-row items-center gap-0.5 px-1.5 py-1"
-              >
-                <Text className="text-xs font-semibold text-gray-600">
-                  {MULTIPLIER_LABEL[tempoMultiplier]}
-                </Text>
+              {/* Loop select / clear */}
+              <TouchableOpacity onPress={handleLoopToggle} hitSlop={8} className="p-1.5">
                 <AppIcon
-                  path={speedOpen ? mdiChevronUp : mdiChevronDown}
-                  size={14}
-                  color="#9CA3AF"
+                  path={loopActive ? mdiClose : mdiRepeat}
+                  size={26}
+                  color={loopActive ? '#9C6B8A' : '#374151'}
                 />
               </TouchableOpacity>
-              {speedOpen && (
-                <View className="flex-col border border-gray-200 rounded-lg overflow-hidden mt-0.5">
-                  {TEMPO_MULTIPLIERS.map((m) => {
-                    const isActive = tempoMultiplier === m;
-                    return (
-                      <TouchableOpacity
-                        key={m}
-                        onPress={() => {
-                          handleMultiplierChange(m);
-                          setSpeedOpen(false);
-                        }}
-                        className={`px-2 py-1.5 ${isActive ? 'bg-seagrass-600' : 'bg-white'}`}
-                      >
-                        <Text
-                          className={`text-xs font-semibold ${isActive ? 'text-white' : 'text-gray-600'}`}
-                        >
-                          {MULTIPLIER_LABEL[m]}
-                        </Text>
-                      </TouchableOpacity>
-                    );
-                  })}
-                </View>
-              )}
-              <Text className="text-xs text-gray-400 mt-0.5">{effectiveBpm} BPM</Text>
+
+              {/* Play / Pause */}
+              <TouchableOpacity onPress={handlePlayPause} hitSlop={8} className="p-1">
+                <AppIcon path={isPlaying ? mdiPause : mdiPlay} size={36} color="#4B7A6E" />
+              </TouchableOpacity>
+
+              {/* Metronome toggle */}
+              <TouchableOpacity onPress={handleMetronomeToggle} hitSlop={8} className="p-1.5">
+                <AppIcon
+                  path={mdiMetronome}
+                  size={26}
+                  color={metronomeOn ? '#4B7A6E' : '#374151'}
+                />
+              </TouchableOpacity>
+
+              {/* Speed trigger — icon when open, current speed label when closed */}
+              <View ref={speedTriggerRef}>
+                <TouchableOpacity
+                  onPress={toggleSpeed}
+                  hitSlop={8}
+                  className="items-center px-2 py-1"
+                >
+                  {speedOpen ? (
+                    <AppIcon path={mdiSpeedometer} size={22} color="#4B7A6E" />
+                  ) : (
+                    <Text className="text-xs font-semibold text-gray-700">
+                      {MULTIPLIER_LABEL[tempoMultiplier]}
+                    </Text>
+                  )}
+                  <Text className="text-[9px] text-gray-400 mt-0.5">{effectiveBpm} BPM</Text>
+                </TouchableOpacity>
+              </View>
             </View>
           </View>
         )}
+
+        {/* Speed panel — overlays the score, anchored to the speed trigger position */}
+        <Animated.View
+          pointerEvents={speedOpen ? 'auto' : 'none'}
+          style={{
+            position: 'absolute',
+            top: panelLayout.top,
+            left: panelLayout.left,
+            width: speedAnim.interpolate({
+              inputRange: [0, 1],
+              outputRange: [0, SPEED_PANEL_WIDTH],
+            }),
+            overflow: 'hidden',
+            flexDirection: 'row',
+            backgroundColor: 'rgba(255,255,255,0.92)',
+            borderRadius: 10,
+            elevation: 4,
+            shadowColor: '#000',
+            shadowOpacity: 0.12,
+            shadowRadius: 6,
+            shadowOffset: { width: 2, height: 0 },
+          }}
+        >
+          {TEMPO_MULTIPLIERS.map((m) => {
+            const isActive = tempoMultiplier === m;
+            return (
+              <TouchableOpacity
+                key={m}
+                onPress={() => {
+                  handleMultiplierChange(m);
+                  toggleSpeed();
+                }}
+                hitSlop={4}
+                style={{ width: 44, height: 44, alignItems: 'center', justifyContent: 'center' }}
+              >
+                <Text
+                  style={{
+                    fontSize: 11,
+                    fontWeight: '600',
+                    color: isActive ? '#4B7A6E' : '#9CA3AF',
+                  }}
+                >
+                  {MULTIPLIER_LABEL[m]}
+                </Text>
+              </TouchableOpacity>
+            );
+          })}
+        </Animated.View>
 
         {/* Overlay: WebView not yet loaded */}
         {!webViewReady && !scoreError && (

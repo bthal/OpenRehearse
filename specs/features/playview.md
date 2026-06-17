@@ -52,16 +52,17 @@ The entire piece is rendered in a **single horizontal line** — all measures la
 
 ## Toolbar
 
-- Positioned **vertically on the left side** of the PlayView screen, overlaid on the score —
-  no separate header row.
+- Positioned **vertically on the left side** of the PlayView screen, **vertically centered**,
+  overlaid on the score — no separate header row.
 - Controls (top to bottom):
   - **Back button** — navigates back to the Dashboard.
   - **Loop button** (icon: loop-icon when inactive; × when active)
   - **Play / Pause**
   - **Metronome toggle** — when enabled, clicks every quarter note; first beat of each measure
     accented (higher pitch, louder). Works for any time signature.
-  - **Speed selector** — expanding picker: collapses to active label + chevron; expands on tap
-    to show ×0.5 / ×0.75 / ×1.0; effective BPM shown below.
+  - **Speed selector** — collapses to current speed label + effective BPM; tapping shows a
+    speedometer icon and **pauses playback**; expands a horizontal spring-animated panel over
+    the score with ×0.5 / ×0.75 / ×1.0 text buttons. Selecting a speed closes the panel.
 
 ## State (Zustand)
 
@@ -90,7 +91,8 @@ Slices: `activePieceId`, `webViewReady`, `isLoadingScore`, `scoreError`, `isPlay
 - [x] Dragging a handle auto-scrolls the view to keep the active handle visible. *(Phase 4)*
 - [x] Playback wraps from B to A with immediate jump. *(Phase 4)*
 - [x] No separate title/composer header; back button lives at the top of the toolbar. *(Phase 5)*
-- [x] Speed picker collapses to active label; expands on tap; closes after selection. *(Phase 5)*
+- [x] Speed picker collapses to active label; tapping pauses playback and expands a horizontal
+  animated overlay; closes after selection. *(Phase 5)*
 - [x] Metronome toggle present; clicks every quarter note; first-beat accent correct for any
   time signature. *(Phase 5)*
 - [ ] Works **offline** once the piece is loaded from local storage. *(Phase 2)*
