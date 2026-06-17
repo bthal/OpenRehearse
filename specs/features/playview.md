@@ -18,6 +18,7 @@ The entire piece is rendered in a **single horizontal line** — all measures la
 - During playback the score scrolls horizontally so the cursor stays at the correct position.
 - **Manual horizontal scroll**: the score moves with the finger; vertical scroll is not possible.
   - Manual scroll **stops playback**.
+  - After lifting the finger, the score **decelerates with momentum** before stopping.
   - The cursor stays centered and corresponds to the scrolled-to position in the piece.
   - On next **play**: if no loop is set, playback resumes from the cursor's current position; if a loop is set, the cursor smoothly scrolls to the loop start and playback begins from there.
 
@@ -81,7 +82,10 @@ Slices: `activePieceId`, `webViewReady`, `isLoadingScore`, `scoreError`, `isPlay
 - [x] Score renders in one-line mode (single horizontal system; cursor pinned to center). *(Phase 4)*
 - [x] Manual horizontal scroll pauses playback; play resumes from scrolled position, or from loop start if a loop is active. *(Phase 4)*
 - [x] Toolbar renders vertically on the left. *(Phase 4)*
-- [x] Tapping loop button creates loop at cursor with fixed pixel span (`LOOP_DEFAULT_PX`); tapping again (× icon) removes it. *(Phase 4)*
+- [x] Tapping loop button creates loop at cursor with fixed pixel span (`LOOP_DEFAULT_PX`);
+  also pauses playback if running. Tapping again (× icon) removes it. *(Phase 4/5)*
+- [x] Manual scroll has momentum: score decelerates after lift; `MOMENTUM_DECELERATION`
+  constant in `playback.ts` controls glide length. *(Phase 5)*
 - [x] Loop handles are continuously draggable; A/B minimum gap (`LOOP_MIN_GAP_PX`) enforced. *(Phase 4)*
 - [x] Dragging a handle auto-scrolls the view to keep the active handle visible. *(Phase 4)*
 - [x] Playback wraps from B to A with immediate jump. *(Phase 4)*

@@ -457,3 +457,60 @@ const isDownbeat = downbeatTicks.has(nearestBeat);
 ```
 
 Works for any time signature and handles mid-score changes automatically.
+
+## LANDMINE: scroll clamp must use `cursorSteps` extremes, not raw `scoreWidth`
+
+Clamping `translateX` to `[viewportWidth - scoreWidth, 0]` limits the score so its left edge
+reaches the screen left and its right edge reaches the screen right. But the cursor line is fixed
+at screen centre — at either boundary the cursor line sits over blank space, not a note.
+
+**Fix:** clamp to `[viewportWidth/2 - pxLast, viewportWidth/2 - px0]` where `px0` and `pxLast`
+are the pixel positions of the first and last cursor steps. Compute in `initPlayback` after
+`buildTimelines`:
+
+```typescript
+const px0    = cursorSteps[0]?.pxLeft ?? 0;
+const pxLast = cursorSteps[cursorSteps.length - 1]?.pxLeft ?? scoreWidth;
+scrollMaxPx  = viewportWidth / 2 - px0;    // first note centred
+scrollMinPx  = viewportWidth / 2 - pxLast; // last note centred
+```
+
+**Secondary LANDMINE (same root cause):** On load, `applyTranslate(viewportWidth/2 - px0)`
+sets a positive `translateX` (first note at centre). The old clamp's max of `0` was lower than
+this value, so any `touchmove` event — even a zero-delta tap — clamped the offset to `0` and
+snapped the score to the left edge. The corrected `scrollMaxPx` bound is always ≥ the initial
+translateX, so no snap occurs.
+
+## PATTERN: momentum scroll — EMA velocity + time-based exponential deceleration
+
+Track drag velocity in `touchmove` with an exponential moving average so brief direction
+reversals don't corrupt the end-of-drag velocity:
+
+```typescript
+const inst = (clientX - lastMoveX) / dt; // px/ms instantaneous
+velocityPx  = velocityPx * 0.7 + inst * 0.3; // EMA (α = 0.3)
+```
+
+On `touchend`, if `|velocityPx| > 0.05`, fire a RAF loop with time-based deceleration so the
+rate is frame-rate independent:
+
+```typescript
+const MOMENTUM_DECELERATION = 0.95; // per 16 ms — increase toward 1 for a longer glide
+
+function step(now: number): void {
+  const dt = Math.min(now - lastTime, 64); // cap: avoid jump after tab hide/show
+  lastTime = now;
+  velocity *= Math.pow(MOMENTUM_DECELERATION, dt / 16);
+  if (Math.abs(velocity) < 0.05) { syncCursorToCenter(); return; }
+  const next    = scrollOffsetPx + velocity * dt;
+  const clamped = clampTranslate(next);
+  applyTranslate(clamped);
+  if (clamped !== next) { syncCursorToCenter(); return; } // boundary hit
+  momentumFrameId = requestAnimationFrame(step);
+}
+```
+
+Cancel `momentumFrameId` on: new `touchstart` (user grabs again), `startPlayback` (RAF
+conflict), `_stopInternal`, and `disposePlayback`. Call `syncCursorToCenter()` whenever
+momentum stops — naturally, at boundary, or on cancel — to keep `currentCursorStep` and
+`Tone.Transport.ticks` in sync with the resting scroll position.

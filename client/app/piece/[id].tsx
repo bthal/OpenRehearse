@@ -278,7 +278,7 @@ export default function PlayView() {
 
         {/* Overlay: XML sent, OSMD rendering */}
         {isLoadingScore && (
-          <View className="absolute inset-0 items-center justify-center bg-white/80">
+          <View className="absolute inset-0 items-center justify-center bg-white">
             <ActivityIndicator size="large" color="#4B7A6E" />
             <Text className="mt-3 text-sm text-gray-500">Loading score…</Text>
           </View>

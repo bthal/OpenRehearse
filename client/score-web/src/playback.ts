@@ -43,6 +43,8 @@ const SALAMANDER_BASE_URL = 'https://tonejs.github.io/audio/salamander/';
 const LOOP_MIN_GAP_PX = 40;
 const LOOP_DEFAULT_PX = 200;
 const EDGE_ZONE = 60;
+// Momentum scroll: fraction of velocity retained per 16 ms frame (increase toward 1 for longer glide).
+const MOMENTUM_DECELERATION = 0.95;
 
 interface NoteEvent {
   time: string;
@@ -86,6 +88,9 @@ let shadeEl: HTMLElement | null = null;
 let scrollOffsetPx = 0;
 let scoreWidth = 0;
 let viewportWidth = 0;
+let scrollMinPx = 0; // translateX that puts the last note at center
+let scrollMaxPx = 0; // translateX that puts the first note at center
+let momentumFrameId: number | null = null;
 let touchHandlersAttached = false;
 let loopRegion: LoopRegion | null = null;
 
@@ -158,7 +163,7 @@ function buildTimelines(osmd: OpenSheetMusicDisplay): {
 // ─── Score translation ────────────────────────────────────────────────────────
 
 function clampTranslate(px: number): number {
-  return Math.max(viewportWidth - scoreWidth, Math.min(0, px));
+  return Math.max(scrollMinPx, Math.min(scrollMaxPx, px));
 }
 
 function applyTranslate(px: number): void {
@@ -281,6 +286,10 @@ function _stopInternal(): void {
     cancelAnimationFrame(animFrameId);
     animFrameId = null;
   }
+  if (momentumFrameId !== null) {
+    cancelAnimationFrame(momentumFrameId);
+    momentumFrameId = null;
+  }
   // Reset OSMD cursor and score to position 0.
   if (osmdRef) {
     osmdRef.cursor.reset();
@@ -295,6 +304,46 @@ function _stopInternal(): void {
 
 // ─── Touch: manual score pan ──────────────────────────────────────────────────
 
+function syncCursorToCenter(): void {
+  const centerInScore = viewportWidth / 2 - scrollOffsetPx;
+  const step = nearestStepToPx(centerInScore);
+  currentCursorStep = step;
+  Tone.Transport.ticks = Math.round((cursorSteps[step]?.quarters ?? 0) * TONE_PPQ);
+  const el = cursorEl();
+  if (el) el.style.left = `${cursorSteps[step]?.pxLeft ?? 0}px`;
+}
+
+function startMomentum(initialVelocity: number): void {
+  if (momentumFrameId !== null) {
+    cancelAnimationFrame(momentumFrameId);
+    momentumFrameId = null;
+  }
+  let velocity = initialVelocity;
+  let lastTime = performance.now();
+
+  function step(now: number): void {
+    const dt = Math.min(now - lastTime, 64); // cap to avoid jump after tab-hide
+    lastTime = now;
+    velocity *= Math.pow(MOMENTUM_DECELERATION, dt / 16);
+    if (Math.abs(velocity) < 0.05) {
+      momentumFrameId = null;
+      syncCursorToCenter();
+      return;
+    }
+    const next = scrollOffsetPx + velocity * dt;
+    const clamped = clampTranslate(next);
+    applyTranslate(clamped);
+    if (clamped !== next) {
+      momentumFrameId = null;
+      syncCursorToCenter();
+      return;
+    }
+    momentumFrameId = requestAnimationFrame(step);
+  }
+
+  momentumFrameId = requestAnimationFrame(step);
+}
+
 function initTouchHandlers(): void {
   if (touchHandlersAttached) return;
   touchHandlersAttached = true;
@@ -305,32 +354,48 @@ function initTouchHandlers(): void {
   let startX = 0;
   let startOffset = 0;
   let dragging = false;
+  let velocityPx = 0; // px/ms, exponential moving average
+  let lastMoveTime = 0;
+  let lastMoveX = 0;
 
   wrapper.addEventListener('touchstart', (e) => {
     if ((e.target as Element).closest('.loop-handle')) return;
+    if (momentumFrameId !== null) {
+      cancelAnimationFrame(momentumFrameId);
+      momentumFrameId = null;
+    }
     dragging = true;
-    startX = e.touches[0]?.clientX ?? 0;
+    const clientX = e.touches[0]?.clientX ?? 0;
+    startX = clientX;
     startOffset = scrollOffsetPx;
+    velocityPx = 0;
+    lastMoveTime = 0;
+    lastMoveX = clientX;
     if (Tone.Transport.state === 'started') pausePlayback();
   }, { passive: true });
 
   wrapper.addEventListener('touchmove', (e) => {
     if (!dragging) return;
-    const dx = (e.touches[0]?.clientX ?? 0) - startX;
-    applyTranslate(clampTranslate(startOffset + dx));
+    const now = performance.now();
+    const clientX = e.touches[0]?.clientX ?? 0;
+    if (lastMoveTime > 0 && now > lastMoveTime) {
+      const dt = now - lastMoveTime;
+      const inst = (clientX - lastMoveX) / dt;
+      velocityPx = velocityPx * 0.7 + inst * 0.3; // exponential smoothing
+    }
+    lastMoveTime = now;
+    lastMoveX = clientX;
+    applyTranslate(clampTranslate(startOffset + (clientX - startX)));
   }, { passive: true });
 
   wrapper.addEventListener('touchend', () => {
     if (!dragging) return;
     dragging = false;
-    // Update cursor step and Transport position to the score position now at center.
-    const centerInScore = viewportWidth / 2 - scrollOffsetPx;
-    const step = nearestStepToPx(centerInScore);
-    currentCursorStep = step;
-    Tone.Transport.ticks = Math.round((cursorSteps[step]?.quarters ?? 0) * TONE_PPQ);
-    // Move OSMD cursor element to match.
-    const el = cursorEl();
-    if (el) el.style.left = `${cursorSteps[step]?.pxLeft ?? 0}px`;
+    if (Math.abs(velocityPx) > 0.05) {
+      startMomentum(velocityPx);
+    } else {
+      syncCursorToCenter();
+    }
   }, { passive: true });
 }
 
@@ -418,6 +483,7 @@ function createLoop(): void {
   if (shadeEl) shadeEl.style.display = 'block';
   updateLoopOverlay();
   postToNative({ type: 'LOOP_STATE', payload: true });
+  if (Tone.Transport.state === 'started') pausePlayback();
 }
 
 function clearLoop(): void {
@@ -526,11 +592,16 @@ export function initPlayback(osmd: OpenSheetMusicDisplay): void {
   osmd.cursor.reset();
   currentCursorStep = 0;
 
-  // Snap score to position 0 at center.
+  // Clamp bounds: first note centered at max, last note centered at min.
   const px0 = cursorSteps[0]?.pxLeft ?? 0;
+  const pxLast = cursorSteps[cursorSteps.length - 1]?.pxLeft ?? scoreWidth;
+  scrollMaxPx = viewportWidth / 2 - px0;
+  scrollMinPx = viewportWidth / 2 - pxLast;
+
+  // Snap score to position 0 at center.
   const el = cursorEl();
   if (el) el.style.left = `${px0}px`;
-  applyTranslate(viewportWidth / 2 - px0);
+  applyTranslate(scrollMaxPx);
 
   Tone.Transport.bpm.value = scoreBpm;
   postToNative({ type: 'SCORE_BPM', payload: scoreBpm });
@@ -563,6 +634,10 @@ export function initPlayback(osmd: OpenSheetMusicDisplay): void {
 
 export async function startPlayback(): Promise<void> {
   if (!sampler || !part) return;
+  if (momentumFrameId !== null) {
+    cancelAnimationFrame(momentumFrameId);
+    momentumFrameId = null;
+  }
 
   // If a loop is active and transport is outside [aTicks, bTicks], seek to A.
   if (loopRegion) {
@@ -612,6 +687,10 @@ export function disposePlayback(): void {
     cancelAnimationFrame(animFrameId);
     animFrameId = null;
   }
+  if (momentumFrameId !== null) {
+    cancelAnimationFrame(momentumFrameId);
+    momentumFrameId = null;
+  }
   if (Tone.Transport.state !== 'stopped') Tone.Transport.stop();
   part?.dispose();
   part = null;
@@ -627,4 +706,6 @@ export function disposePlayback(): void {
   totalQuarters = 0;
   loopRegion = null;
   Tone.Transport.loop = false;
+  scrollMinPx = 0;
+  scrollMaxPx = 0;
 }
