@@ -66,7 +66,7 @@ git commit -m "feat(playview): add BPM stepper" \
 
 ## Non-negotiables (from `AGENTS.md`)
 
-- MusicXML: **uncompressed `.xml`, 2.x–4.x** — reject `.mxl` and non-XML formats explicitly
+- MusicXML: **`.xml` (uncompressed) and `.mxl` (compressed), 2.x–4.x** — reject other formats explicitly
 - Scores: **local device only** in MVP — never upload MusicXML to any server
 - Loops: **one active loop**; handles **continuously draggable**; **immediate jump** at wrap
 - Cursor: **OSMD standard cursor**, **smooth continuous movement** — prefer OSMD APIs over custom overlays

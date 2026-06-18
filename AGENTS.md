@@ -64,7 +64,7 @@ Use the **commit** Cursor command (`.cursor/commands/commit.md`) for a guided pa
 
 ## Non-negotiables from specs
 
-- **MusicXML**: uncompressed **`.xml`**, **2.x–4.x**; reject other formats clearly.
+- **MusicXML**: **`.xml`** (uncompressed) and **`.mxl`** (compressed); both **2.x–4.x**; reject other formats clearly.
 - **Scores**: **local device only** in MVP — **do not** upload MusicXML to any server.
 - **Loops**: **one** active loop; handles **continuously draggable**; **immediate jump** at wrap.
 - **Cursor**: **OSMD standard cursor**, **smooth continuous movement** — prefer OSMD APIs over custom overlays.

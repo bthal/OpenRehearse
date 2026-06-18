@@ -2,13 +2,14 @@
 
 ## Goal
 
-Let users add **pieces** from **uncompressed MusicXML 2.x–4.x** files.
+Let users add **pieces** from **MusicXML 2.x–4.x** files, both uncompressed (`.xml`) and compressed (`.mxl`).
 
 ## Accepted format
 
-- **Extension**: `.xml` (uncompressed).
-- **Rejected** with explicit messaging: `.mxl`, `.musicxml`, `.mid`, PDF, images, compressed archives.
+- **Extensions**: `.xml` (uncompressed) and `.mxl` (compressed MusicXML / ZIP).
+- **Rejected** with explicit messaging: `.musicxml`, `.mid`, PDF, images, and other archives.
 - **Version**: **MusicXML 2.x–4.x** — if parser cannot confirm a supported version, reject with a clear error.
+- **MXL decompression**: `.mxl` archives are decompressed on-device before validation; the extracted XML goes through the same pipeline as `.xml` files.
 
 ## Flow
 
@@ -32,7 +33,7 @@ Let users add **pieces** from **uncompressed MusicXML 2.x–4.x** files.
 
 ## Acceptance criteria
 
-- [ ] Only `.xml` MusicXML 2.x–4.x is advertised in UI copy.
+- [ ] Both `.xml` and `.mxl` MusicXML 2.x–4.x files can be imported.
 - [ ] Invalid inputs never corrupt the local piece index.
 - [ ] Imported piece is available offline immediately after import.
 - [ ] Title (and composer if present) are scraped and stored on import.

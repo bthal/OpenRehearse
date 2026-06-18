@@ -147,20 +147,59 @@ Type '"/piece/[id]"' is not assignable to type '"/" | "/_sitemap"'
 
 **Fix for development:** Disable `typedRoutes` in `app.json` until the route structure stabilises, then re-enable and run `expo start` once to regenerate. If you keep it enabled, delete `.expo/types/router.d.ts` after adding new routes and let Metro regenerate it on next start.
 
-### Test MusicXML files: .mxl → .xml extraction
+### Test MusicXML files: push .mxl directly (both formats now accepted)
 
-MuseScore and most repositories distribute scores as `.mxl` (compressed MusicXML — a ZIP containing the `.xml`). The app only accepts uncompressed `.xml`. To extract:
+The app accepts both `.mxl` (compressed MusicXML) and `.xml` (uncompressed). Push either format to device:
+
+```bash
+~/Library/Android/sdk/platform-tools/adb push test-mxls/*.mxl /sdcard/Download/
+~/Library/Android/sdk/platform-tools/adb push test-mxls/*.xml  /sdcard/Download/
+```
+
+If you need the uncompressed XML for other tooling, extract with:
 
 ```bash
 for f in test-mxls/*.mxl; do
   dir="${f%.mxl}_tmp" && mkdir -p "$dir" && unzip -o "$f" -d "$dir" > /dev/null
-  rootfile=$(grep -o 'full-path="[^"]*\.xml"' "$dir/META-INF/container.xml" | head -1 | sed 's/full-path="//;s/"//')
+  rootfile=$(grep -o 'full-path="[^"]*\.xml"' "$dir/META-INF/container.xml" | head -1 \
+    | sed 's/full-path="//;s/"//')
   cp "$dir/$rootfile" "${f%.mxl}.xml" && rm -rf "$dir"
 done
 ```
 
-Push to a connected Android device for testing:
+### `Buffer` is not available in Hermes / React Native
 
-```bash
-~/Library/Android/sdk/platform-tools/adb push test-mxls/*.xml /sdcard/Download/
+**LANDMINE:** Node's `Buffer` global does not exist in the Hermes JS engine:
+
+```
+ReferenceError: Property 'Buffer' doesn't exist
+```
+
+**Fix:** Use the globally available `atob` / `btoa` for base64, and `TextDecoder` / `TextEncoder` for string↔bytes:
+
+```ts
+function base64ToBytes(b64: string): Uint8Array {
+  const bin = atob(b64);
+  const out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return out;
+}
+
+// bytes → UTF-8 string
+new TextDecoder('utf-8').decode(bytes);
+```
+
+Both `atob` and `TextDecoder` are available in RN ≥ 0.73 / Hermes. They are NOT available in Node.js < 18, so test files that call these helpers need a polyfill: `global.atob = (b64) => Buffer.from(b64, 'base64').toString('binary')`.
+
+### Android SAF may strip or change the file extension in `asset.name`
+
+**LANDMINE:** `expo-document-picker` on Android returns `asset.name` from the SAF display name, which can omit the extension or use a different one for MIME types the device doesn't recognise (e.g. `.mxl` files may come back named without an extension, or with `.zip`).
+
+**Fix:** Do not rely solely on `asset.name.endsWith('.mxl')` for binary format detection. Check the file's magic bytes after copying to a temp path. ZIP files (including `.mxl`) start with `PK\x03\x04` (bytes `50 4B 03 04`):
+
+```ts
+function isZip(base64: string): boolean {
+  const head = base64ToBytes(base64.slice(0, 8));
+  return head[0] === 0x50 && head[1] === 0x4b && head[2] === 0x03 && head[3] === 0x04;
+}
 ```

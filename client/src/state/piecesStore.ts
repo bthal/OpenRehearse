@@ -9,7 +9,7 @@ import { pieceRepository } from '@data/index';
 function errorMessage(code: ReturnType<typeof validateMusicXml>): string {
   switch (code) {
     case 'NOT_XML':
-      return "This file isn't valid XML. Only uncompressed MusicXML (.xml) files are supported.";
+      return "This file isn't valid XML. Only MusicXML (.xml) or compressed MusicXML (.mxl) files are supported.";
     case 'NOT_MUSICXML':
       return "This XML file doesn't appear to be MusicXML. Make sure you're importing a MusicXML score file.";
     case 'UNSUPPORTED_VERSION':

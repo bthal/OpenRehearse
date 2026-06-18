@@ -36,7 +36,7 @@ export default function Dashboard() {
     try {
       const file = await pickXmlFile();
       if (!file) return;
-      const fallbackTitle = file.name.replace(/\.xml$/i, '');
+      const fallbackTitle = file.name.replace(/\.(xml|mxl)$/i, '');
       await importPiece(file, fallbackTitle);
     } catch (err) {
       console.error('[handleImport] unexpected error:', err);
