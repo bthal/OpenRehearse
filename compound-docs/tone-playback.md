@@ -481,6 +481,36 @@ this value, so any `touchmove` event — even a zero-delta tap — clamped the o
 snapped the score to the left edge. The corrected `scrollMaxPx` bound is always ≥ the initial
 translateX, so no snap occurs.
 
+## Fermata: expand the tick timeline, don't just extend the note duration
+
+**LANDMINE:** Extending `durQ` for a fermata note makes it sound longer, but the next note
+is still scheduled at the original tick. The sustained tail is masked — the listener hears
+the next note as "too early", not a held fermata.
+
+**Fix:** Track a `tickShift` accumulator. After each fermata position, add
+`round(normalDurQ * (FERMATA_MULTIPLIER - 1) * PPQ)` to `tickShift`. All subsequent note
+events and cursor steps use `expandedQuarters = quarters + tickShift / PPQ` so the next
+note only fires after the fermata expires.
+
+Insert a **hold step** (same `pxLeft`, same `osmdIdx` as the fermata step) at
+`expandedQ + normalDurQ * MULTIPLIER - epsilon` so the cursor stays on the fermata note
+during the hold. `advanceCursorTo` uses `CursorStep.osmdIdx` — not the array index — to
+decide how many `cursor.next()` calls to make; hold steps share the preceding `osmdIdx` and
+cause zero extra OSMD cursor advances.
+
+**Detection:** `note.ParentVoiceEntry.Articulations` contains `Articulation` objects;
+check `a.articulationEnum === ArticulationEnum.fermata` (10) or `invertedfermata` (11).
+Both `ArticulationEnum` and `ArpeggioType` must be **value imports** (not `import type`)
+from `opensheetmusicdisplay` since the enum members are needed at runtime.
+
+## Arpeggio chord rolling: group by `VoiceEntry.Arpeggio`, stagger by `ArpeggioType`
+
+**PATTERN:** `note.ParentVoiceEntry.Arpeggio` returns the chord's `Arpeggio` object.
+Notes in the same voice entry share the same object reference — use it as a `Map` key.
+Sort the group ascending (UP / directionless) or descending (DOWN types) by `halfTone`,
+then schedule each note at `baseTicks + i * ARPEGGIO_STEP_TICKS`. Six ticks (~15 ms at
+120 BPM) per step produces a perceptible roll without audibly delaying the chord.
+
 ## PATTERN: momentum scroll — EMA velocity + time-based exponential deceleration
 
 Track drag velocity in `touchmove` with an exponential moving average so brief direction

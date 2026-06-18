@@ -1,5 +1,6 @@
 import * as Tone from 'tone';
 import type { OpenSheetMusicDisplay } from 'opensheetmusicdisplay';
+import { ArpeggioType, ArticulationEnum } from 'opensheetmusicdisplay';
 import type { OutboundMessage } from './types';
 
 // Matches Tone.js default PPQ; must stay in sync with Tone.Transport.PPQ.
@@ -45,6 +46,10 @@ const LOOP_DEFAULT_PX = 200;
 const EDGE_ZONE = 60;
 // Momentum scroll: fraction of velocity retained per 16 ms frame (increase toward 1 for longer glide).
 const MOMENTUM_DECELERATION = 0.95;
+// Fermata notes are held 1.75× their written duration.
+const FERMATA_DURATION_MULTIPLIER = 1.75;
+// Ticks between successive notes in an arpeggio roll (~15 ms at 120 BPM with PPQ=192).
+const ARPEGGIO_STEP_TICKS = 6;
 
 interface NoteEvent {
   time: string;
@@ -53,8 +58,9 @@ interface NoteEvent {
 }
 
 interface CursorStep {
-  quarters: number;
+  quarters: number; // expanded time (fermata hold adds extra quarters)
   pxLeft: number; // exact value of cursorElement.style.left at this step
+  osmdIdx: number; // how many cursor.next() calls from start to reach this OSMD position
 }
 
 interface LoopRegion {
@@ -118,42 +124,127 @@ function buildTimelines(osmd: OpenSheetMusicDisplay): {
   const scoreBpm = rawBpm > 0 && rawBpm < 400 ? rawBpm : 120;
 
   const WHOLE_TO_QUARTER = 4;
-  let lastQuarters = 0;
+  let lastExpandedQuarters = 0;
   let lastMeasure: unknown = null;
+  // Extra ticks accumulated from fermata hold expansions. All note events and
+  // cursor steps after a fermata are shifted right by this amount so that the
+  // next note only starts after the fermata has fully sounded.
+  let tickShift = 0;
+  let osmdIdx = 0; // cursor.next() call count — shared by hold steps at the same position
   downbeatTicks = new Set();
 
   while (!osmd.cursor.Iterator.EndReached) {
     const quarters = osmd.cursor.Iterator.CurrentEnrolledTimestamp.RealValue * WHOLE_TO_QUARTER;
-    lastQuarters = quarters;
+    const expandedQuarters = quarters + tickShift / TONE_PPQ;
+    lastExpandedQuarters = expandedQuarters;
 
     const measure = osmd.cursor.Iterator.CurrentMeasure as unknown;
     if (measure !== lastMeasure) {
       lastMeasure = measure;
-      downbeatTicks.add(Math.round(quarters * TONE_PPQ));
+      downbeatTicks.add(Math.round(expandedQuarters * TONE_PPQ));
     }
     // Use style.left (exact value OSMD sets) rather than offsetLeft (integer, may round).
     const pxLeft = parseFloat(el?.style.left ?? '0');
-    steps.push({ quarters, pxLeft });
+    steps.push({ quarters: expandedQuarters, pxLeft, osmdIdx });
+
+    // Extra ticks to insert after this position due to a fermata at this step.
+    let fermataExtraTicks = 0;
+    let fermataMaxNormalDurQ = 0;
 
     try {
       const notes = osmd.cursor.NotesUnderCursor();
+      const baseTicks = Math.round(expandedQuarters * TONE_PPQ);
+
+      // Separate notes into plain vs. arpeggio groups (keyed by the shared Arpeggio object).
+      type OsmdNote = (typeof notes)[number];
+      const arpMap = new Map<object, OsmdNote[]>();
+      const plainNotes: OsmdNote[] = [];
+
       for (const note of notes) {
         if (note.isRest() || note.IsGraceNote) continue;
         if (note.NoteTie && note.NoteTie.StartNote !== note) continue;
-        const midi = note.halfTone;
-        if (midi <= 0 || midi > 127) continue;
-        const durQ = note.Length.RealValue * WHOLE_TO_QUARTER;
+        if (note.halfTone <= 0 || note.halfTone > 127) continue;
+        const arp = note.ParentVoiceEntry.Arpeggio;
+        if (arp) {
+          const group = arpMap.get(arp);
+          if (group) group.push(note);
+          else arpMap.set(arp, [note]);
+        } else {
+          plainNotes.push(note);
+        }
+      }
+
+      for (const note of plainNotes) {
+        const hasFermata = note.ParentVoiceEntry.Articulations.some(
+          (a) =>
+            a.articulationEnum === ArticulationEnum.fermata ||
+            a.articulationEnum === ArticulationEnum.invertedfermata,
+        );
+        const normalDurQ = note.Length.RealValue * WHOLE_TO_QUARTER;
+        const durQ = normalDurQ * (hasFermata ? FERMATA_DURATION_MULTIPLIER : 1);
         if (durQ <= 0) continue;
-        noteEvents.push({ time: `${Math.round(quarters * TONE_PPQ)}i`, midi, durQ });
+        noteEvents.push({ time: `${baseTicks}i`, midi: note.halfTone, durQ });
+        if (hasFermata) {
+          const extra = Math.round(normalDurQ * (FERMATA_DURATION_MULTIPLIER - 1) * TONE_PPQ);
+          if (extra > fermataExtraTicks) {
+            fermataExtraTicks = extra;
+            fermataMaxNormalDurQ = normalDurQ;
+          }
+        }
+      }
+
+      for (const [arpObj, arpNotes] of arpMap) {
+        const arp = arpObj as { type?: number };
+        const descending =
+          arp.type === ArpeggioType.BRUSH_DOWN ||
+          arp.type === ArpeggioType.ROLL_DOWN ||
+          arp.type === ArpeggioType.RASQUEDO_DOWN;
+        const sorted = [...arpNotes].sort((a, b) =>
+          descending ? b.halfTone - a.halfTone : a.halfTone - b.halfTone,
+        );
+        sorted.forEach((note, i) => {
+          const hasFermata = note.ParentVoiceEntry.Articulations.some(
+            (a) =>
+              a.articulationEnum === ArticulationEnum.fermata ||
+              a.articulationEnum === ArticulationEnum.invertedfermata,
+          );
+          const normalDurQ = note.Length.RealValue * WHOLE_TO_QUARTER;
+          const durQ = normalDurQ * (hasFermata ? FERMATA_DURATION_MULTIPLIER : 1);
+          if (durQ <= 0) return;
+          noteEvents.push({
+            time: `${baseTicks + i * ARPEGGIO_STEP_TICKS}i`,
+            midi: note.halfTone,
+            durQ,
+          });
+          // Only the first note in the arpeggio governs hold duration.
+          if (hasFermata && i === 0) {
+            const extra = Math.round(normalDurQ * (FERMATA_DURATION_MULTIPLIER - 1) * TONE_PPQ);
+            if (extra > fermataExtraTicks) {
+              fermataExtraTicks = extra;
+              fermataMaxNormalDurQ = normalDurQ;
+            }
+          }
+        });
       }
     } catch {
       // skip position if note extraction fails
     }
 
+    if (fermataExtraTicks > 0) {
+      // Insert a hold step so the cursor stays at the fermata note's pxLeft
+      // during the extended hold. The hold ends when the next real note begins
+      // (expandedQuarters + full fermata duration). This step shares osmdIdx
+      // with the preceding regular step so advanceCursorTo makes no extra calls.
+      const holdEndQ = expandedQuarters + fermataMaxNormalDurQ * FERMATA_DURATION_MULTIPLIER;
+      steps.push({ quarters: holdEndQ - 1 / TONE_PPQ, pxLeft, osmdIdx });
+      tickShift += fermataExtraTicks;
+    }
+
+    osmdIdx++;
     osmd.cursor.next();
   }
 
-  totalQuarters = lastQuarters + 1;
+  totalQuarters = lastExpandedQuarters + 1;
   cursorSteps = steps;
   osmd.cursor.reset();
 
@@ -185,17 +276,23 @@ function advanceCursorTo(targetStep: number): void {
     return;
   }
 
-  if (currentCursorStep < 0) {
+  // cursorSteps may contain extra hold steps (same osmdIdx as preceding step).
+  // Use osmdIdx — not the step array index — to decide how many cursor.next()
+  // calls to make, so hold steps don't accidentally advance the OSMD cursor.
+  const targetIdx = cursorSteps[targetStep]?.osmdIdx ?? 0;
+  const currentIdx = currentCursorStep < 0 ? -1 : (cursorSteps[currentCursorStep]?.osmdIdx ?? -1);
+
+  if (currentIdx < 0) {
     osmdRef.cursor.reset();
     osmdRef.cursor.show();
-    for (let i = 0; i < targetStep; i++) osmdRef.cursor.next();
-  } else if (targetStep > currentCursorStep) {
-    for (let i = 0; i < targetStep - currentCursorStep; i++) osmdRef.cursor.next();
-  } else {
+    for (let i = 0; i < targetIdx; i++) osmdRef.cursor.next();
+  } else if (targetIdx > currentIdx) {
+    for (let i = 0; i < targetIdx - currentIdx; i++) osmdRef.cursor.next();
+  } else if (targetIdx < currentIdx) {
     // Backward seek (loop wrap or stop → replay).
     osmdRef.cursor.reset();
     osmdRef.cursor.show();
-    for (let i = 0; i < targetStep; i++) osmdRef.cursor.next();
+    for (let i = 0; i < targetIdx; i++) osmdRef.cursor.next();
   }
   currentCursorStep = targetStep;
 }
