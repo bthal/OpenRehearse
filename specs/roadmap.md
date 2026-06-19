@@ -39,7 +39,7 @@ Phases are **sequential**; within a phase, items can be parallelized when they d
 
 ## Later (post-MVP backlog)
 
-- **Metronome** aligned with transport (native or WebView click).
+- [x] **Metronome** aligned with transport; oscillator click track in WebView with downbeat detection; toolbar toggle.
 - **Saved bits** / multiple loops / hierarchical practice (per original vision).
 - **iOS** build and TestFlight when ready.
 - **Auth & cross-device sync** — only after scope is explicitly re-opened; not in MVP.

@@ -16,7 +16,6 @@ Play **audio derived from the score** (not external recordings) so that **notati
 ## Future (not MVP)
 
 - Native audio path for lower latency (requires careful sync with OSMD — ADR if pursued).
-- **Metronome** channel mixed with synth (see `roadmap.md`).
 
 ## Acceptance criteria
 
@@ -26,3 +25,4 @@ Play **audio derived from the score** (not external recordings) so that **notati
 - [x] Repeat barlines are honored: playback cycles through the repeated section.
 - [x] Fermata notes sound longer; subsequent notes are delayed so the hold is audible.
 - [x] Arpeggiated chords roll from low to high (or high to low per marking).
+- [x] Metronome toggleable from toolbar; quarter-note click track; downbeats louder/higher-pitch; correct for any time signature.

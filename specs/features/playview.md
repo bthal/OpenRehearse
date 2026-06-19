@@ -26,7 +26,11 @@ The entire piece is rendered in a **single horizontal line** — all measures la
 
 - **OpenSheetMusicDisplay** inside **WebView** (see `architecture.md`).
 - **OSMD standard cursor**, moving **smoothly** with the playback position — not jumping discretely note-to-note. Use OSMD's documented cursor / playback integration; do not replace with a hand-drawn caret unless OSMD proves insufficient (then ADR required).
-- **Piece title** engraved in the score header by OSMD using `work-title` / `movement-title` from the imported MusicXML.
+- OSMD title, subtitle, composer, lyricist, and copyright rendering are **suppressed**
+  (`RenderTitle = false` etc. in EngravingRules; `drawTitle`/`drawComposer` constructor options).
+  The native Dashboard shows piece metadata; the WebView displays notation only.
+  Suppressing metadata eliminates the large `systemTop` offset that otherwise complicates
+  vertical centering.
 
 ## Playback & tempo
 
@@ -73,7 +77,7 @@ Slices: `activePieceId`, `webViewReady`, `isLoadingScore`, `scoreError`, `isPlay
 
 ## Acceptance criteria
 
-- [x] Opening a piece shows rendered notation with piece title in score header. *(Phase 2)*
+- [x] Opening a piece shows rendered notation; OSMD title/metadata suppressed. *(Phase 2)*
 - [x] OSMD cursor moves smoothly with playback — no discrete per-note jumping. *(Phase 3)*
 - [x] Play/pause drives **synth + OSMD cursor** without obvious systematic drift under normal scores. *(Phase 3)*
 - [x] Changing tempo updates playback speed and cursor alignment. *(Phase 3)*

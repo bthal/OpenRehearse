@@ -40,6 +40,11 @@ w.__rn_load_xml = async (xml: string) => {
     osmd.EngravingRules.NewSystemAtXMLNewSystemAttribute = false;
     osmd.EngravingRules.NewSystemAtXMLNewPageAttribute = false;
     osmd.EngravingRules.RenderSingleHorizontalStaffline = true;
+    osmd.EngravingRules.RenderTitle = false;
+    osmd.EngravingRules.RenderSubtitle = false;
+    osmd.EngravingRules.RenderComposer = false;
+    osmd.EngravingRules.RenderLyricist = false;
+    osmd.EngravingRules.RenderCopyright = false;
     const container = document.getElementById('osmd')!;
     container.style.width = '10000px';
     await osmd.load(xml);
@@ -87,8 +92,8 @@ if (!container) {
     osmd = new OpenSheetMusicDisplay(container, {
       autoResize: false, // PageWidth is set manually before each load for one-line layout
       backend: 'svg',
-      drawTitle: true,
-      drawComposer: true,
+      drawTitle: false,
+      drawComposer: false,
       followCursor: false, // we control scrolling via translateX
     });
     postToNative({ type: 'DEBUG', payload: 'OSMD ready' });

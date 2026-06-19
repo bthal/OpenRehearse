@@ -664,34 +664,21 @@ export function initPlayback(osmd: OpenSheetMusicDisplay): void {
   viewportWidth = window.innerWidth;
 
   // Size the overlay elements to the rendered system.
-  // OSMD sets img.height (the HTMLImageElement height IDL attribute) for the cursor height.
-  // style.top and style.left are set via style. Use the IDL .height for the system height
-  // to avoid CSS-computed values that may reflect the parent container height instead.
   osmd.cursor.show();
   hideCursorEl();
   const cEl = cursorEl();
   let systemTop = 0;
   let systemH = 0;
   if (cEl) {
-    // style.top is reliable (OSMD sets it explicitly in pixels).
     systemTop = parseFloat(cEl.style.top || '0');
-    // img.height (IDL) is the CSS rendered height — may be overridden by CSS.
-    // Use the HTML attribute value directly since OSMD sets `img.height = px` as the attribute.
     const attrH = parseInt(cEl.getAttribute('height') ?? '0', 10);
     const idlH = (cEl as HTMLImageElement).height;
     const bcrH = Math.round(cEl.getBoundingClientRect().height);
     systemH = attrH || idlH || bcrH;
-    postToNative({
-      type: 'DEBUG',
-      payload: `overlay: styleTop=${cEl.style.top} attrH=${attrH} idlH=${idlH} bcrH=${bcrH} => top=${systemTop} h=${systemH}`,
-    });
   }
   setOverlayBounds(systemTop, systemH);
 
   // Center the staff system vertically in the viewport.
-  // OSMD renders title/composer above the system (hence systemTop > 0); since the native
-  // header already shows piece title/composer, we slide #osmd up so the staff system is
-  // centered. OSMD's title region moves off the top of the viewport — acceptable.
   const viewportHeight = window.innerHeight;
   const centeredTop = Math.round((viewportHeight - systemH) / 2);
   if (osmdEl) osmdEl.style.top = `${centeredTop - systemTop}px`;

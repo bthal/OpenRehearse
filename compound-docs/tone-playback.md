@@ -326,7 +326,20 @@ The cursor element's `style.top` gives the system Y offset (e.g. 179px for Prelu
 scores with more metadata). Without correcting for this, the staff system can appear near the
 bottom of the viewport or scroll off-screen entirely for metadata-heavy scores.
 
-**Fix:** After `initPlayback` measures `systemTop` and `systemH`, vertically center the staff:
+**Primary fix (Phase 5):** Suppress OSMD metadata rendering entirely — set before every `load()`:
+```typescript
+osmd.EngravingRules.RenderTitle = false;
+osmd.EngravingRules.RenderSubtitle = false;
+osmd.EngravingRules.RenderComposer = false;
+osmd.EngravingRules.RenderLyricist = false;
+osmd.EngravingRules.RenderCopyright = false;
+```
+Also pass `drawTitle: false, drawComposer: false` in the `OpenSheetMusicDisplay` constructor.
+The native layer shows piece metadata; the WebView shows notation only. Suppressing metadata
+eliminates the `systemTop` offset for most scores.
+
+**Secondary fix (belt-and-suspenders):** After `initPlayback` measures `systemTop` and `systemH`,
+vertically center the staff in case any residual offset remains:
 
 ```typescript
 const viewportHeight = window.innerHeight;
