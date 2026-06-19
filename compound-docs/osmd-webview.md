@@ -130,6 +130,25 @@ The `score-web/` project has its own `tsconfig.json` that declares `"lib": ["ES2
 
 **NOTE:** The build script (`npm run build:score-web`) uses `npm ci`, which requires `score-web/package-lock.json`. On first clone or after deleting `score-web/node_modules/`, run `cd score-web && npm install` once to generate the lock file, then commit it. Subsequent runs use `npm ci` for reproducible installs.
 
+## Hiding the OSMD default cursor element
+
+The OSMD cursor (`cursor.cursorElement`) is an `<img>` that renders as a green arrow at the current step. We use a custom `#cursor-line` div for the visual cursor instead.
+
+**Fix:** After every `cursor.show()` call, set `visibility: hidden` on the element:
+```typescript
+function hideCursorEl(): void {
+  const el = cursorEl(); // accesses cursor.cursorElement
+  if (el) el.style.visibility = 'hidden';
+}
+```
+
+Call `hideCursorEl()` immediately after every `cursor.show()` in `buildTimelines`,
+`advanceCursorTo`, `_stopInternal`, and `initPlayback`. OSMD resets the element's
+display on each `show()` call, so a single hide at init is not enough.
+
+The element must remain in the DOM — `style.left` is read every frame for scroll math.
+Use `visibility: hidden` (not `display: none`) so layout and position reads are unaffected.
+
 ## WebView bridge message protocol
 
 Web→Native: web page calls `window.ReactNativeWebView.postMessage(data)`; native receives via `onMessage` prop.

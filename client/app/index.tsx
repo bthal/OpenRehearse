@@ -1,5 +1,5 @@
 import { mdiMusicNote, mdiPlus } from '@mdi/js';
-import { router, useFocusEffect } from 'expo-router';
+import { router, Stack, useFocusEffect } from 'expo-router';
 import { useCallback, useState } from 'react';
 import { ActivityIndicator, Alert, FlatList, Pressable, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -48,82 +48,85 @@ export default function Dashboard() {
   const showSpinner = isLoading && isEmpty;
 
   return (
-    <SafeAreaView className="flex-1 bg-ash-grey-50 px-6 pb-6">
-      <View className="w-full max-w-[720px] flex-1 self-center">
-        {/* Header */}
-        <View className="mb-4 flex-row items-center justify-between pt-2">
-          <Text className="text-[22px] font-bold text-ash-grey-950">Pieces</Text>
-          {!isEmpty ? (
-            <Pressable
-              className="h-9 w-9 items-center justify-center rounded-lg bg-seagrass-600 active:bg-seagrass-700"
-              onPress={handleImport}
-              disabled={isLoading}
-            >
-              {isLoading ? (
-                <ActivityIndicator size="small" color={Colors.primaryForeground} />
-              ) : (
-                <AppIcon path={mdiPlus} size={16} color={Colors.primaryForeground} />
-              )}
-            </Pressable>
-          ) : null}
-        </View>
-
-        {/* Content */}
-        {showSpinner ? (
-          <View className="flex-1 items-center justify-center">
-            <ActivityIndicator size="large" color={Colors.primary} />
-          </View>
-        ) : isEmpty ? (
-          <View className="flex-1 items-center justify-center py-6">
-            <View className="w-full max-w-[400px] items-center gap-3 rounded-xl border border-ash-grey-500/35 bg-ash-grey-100 px-7 py-9">
-              <View className="mb-1 h-16 w-16 items-center justify-center rounded-full bg-seagrass-500/20">
-                <AppIcon path={mdiMusicNote} size={32} color={Colors.primary} />
-              </View>
-              <Text className="text-center text-xl font-semibold text-ash-grey-950">
-                No pieces yet
-              </Text>
-              <Text className="mb-2 text-center text-[15px] leading-[22px] opacity-[0.88] text-ash-grey-950">
-                Import a MusicXML score to start practicing. Your files stay on this device —
-                nothing is uploaded.
-              </Text>
+    <>
+      <Stack.Screen options={{ orientation: 'portrait' }} />
+      <SafeAreaView className="flex-1 bg-ash-grey-50 px-6 pb-6">
+        <View className="w-full max-w-[720px] flex-1 self-center">
+          {/* Header */}
+          <View className="mb-4 flex-row items-center justify-between pt-2">
+            <Text className="text-[22px] font-bold text-ash-grey-950">Pieces</Text>
+            {!isEmpty ? (
               <Pressable
-                className="min-w-[160px] flex-row items-center justify-center gap-2 rounded-lg bg-seagrass-600 px-5 py-3 active:bg-seagrass-700"
+                className="h-9 w-9 items-center justify-center rounded-lg bg-seagrass-600 active:bg-seagrass-700"
                 onPress={handleImport}
                 disabled={isLoading}
               >
                 {isLoading ? (
                   <ActivityIndicator size="small" color={Colors.primaryForeground} />
                 ) : (
-                  <>
-                    <AppIcon path={mdiPlus} size={14} color={Colors.primaryForeground} />
-                    <Text className="text-base font-semibold text-ash-grey-50">Import score</Text>
-                  </>
+                  <AppIcon path={mdiPlus} size={16} color={Colors.primaryForeground} />
                 )}
               </Pressable>
-            </View>
+            ) : null}
           </View>
-        ) : (
-          <FlatList
-            className="flex-1"
-            data={pieceIds}
-            keyExtractor={(id) => id}
-            contentContainerClassName="pb-10"
-            renderItem={({ item: id }) => {
-              const piece = piecesById[id];
-              if (!piece) return null;
-              return (
-                <PieceRow
-                  piece={piece}
-                  onPress={() => router.push({ pathname: '/piece/[id]', params: { id } })}
-                  onEdit={() => setEditingId(id)}
-                />
-              );
-            }}
-          />
-        )}
-      </View>
 
-      <PieceEditModal pieceId={editingId} onClose={() => setEditingId(null)} />
-    </SafeAreaView>
+          {/* Content */}
+          {showSpinner ? (
+            <View className="flex-1 items-center justify-center">
+              <ActivityIndicator size="large" color={Colors.primary} />
+            </View>
+          ) : isEmpty ? (
+            <View className="flex-1 items-center justify-center py-6">
+              <View className="w-full max-w-[400px] items-center gap-3 rounded-xl border border-ash-grey-500/35 bg-ash-grey-100 px-7 py-9">
+                <View className="mb-1 h-16 w-16 items-center justify-center rounded-full bg-seagrass-500/20">
+                  <AppIcon path={mdiMusicNote} size={32} color={Colors.primary} />
+                </View>
+                <Text className="text-center text-xl font-semibold text-ash-grey-950">
+                  No pieces yet
+                </Text>
+                <Text className="mb-2 text-center text-[15px] leading-[22px] opacity-[0.88] text-ash-grey-950">
+                  Import a MusicXML score to start practicing. Your files stay on this device —
+                  nothing is uploaded.
+                </Text>
+                <Pressable
+                  className="min-w-[160px] flex-row items-center justify-center gap-2 rounded-lg bg-seagrass-600 px-5 py-3 active:bg-seagrass-700"
+                  onPress={handleImport}
+                  disabled={isLoading}
+                >
+                  {isLoading ? (
+                    <ActivityIndicator size="small" color={Colors.primaryForeground} />
+                  ) : (
+                    <>
+                      <AppIcon path={mdiPlus} size={14} color={Colors.primaryForeground} />
+                      <Text className="text-base font-semibold text-ash-grey-50">Import score</Text>
+                    </>
+                  )}
+                </Pressable>
+              </View>
+            </View>
+          ) : (
+            <FlatList
+              className="flex-1"
+              data={pieceIds}
+              keyExtractor={(id) => id}
+              contentContainerClassName="pb-10"
+              renderItem={({ item: id }) => {
+                const piece = piecesById[id];
+                if (!piece) return null;
+                return (
+                  <PieceRow
+                    piece={piece}
+                    onPress={() => router.push({ pathname: '/piece/[id]', params: { id } })}
+                    onEdit={() => setEditingId(id)}
+                  />
+                );
+              }}
+            />
+          )}
+        </View>
+
+        <PieceEditModal pieceId={editingId} onClose={() => setEditingId(null)} />
+      </SafeAreaView>
+    </>
   );
 }

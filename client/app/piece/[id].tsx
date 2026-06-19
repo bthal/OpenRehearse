@@ -9,7 +9,7 @@ import {
   mdiRepeat,
   mdiSpeedometer,
 } from '@mdi/js';
-import { router, useLocalSearchParams } from 'expo-router';
+import { router, Stack, useLocalSearchParams } from 'expo-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Animated, ActivityIndicator, Text, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -195,186 +195,195 @@ export default function PlayView() {
 
   if (!piece) {
     return (
-      <SafeAreaView className="flex-1 bg-white items-center justify-center px-6">
-        <Text className="text-base text-gray-500">Piece not found.</Text>
-        <TouchableOpacity onPress={() => router.back()} className="mt-4">
-          <Text className="text-blue-500 text-base">Go back</Text>
-        </TouchableOpacity>
-      </SafeAreaView>
+      <>
+        <Stack.Screen options={{ orientation: 'landscape' }} />
+        <SafeAreaView className="flex-1 bg-white items-center justify-center px-6">
+          <Text className="text-base text-gray-500">Piece not found.</Text>
+          <TouchableOpacity onPress={() => router.back()} className="mt-4">
+            <Text className="text-blue-500 text-base">Go back</Text>
+          </TouchableOpacity>
+        </SafeAreaView>
+      </>
     );
   }
 
   return (
-    <SafeAreaView className="flex-1 bg-white">
-      {/* Score area — WebView fills all space, toolbar floats over it */}
-      <View ref={scoreAreaRef} className="flex-1">
-        {/* baseUrl required on Android for large inline HTML; allowUniversalAccessFromFileURLs
+    <>
+      <Stack.Screen options={{ orientation: 'landscape' }} />
+      <SafeAreaView className="flex-1 bg-white">
+        {/* Score area — WebView fills all space, toolbar floats over it */}
+        <View ref={scoreAreaRef} className="flex-1">
+          {/* baseUrl required on Android for large inline HTML; allowUniversalAccessFromFileURLs
             lets the file:// origin fetch HTTPS audio samples — see compound-docs */}
-        <WebView
-          ref={webViewRef}
-          source={{ html: SCORE_WEB_HTML, baseUrl: 'file:///android_asset/' }}
-          originWhitelist={['*']}
-          allowUniversalAccessFromFileURLs={true}
-          onLoadEnd={() => setWebViewReady(true)}
-          onMessage={handleMessage}
-          scrollEnabled={false}
-          javaScriptEnabled={true}
-          mediaPlaybackRequiresUserAction={false}
-          style={{ flex: 1 }}
-        />
+          <WebView
+            ref={webViewRef}
+            source={{ html: SCORE_WEB_HTML, baseUrl: 'file:///android_asset/' }}
+            originWhitelist={['*']}
+            allowUniversalAccessFromFileURLs={true}
+            onLoadEnd={() => setWebViewReady(true)}
+            onMessage={handleMessage}
+            scrollEnabled={false}
+            javaScriptEnabled={true}
+            mediaPlaybackRequiresUserAction={false}
+            style={{ flex: 1 }}
+          />
 
-        {/* Toolbar — vertically centered, left-side overlay */}
-        {scoreReady && (
-          <View
-            style={{
-              position: 'absolute',
-              left: 0,
-              top: 0,
-              bottom: 0,
-              justifyContent: 'center',
-            }}
-          >
+          {/* Toolbar — vertically centered, left-side overlay */}
+          {scoreReady && (
             <View
-              ref={toolbarRef}
-              className="bg-white/90 rounded-r-xl py-3 px-2 items-center gap-4"
               style={{
-                elevation: 4,
-                shadowColor: '#000',
-                shadowOpacity: 0.12,
-                shadowRadius: 6,
-                shadowOffset: { width: 2, height: 0 },
+                position: 'absolute',
+                left: 0,
+                top: 0,
+                bottom: 0,
+                justifyContent: 'center',
               }}
             >
-              {/* Back */}
-              <TouchableOpacity onPress={() => router.back()} hitSlop={12} className="p-1">
-                <AppIcon path={mdiArrowLeft} size={24} color="#374151" />
-              </TouchableOpacity>
-
-              {/* Loop select / clear */}
-              <TouchableOpacity onPress={handleLoopToggle} hitSlop={8} className="p-1.5">
-                <AppIcon
-                  path={loopActive ? mdiClose : mdiRepeat}
-                  size={26}
-                  color={loopActive ? '#9C6B8A' : '#374151'}
-                />
-              </TouchableOpacity>
-
-              {/* Play / Pause */}
-              <TouchableOpacity onPress={handlePlayPause} hitSlop={8} className="p-1">
-                <AppIcon path={isPlaying ? mdiPause : mdiPlay} size={36} color="#4B7A6E" />
-              </TouchableOpacity>
-
-              {/* Metronome toggle */}
-              <TouchableOpacity onPress={handleMetronomeToggle} hitSlop={8} className="p-1.5">
-                <AppIcon
-                  path={mdiMetronome}
-                  size={26}
-                  color={metronomeOn ? '#4B7A6E' : '#374151'}
-                />
-              </TouchableOpacity>
-
-              {/* Speed trigger — icon when open, current speed label when closed */}
-              <View ref={speedTriggerRef}>
-                <TouchableOpacity
-                  onPress={toggleSpeed}
-                  hitSlop={8}
-                  className="items-center px-2 py-1"
-                >
-                  {speedOpen ? (
-                    <AppIcon path={mdiSpeedometer} size={22} color="#4B7A6E" />
-                  ) : (
-                    <Text className="text-xs font-semibold text-gray-700">
-                      {MULTIPLIER_LABEL[tempoMultiplier]}
-                    </Text>
-                  )}
-                  <Text className="text-[9px] text-gray-400 mt-0.5">{effectiveBpm} BPM</Text>
+              <View
+                ref={toolbarRef}
+                className="bg-white rounded-r-xl py-3 px-2 items-center gap-4"
+                style={{
+                  elevation: 4,
+                  shadowColor: '#000',
+                  shadowOpacity: 0.12,
+                  shadowRadius: 6,
+                  shadowOffset: { width: 2, height: 0 },
+                }}
+              >
+                {/* Back */}
+                <TouchableOpacity onPress={() => router.back()} hitSlop={12} className="p-1">
+                  <AppIcon path={mdiArrowLeft} size={24} color="#374151" />
                 </TouchableOpacity>
+
+                {/* Loop select / clear */}
+                <TouchableOpacity onPress={handleLoopToggle} hitSlop={8} className="p-1.5">
+                  <AppIcon
+                    path={loopActive ? mdiClose : mdiRepeat}
+                    size={26}
+                    color={loopActive ? '#9C6B8A' : '#374151'}
+                  />
+                </TouchableOpacity>
+
+                {/* Play / Pause */}
+                <TouchableOpacity onPress={handlePlayPause} hitSlop={8} className="p-1">
+                  <AppIcon path={isPlaying ? mdiPause : mdiPlay} size={36} color="#4B7A6E" />
+                </TouchableOpacity>
+
+                {/* Metronome toggle */}
+                <TouchableOpacity onPress={handleMetronomeToggle} hitSlop={8} className="p-1.5">
+                  <AppIcon
+                    path={mdiMetronome}
+                    size={26}
+                    color={metronomeOn ? '#4B7A6E' : '#374151'}
+                  />
+                </TouchableOpacity>
+
+                {/* Speed trigger — icon when open, current speed label when closed */}
+                <View ref={speedTriggerRef}>
+                  <TouchableOpacity
+                    onPress={toggleSpeed}
+                    hitSlop={8}
+                    className="items-center px-2 py-1"
+                  >
+                    <View style={{ height: 22, justifyContent: 'center', alignItems: 'center' }}>
+                      {speedOpen ? (
+                        <AppIcon path={mdiSpeedometer} size={22} color="#4B7A6E" />
+                      ) : (
+                        <Text className="text-base font-semibold text-gray-700">
+                          {MULTIPLIER_LABEL[tempoMultiplier]}
+                        </Text>
+                      )}
+                    </View>
+                    <Text className="text-[9px] text-black mt-0.5">{effectiveBpm} BPM</Text>
+                  </TouchableOpacity>
+                </View>
               </View>
             </View>
-          </View>
-        )}
+          )}
 
-        {/* Speed panel — overlays the score, anchored to the speed trigger position */}
-        <Animated.View
-          pointerEvents={speedOpen ? 'auto' : 'none'}
-          style={{
-            position: 'absolute',
-            top: panelLayout.top,
-            left: panelLayout.left,
-            width: speedAnim.interpolate({
-              inputRange: [0, 1],
-              outputRange: [0, SPEED_PANEL_WIDTH],
-            }),
-            overflow: 'hidden',
-            flexDirection: 'row',
-            backgroundColor: 'rgba(255,255,255,0.92)',
-            borderRadius: 10,
-            elevation: 4,
-            shadowColor: '#000',
-            shadowOpacity: 0.12,
-            shadowRadius: 6,
-            shadowOffset: { width: 2, height: 0 },
-          }}
-        >
-          {TEMPO_MULTIPLIERS.map((m) => {
-            const isActive = tempoMultiplier === m;
-            return (
-              <TouchableOpacity
-                key={m}
-                onPress={() => {
-                  handleMultiplierChange(m);
-                  toggleSpeed();
-                }}
-                hitSlop={4}
-                style={{ width: 44, height: 44, alignItems: 'center', justifyContent: 'center' }}
-              >
-                <Text
-                  style={{
-                    fontSize: 11,
-                    fontWeight: '600',
-                    color: isActive ? '#4B7A6E' : '#9CA3AF',
+          {/* Speed panel — overlays the score, anchored to the speed trigger position */}
+          <Animated.View
+            pointerEvents={speedOpen ? 'auto' : 'none'}
+            style={{
+              position: 'absolute',
+              top: panelLayout.top,
+              left: panelLayout.left,
+              width: speedAnim.interpolate({
+                inputRange: [0, 1],
+                outputRange: [0, SPEED_PANEL_WIDTH],
+                extrapolate: 'clamp',
+              }),
+              overflow: 'hidden',
+              flexDirection: 'row',
+              backgroundColor: 'rgba(255,255,255,0.92)',
+              borderRadius: 10,
+              elevation: 4,
+              shadowColor: '#000',
+              shadowOpacity: 0.12,
+              shadowRadius: 6,
+              shadowOffset: { width: 2, height: 0 },
+            }}
+          >
+            {TEMPO_MULTIPLIERS.map((m) => {
+              const isActive = tempoMultiplier === m;
+              return (
+                <TouchableOpacity
+                  key={m}
+                  onPress={() => {
+                    handleMultiplierChange(m);
+                    toggleSpeed();
                   }}
+                  hitSlop={4}
+                  style={{ width: 44, height: 44, alignItems: 'center', justifyContent: 'center' }}
                 >
-                  {MULTIPLIER_LABEL[m]}
-                </Text>
+                  <Text
+                    style={{
+                      fontSize: 14,
+                      fontWeight: '600',
+                      color: isActive ? '#4B7A6E' : '#9CA3AF',
+                    }}
+                  >
+                    {MULTIPLIER_LABEL[m]}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
+          </Animated.View>
+
+          {/* Overlay: WebView not yet loaded */}
+          {!webViewReady && !scoreError && (
+            <View className="absolute inset-0 items-center justify-center bg-white">
+              <AppIcon path={mdiMusicNoteOutline} size={48} color="#D1D5DB" />
+              <Text className="mt-3 text-sm text-gray-400">Preparing score…</Text>
+            </View>
+          )}
+
+          {/* Overlay: XML sent, OSMD rendering */}
+          {isLoadingScore && (
+            <View className="absolute inset-0 items-center justify-center bg-white">
+              <ActivityIndicator size="large" color="#4B7A6E" />
+              <Text className="mt-3 text-sm text-gray-500">Loading score…</Text>
+            </View>
+          )}
+
+          {/* Error state */}
+          {scoreError && (
+            <View className="absolute inset-0 items-center justify-center bg-white px-8">
+              <AppIcon path={mdiAlertCircleOutline} size={48} color="#9C6B8A" />
+              <Text className="mt-3 text-base font-semibold text-gray-800 text-center">
+                Could not render score
+              </Text>
+              <Text className="mt-1 text-sm text-gray-500 text-center">{scoreError}</Text>
+              <TouchableOpacity
+                className="mt-5 px-5 py-2.5 rounded-lg bg-seagrass-600 active:bg-seagrass-700"
+                onPress={() => reset()}
+              >
+                <Text className="text-sm font-semibold text-ash-grey-50">Retry</Text>
               </TouchableOpacity>
-            );
-          })}
-        </Animated.View>
-
-        {/* Overlay: WebView not yet loaded */}
-        {!webViewReady && !scoreError && (
-          <View className="absolute inset-0 items-center justify-center bg-white">
-            <AppIcon path={mdiMusicNoteOutline} size={48} color="#D1D5DB" />
-            <Text className="mt-3 text-sm text-gray-400">Preparing score…</Text>
-          </View>
-        )}
-
-        {/* Overlay: XML sent, OSMD rendering */}
-        {isLoadingScore && (
-          <View className="absolute inset-0 items-center justify-center bg-white">
-            <ActivityIndicator size="large" color="#4B7A6E" />
-            <Text className="mt-3 text-sm text-gray-500">Loading score…</Text>
-          </View>
-        )}
-
-        {/* Error state */}
-        {scoreError && (
-          <View className="absolute inset-0 items-center justify-center bg-white px-8">
-            <AppIcon path={mdiAlertCircleOutline} size={48} color="#9C6B8A" />
-            <Text className="mt-3 text-base font-semibold text-gray-800 text-center">
-              Could not render score
-            </Text>
-            <Text className="mt-1 text-sm text-gray-500 text-center">{scoreError}</Text>
-            <TouchableOpacity
-              className="mt-5 px-5 py-2.5 rounded-lg bg-seagrass-600 active:bg-seagrass-700"
-              onPress={() => reset()}
-            >
-              <Text className="text-sm font-semibold text-ash-grey-50">Retry</Text>
-            </TouchableOpacity>
-          </View>
-        )}
-      </View>
-    </SafeAreaView>
+            </View>
+          )}
+        </View>
+      </SafeAreaView>
+    </>
   );
 }

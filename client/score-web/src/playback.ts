@@ -107,6 +107,11 @@ function cursorEl(): HTMLImageElement | undefined {
     ?.cursorElement;
 }
 
+function hideCursorEl(): void {
+  const el = cursorEl();
+  if (el) el.style.visibility = 'hidden';
+}
+
 // ─── Build timelines ──────────────────────────────────────────────────────────
 
 function buildTimelines(osmd: OpenSheetMusicDisplay): {
@@ -118,6 +123,7 @@ function buildTimelines(osmd: OpenSheetMusicDisplay): {
 
   osmd.cursor.reset();
   osmd.cursor.show();
+  hideCursorEl();
   const el = cursorEl();
 
   const rawBpm = osmd.cursor.Iterator.CurrentBpm;
@@ -272,6 +278,7 @@ function advanceCursorTo(targetStep: number): void {
   if (targetStep < 0) {
     osmdRef.cursor.reset();
     osmdRef.cursor.show();
+    hideCursorEl();
     currentCursorStep = -1;
     return;
   }
@@ -285,6 +292,7 @@ function advanceCursorTo(targetStep: number): void {
   if (currentIdx < 0) {
     osmdRef.cursor.reset();
     osmdRef.cursor.show();
+    hideCursorEl();
     for (let i = 0; i < targetIdx; i++) osmdRef.cursor.next();
   } else if (targetIdx > currentIdx) {
     for (let i = 0; i < targetIdx - currentIdx; i++) osmdRef.cursor.next();
@@ -292,6 +300,7 @@ function advanceCursorTo(targetStep: number): void {
     // Backward seek (loop wrap or stop → replay).
     osmdRef.cursor.reset();
     osmdRef.cursor.show();
+    hideCursorEl();
     for (let i = 0; i < targetIdx; i++) osmdRef.cursor.next();
   }
   currentCursorStep = targetStep;
@@ -391,6 +400,7 @@ function _stopInternal(): void {
   if (osmdRef) {
     osmdRef.cursor.reset();
     osmdRef.cursor.show();
+    hideCursorEl();
   }
   currentCursorStep = 0;
   const px0 = cursorSteps[0]?.pxLeft ?? 0;
@@ -658,6 +668,7 @@ export function initPlayback(osmd: OpenSheetMusicDisplay): void {
   // style.top and style.left are set via style. Use the IDL .height for the system height
   // to avoid CSS-computed values that may reflect the parent container height instead.
   osmd.cursor.show();
+  hideCursorEl();
   const cEl = cursorEl();
   let systemTop = 0;
   let systemH = 0;
@@ -698,6 +709,7 @@ export function initPlayback(osmd: OpenSheetMusicDisplay): void {
   // Snap score to position 0 at center.
   const el = cursorEl();
   if (el) el.style.left = `${px0}px`;
+  hideCursorEl();
   applyTranslate(scrollMaxPx);
 
   Tone.Transport.bpm.value = scoreBpm;
