@@ -4,6 +4,8 @@
     "ok": "OK",
     "retry": "Retry",
     "save": "Save",
+    "remove": "Remove",
+    "edit": "Edit",
     "goBack": "Go back"
   },
   "dashboard": {
@@ -14,6 +16,8 @@
     "emptyTitle": "No pieces yet",
     "emptyDescription": "Import a MusicXML score to start practicing. Your files stay on this device — nothing is uploaded.",
     "importScore": "Import score",
+    "importMxl": "Import .mxl-File",
+    "privacyNote": "Your files stay on this device — nothing is uploaded.",
     "importFailed": "Import failed"
   },
   "playView": {
@@ -48,6 +52,8 @@
     "saveFailed": "Failed to save. Please try again.",
     "deleteTitle": "Delete piece?",
     "deleteMessage": "Remove \"{{title}}\" from your library? This cannot be undone.",
+    "deleteMultipleTitle": "Delete {{count}} pieces?",
+    "deleteMultipleMessage": "Remove these {{count}} pieces from your library? This cannot be undone.",
     "deleteConfirm": "Delete",
     "deletePiece": "Delete piece"
   },

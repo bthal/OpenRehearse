@@ -2,7 +2,6 @@ import { mdiClose } from '@mdi/js';
 import { useMemo, useState } from 'react';
 import {
   ActivityIndicator,
-  Alert,
   Modal,
   Pressable,
   ScrollView,
@@ -31,7 +30,6 @@ function valuesEqual(a: FormValues, b: FormValues) {
 function PieceEditForm({ piece, onClose }: { piece: Piece; onClose: () => void }) {
   const { t } = useTranslation();
   const updatePiece = usePiecesStore((s) => s.updatePiece);
-  const deletePiece = usePiecesStore((s) => s.deletePiece);
 
   const initial = useMemo<FormValues>(
     () => ({ title: piece.title, composer: piece.composer ?? '' }),
@@ -40,11 +38,10 @@ function PieceEditForm({ piece, onClose }: { piece: Piece; onClose: () => void }
   );
   const [values, setValues] = useState<FormValues>(initial);
   const [saving, setSaving] = useState(false);
-  const [deleting, setDeleting] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
 
   const isDirty = !valuesEqual(values, initial);
-  const busy = saving || deleting;
+  const busy = saving;
 
   async function onSave() {
     if (!isDirty) return;
@@ -65,26 +62,6 @@ function PieceEditForm({ piece, onClose }: { piece: Piece; onClose: () => void }
     } finally {
       setSaving(false);
     }
-  }
-
-  function confirmDelete() {
-    if (busy) return;
-    Alert.alert(t('pieceEdit.deleteTitle'), t('pieceEdit.deleteMessage', { title: piece.title }), [
-      { text: t('common.cancel'), style: 'cancel' },
-      {
-        text: t('pieceEdit.deleteConfirm'),
-        style: 'destructive',
-        onPress: async () => {
-          setDeleting(true);
-          try {
-            await deletePiece(piece.id);
-            onClose();
-          } finally {
-            setDeleting(false);
-          }
-        },
-      },
-    ]);
   }
 
   return (
@@ -134,19 +111,9 @@ function PieceEditForm({ piece, onClose }: { piece: Piece; onClose: () => void }
       </ScrollView>
 
       {/* Footer */}
-      <View className="mt-4 flex-row items-center justify-between gap-4">
-        <Pressable className="items-center py-3" onPress={confirmDelete} disabled={busy}>
-          {deleting ? (
-            <ActivityIndicator color={Colors.error} />
-          ) : (
-            <Text className="text-[15px] font-semibold text-mauve-shadow-800">
-              {t('pieceEdit.deletePiece')}
-            </Text>
-          )}
-        </Pressable>
-
+      <View className="mt-4">
         <Pressable
-          className={`min-w-[120px] flex-grow items-center rounded-lg px-5 py-3 ${!isDirty || busy ? 'bg-ash-grey-500/12' : 'bg-seagrass-600'}`}
+          className={`items-center rounded-lg px-5 py-3 ${!isDirty || busy ? 'bg-ash-grey-500/12' : 'bg-seagrass-600'}`}
           onPress={() => void onSave()}
           disabled={!isDirty || busy}
         >

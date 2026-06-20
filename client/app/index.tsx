@@ -1,13 +1,13 @@
-import { mdiMusicNote, mdiPlus } from '@mdi/js';
+import { mdiDelete, mdiPencil, mdiPlus } from '@mdi/js';
 import { router, Stack, useFocusEffect } from 'expo-router';
 import { useCallback, useState } from 'react';
-import { ActivityIndicator, Alert, FlatList, Pressable, Text, View } from 'react-native';
+import { ActivityIndicator, Alert, FlatList, Pressable, Text, Vibration, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useTranslation } from 'react-i18next';
 
 import { AppIcon } from '@components/AppIcon';
 import { PieceEditModal } from '@components/PieceEditModal';
-import { PieceRow } from '@components/PieceRow';
+import { PieceRow, PieceRowSkeleton } from '@components/PieceRow';
 import { WarmUpRow } from '@components/WarmUpRow';
 import { pickXmlFile } from '@data/index';
 import { Colors } from '@theme/colors';
@@ -21,9 +21,14 @@ export default function Dashboard() {
   const importError = usePiecesStore((s) => s.importError);
   const loadPieces = usePiecesStore((s) => s.loadPieces);
   const importPiece = usePiecesStore((s) => s.importPiece);
+  const deletePiece = usePiecesStore((s) => s.deletePiece);
   const clearImportError = usePiecesStore((s) => s.clearImportError);
 
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [isDeleting, setIsDeleting] = useState(false);
+
+  const isSelectionMode = selectedIds.length > 0;
 
   useFocusEffect(
     useCallback(() => {
@@ -49,16 +54,67 @@ export default function Dashboard() {
     }
   }
 
+  function toggleSelect(id: string) {
+    setSelectedIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
+  }
+
+  function handleRowPress(id: string) {
+    if (isSelectionMode) {
+      toggleSelect(id);
+    } else {
+      router.push({ pathname: '/piece/[id]', params: { id } });
+    }
+  }
+
+  function handleEdit() {
+    const id = selectedIds[0] ?? null;
+    setSelectedIds([]);
+    setEditingId(id);
+  }
+
+  function handleRemove() {
+    const count = selectedIds.length;
+    const firstId = selectedIds[0];
+    const title =
+      count === 1 ? t('pieceEdit.deleteTitle') : t('pieceEdit.deleteMultipleTitle', { count });
+    const message =
+      count === 1
+        ? t('pieceEdit.deleteMessage', { title: firstId ? (piecesById[firstId]?.title ?? '') : '' })
+        : t('pieceEdit.deleteMultipleMessage', { count });
+    Alert.alert(title, message, [
+      { text: t('common.cancel'), style: 'cancel' },
+      {
+        text: t('pieceEdit.deleteConfirm'),
+        style: 'destructive',
+        onPress: async () => {
+          setIsDeleting(true);
+          try {
+            await Promise.all(selectedIds.map((id) => deletePiece(id)));
+            setSelectedIds([]);
+          } finally {
+            setIsDeleting(false);
+          }
+        },
+      },
+    ]);
+  }
+
   const isEmpty = pieceIds.length === 0;
-  const showSpinner = isLoading && isEmpty;
 
   return (
     <>
       <Stack.Screen options={{ orientation: 'portrait' }} />
       <SafeAreaView className="flex-1 bg-ash-grey-50 px-6 pb-6">
         <View className="w-full max-w-[720px] flex-1 self-center">
+          {/* Brand header */}
+          <View className="items-center pb-2 pt-10">
+            <Text className="font-brand text-4xl font-semibold italic tracking-wide text-mauve-shadow-500">
+              OpenRehearse
+            </Text>
+          </View>
+
           {/* Warm-ups section */}
-          <View className="mb-4 pt-2">
+          <View className="mb-6 mt-4">
             <Text className="mb-2 text-[22px] font-bold text-ash-grey-950">
               {t('dashboard.warmUps')}
             </Text>
@@ -70,58 +126,67 @@ export default function Dashboard() {
           </View>
 
           {/* Header */}
-          <View className="mb-4 flex-row items-center justify-between">
+          <View className="mb-2 mt-2 flex-row items-center justify-between">
             <Text className="text-[22px] font-bold text-ash-grey-950">{t('dashboard.pieces')}</Text>
-            {!isEmpty ? (
-              <Pressable
-                className="h-9 w-9 items-center justify-center rounded-lg bg-seagrass-600 active:bg-seagrass-700"
-                onPress={handleImport}
-                disabled={isLoading}
-              >
-                {isLoading ? (
-                  <ActivityIndicator size="small" color={Colors.primaryForeground} />
-                ) : (
-                  <AppIcon path={mdiPlus} size={16} color={Colors.primaryForeground} />
-                )}
-              </Pressable>
-            ) : null}
-          </View>
 
-          {/* Content */}
-          {showSpinner ? (
-            <View className="flex-1 items-center justify-center">
-              <ActivityIndicator size="large" color={Colors.primary} />
-            </View>
-          ) : isEmpty ? (
-            <View className="flex-1 items-center justify-center py-6">
-              <View className="w-full max-w-[400px] items-center gap-3 rounded-xl border border-ash-grey-500/35 bg-ash-grey-100 px-7 py-9">
-                <View className="mb-1 h-16 w-16 items-center justify-center rounded-full bg-seagrass-500/20">
-                  <AppIcon path={mdiMusicNote} size={32} color={Colors.primary} />
-                </View>
-                <Text className="text-center text-xl font-semibold text-ash-grey-950">
-                  {t('dashboard.emptyTitle')}
-                </Text>
-                <Text className="mb-2 text-center text-[15px] leading-[22px] opacity-[0.88] text-ash-grey-950">
-                  {t('dashboard.emptyDescription')}
-                </Text>
+            {isSelectionMode ? (
+              <View className="flex-row gap-2">
                 <Pressable
-                  className="min-w-[160px] flex-row items-center justify-center gap-2 rounded-lg bg-seagrass-600 px-5 py-3 active:bg-seagrass-700"
-                  onPress={handleImport}
-                  disabled={isLoading}
+                  className="flex-row items-center gap-1.5 rounded-lg border border-mauve-shadow-600 bg-white px-3 py-2 active:bg-ash-grey-100"
+                  onPress={handleRemove}
+                  disabled={isDeleting}
                 >
-                  {isLoading ? (
-                    <ActivityIndicator size="small" color={Colors.primaryForeground} />
+                  {isDeleting ? (
+                    <ActivityIndicator size="small" color={Colors.destructive} />
                   ) : (
                     <>
-                      <AppIcon path={mdiPlus} size={14} color={Colors.primaryForeground} />
-                      <Text className="text-base font-semibold text-ash-grey-50">
-                        {t('dashboard.importScore')}
+                      <AppIcon path={mdiDelete} size={14} color={Colors.destructive} />
+                      <Text className="text-sm font-semibold text-mauve-shadow-600">
+                        {t('common.remove')}
                       </Text>
                     </>
                   )}
                 </Pressable>
+                {selectedIds.length === 1 ? (
+                  <Pressable
+                    className="flex-row items-center gap-1.5 rounded-lg border border-seagrass-600 bg-white px-3 py-2 active:bg-seagrass-50"
+                    onPress={handleEdit}
+                  >
+                    <AppIcon path={mdiPencil} size={14} color={Colors.primary} />
+                    <Text className="text-sm font-semibold text-seagrass-600">
+                      {t('common.edit')}
+                    </Text>
+                  </Pressable>
+                ) : null}
               </View>
-            </View>
+            ) : (
+              <Pressable
+                className="flex-row items-center gap-2 rounded-lg border border-seagrass-600 bg-white px-4 py-2 active:bg-seagrass-50"
+                onPress={handleImport}
+                disabled={isLoading}
+              >
+                {isLoading ? (
+                  <ActivityIndicator size="small" color={Colors.primary} />
+                ) : (
+                  <>
+                    <AppIcon path={mdiPlus} size={14} color={Colors.primary} />
+                    <Text className="text-sm font-semibold text-seagrass-600">
+                      {t('dashboard.importMxl')}
+                    </Text>
+                  </>
+                )}
+              </Pressable>
+            )}
+          </View>
+
+          {/* Privacy note */}
+          <Text className="mb-3 text-xs text-ash-grey-400">{t('dashboard.privacyNote')}</Text>
+
+          {/* Content */}
+          {isEmpty && !isLoading ? (
+            <Text className="py-4 text-center text-sm text-ash-grey-400">
+              {t('dashboard.emptyTitle')}
+            </Text>
           ) : (
             <FlatList
               className="flex-1"
@@ -134,11 +199,17 @@ export default function Dashboard() {
                 return (
                   <PieceRow
                     piece={piece}
-                    onPress={() => router.push({ pathname: '/piece/[id]', params: { id } })}
-                    onEdit={() => setEditingId(id)}
+                    isSelected={selectedIds.includes(id)}
+                    isSelectionMode={isSelectionMode}
+                    onPress={() => handleRowPress(id)}
+                    onLongPress={() => {
+                      if (!isSelectionMode) Vibration.vibrate(40);
+                      toggleSelect(id);
+                    }}
                   />
                 );
               }}
+              ListFooterComponent={isLoading ? <PieceRowSkeleton /> : null}
             />
           )}
         </View>
