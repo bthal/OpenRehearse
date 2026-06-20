@@ -7,6 +7,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { AppIcon } from '@components/AppIcon';
 import { PieceEditModal } from '@components/PieceEditModal';
 import { PieceRow } from '@components/PieceRow';
+import { WarmUpRow } from '@components/WarmUpRow';
 import { pickXmlFile } from '@data/index';
 import { Colors } from '@theme/colors';
 import { usePiecesStore } from '@state/piecesStore';
@@ -52,8 +53,15 @@ export default function Dashboard() {
       <Stack.Screen options={{ orientation: 'portrait' }} />
       <SafeAreaView className="flex-1 bg-ash-grey-50 px-6 pb-6">
         <View className="w-full max-w-[720px] flex-1 self-center">
+          {/* Warm-ups section */}
+          <View className="mb-4 pt-2">
+            <Text className="mb-2 text-[22px] font-bold text-ash-grey-950">Warm-ups</Text>
+            <WarmUpRow title="Hanon I" onPress={() => router.push('/warmup/hanon')} />
+            <WarmUpRow title="Scales" onPress={() => router.push('/warmup/scales')} />
+          </View>
+
           {/* Header */}
-          <View className="mb-4 flex-row items-center justify-between pt-2">
+          <View className="mb-4 flex-row items-center justify-between">
             <Text className="text-[22px] font-bold text-ash-grey-950">Pieces</Text>
             {!isEmpty ? (
               <Pressable

@@ -16,6 +16,7 @@ This repository uses **`specs/`** as the source of truth for product intent and 
 | Local data & offline | `specs/features/offline-storage.md`, `client/docs/offline-qa.md` |
 | Audio + cursor sync | `specs/features/playback-synthesis.md`, `specs/features/playview.md` |
 | State & domain | `specs/features/pieces-domain.md` |
+| Warm-up exercises | `specs/features/warmup.md` |
 
 ## Module map (where code goes)
 
