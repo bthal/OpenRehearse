@@ -4,7 +4,7 @@ import * as SQLite from 'expo-sqlite';
 import type { Piece } from '@domain/piece';
 import type { PieceRepository } from './PieceRepository';
 
-const DB_NAME = 'unger.db';
+const DB_NAME = 'openrehearse.db';
 const XML_DIR = (FileSystem.documentDirectory ?? '') + 'pieces/';
 
 export class ExpoLocalPieceRepository implements PieceRepository {

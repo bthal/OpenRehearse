@@ -1,15 +1,15 @@
 {
   "expo": {
-    "name": "Unger",
-    "slug": "unger",
-    "scheme": "unger",
+    "name": "OpenRehearse",
+    "slug": "openrehearse",
+    "scheme": "openrehearse",
     "version": "1.0.0",
     "orientation": "default",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.unger.app"
+      "bundleIdentifier": "com.openrehearse.app"
     },
     "android": {
       "adaptiveIcon": {
@@ -18,7 +18,7 @@
         "backgroundImage": "./assets/android-icon-background.png",
         "monochromeImage": "./assets/android-icon-monochrome.png"
       },
-      "package": "com.unger.app",
+      "package": "com.openrehearse.app",
       "predictiveBackGestureEnabled": false
     },
     "web": {

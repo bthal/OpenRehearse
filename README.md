@@ -1,4 +1,4 @@
-# Unger — Piano Practice Companion
+# OpenRehearse — Piano Practice Companion
 
 Import MusicXML scores, render them via OSMD, and loop passages ("bits") with synthesized playback.
 Android-first React Native app. Offline after import — scores stay on device.
