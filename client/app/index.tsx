@@ -59,9 +59,14 @@ export default function Dashboard() {
         <View className="w-full max-w-[720px] flex-1 self-center">
           {/* Warm-ups section */}
           <View className="mb-4 pt-2">
-            <Text className="mb-2 text-[22px] font-bold text-ash-grey-950">{t('dashboard.warmUps')}</Text>
+            <Text className="mb-2 text-[22px] font-bold text-ash-grey-950">
+              {t('dashboard.warmUps')}
+            </Text>
             <WarmUpRow title={t('dashboard.hanon')} onPress={() => router.push('/warmup/hanon')} />
-            <WarmUpRow title={t('dashboard.scales')} onPress={() => router.push('/warmup/scales')} />
+            <WarmUpRow
+              title={t('dashboard.scales')}
+              onPress={() => router.push('/warmup/scales')}
+            />
           </View>
 
           {/* Header */}
@@ -109,7 +114,9 @@ export default function Dashboard() {
                   ) : (
                     <>
                       <AppIcon path={mdiPlus} size={14} color={Colors.primaryForeground} />
-                      <Text className="text-base font-semibold text-ash-grey-50">{t('dashboard.importScore')}</Text>
+                      <Text className="text-base font-semibold text-ash-grey-50">
+                        {t('dashboard.importScore')}
+                      </Text>
                     </>
                   )}
                 </Pressable>

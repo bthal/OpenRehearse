@@ -296,7 +296,9 @@ export default function PlayView() {
                         </Text>
                       )}
                     </View>
-                    <Text className="text-[9px] text-black mt-0.5">{effectiveBpm} {t('playView.bpm')}</Text>
+                    <Text className="text-[9px] text-black mt-0.5">
+                      {effectiveBpm} {t('playView.bpm')}
+                    </Text>
                   </TouchableOpacity>
                 </View>
               </View>

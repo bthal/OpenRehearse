@@ -69,26 +69,22 @@ function PieceEditForm({ piece, onClose }: { piece: Piece; onClose: () => void }
 
   function confirmDelete() {
     if (busy) return;
-    Alert.alert(
-      t('pieceEdit.deleteTitle'),
-      t('pieceEdit.deleteMessage', { title: piece.title }),
-      [
-        { text: t('common.cancel'), style: 'cancel' },
-        {
-          text: t('pieceEdit.deleteConfirm'),
-          style: 'destructive',
-          onPress: async () => {
-            setDeleting(true);
-            try {
-              await deletePiece(piece.id);
-              onClose();
-            } finally {
-              setDeleting(false);
-            }
-          },
+    Alert.alert(t('pieceEdit.deleteTitle'), t('pieceEdit.deleteMessage', { title: piece.title }), [
+      { text: t('common.cancel'), style: 'cancel' },
+      {
+        text: t('pieceEdit.deleteConfirm'),
+        style: 'destructive',
+        onPress: async () => {
+          setDeleting(true);
+          try {
+            await deletePiece(piece.id);
+            onClose();
+          } finally {
+            setDeleting(false);
+          }
         },
-      ],
-    );
+      },
+    ]);
   }
 
   return (
@@ -143,7 +139,9 @@ function PieceEditForm({ piece, onClose }: { piece: Piece; onClose: () => void }
           {deleting ? (
             <ActivityIndicator color={Colors.error} />
           ) : (
-            <Text className="text-[15px] font-semibold text-mauve-shadow-800">{t('pieceEdit.deletePiece')}</Text>
+            <Text className="text-[15px] font-semibold text-mauve-shadow-800">
+              {t('pieceEdit.deletePiece')}
+            </Text>
           )}
         </Pressable>
 

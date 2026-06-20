@@ -506,7 +506,11 @@ export default function WarmUpView() {
                     color: settings.hand === value ? '#4B7A6E' : '#9CA3AF',
                   }}
                 >
-                  {value === 'both' ? t('warmup.both') : value === 'right' ? t('warmup.right') : t('warmup.left')}
+                  {value === 'both'
+                    ? t('warmup.both')
+                    : value === 'right'
+                      ? t('warmup.right')
+                      : t('warmup.left')}
                 </Text>
               </TouchableOpacity>
             ))}
