@@ -1,0 +1,57 @@
+{
+  "common": {
+    "cancel": "Cancel",
+    "ok": "OK",
+    "retry": "Retry",
+    "save": "Save",
+    "goBack": "Go back"
+  },
+  "dashboard": {
+    "warmUps": "Warm-ups",
+    "hanon": "Hanon I",
+    "scales": "Scales",
+    "pieces": "Pieces",
+    "emptyTitle": "No pieces yet",
+    "emptyDescription": "Import a MusicXML score to start practicing. Your files stay on this device — nothing is uploaded.",
+    "importScore": "Import score",
+    "importFailed": "Import failed"
+  },
+  "playView": {
+    "bpm": "BPM",
+    "preparingScore": "Preparing score…",
+    "loadingScore": "Loading score…",
+    "couldNotRender": "Could not render score",
+    "pieceNotFound": "Piece not found.",
+    "failedToReadScore": "Failed to read score file."
+  },
+  "warmup": {
+    "bpm": "BPM",
+    "key": "Key",
+    "octaves": "Octaves",
+    "hands": "Hands",
+    "hand": "Hand",
+    "both": "Both",
+    "right": "Right",
+    "left": "Left",
+    "preparingScore": "Preparing score…",
+    "loadingScore": "Loading score…",
+    "couldNotRender": "Could not render score",
+    "failedToGenerate": "Failed to generate score."
+  },
+  "pieceEdit": {
+    "heading": "Edit piece",
+    "titleLabel": "Title *",
+    "titlePlaceholder": "Title",
+    "composerLabel": "Composer",
+    "composerPlaceholder": "Composer",
+    "titleRequired": "Title is required.",
+    "saveFailed": "Failed to save. Please try again.",
+    "deleteTitle": "Delete piece?",
+    "deleteMessage": "Remove \"{{title}}\" from your library? This cannot be undone.",
+    "deleteConfirm": "Delete",
+    "deletePiece": "Delete piece"
+  },
+  "warmUpRow": {
+    "description": "Warm-up exercise"
+  }
+}

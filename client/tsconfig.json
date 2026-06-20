@@ -10,7 +10,8 @@
       "@state/*": ["./src/state/*"],
       "@components/*": ["./components/*"],
       "@theme/*": ["./src/theme/*"],
-      "@score-web/*": ["./src/score-web/*"]
+      "@score-web/*": ["./src/score-web/*"],
+      "@i18n/*": ["./src/i18n/*"]
     }
   },
   "include": ["**/*.ts", "**/*.tsx", ".expo/types/**/*.d.ts", "nativewind-env.d.ts"],

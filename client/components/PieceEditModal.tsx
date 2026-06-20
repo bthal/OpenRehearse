@@ -11,6 +11,8 @@ import {
   View,
 } from 'react-native';
 
+import { useTranslation } from 'react-i18next';
+
 import type { Piece } from '@domain/piece';
 import { AppIcon } from '@components/AppIcon';
 import { Colors } from '@theme/colors';
@@ -27,6 +29,7 @@ function valuesEqual(a: FormValues, b: FormValues) {
 
 // Inner form — remounts via key={pieceId} so state initialises from props without an effect.
 function PieceEditForm({ piece, onClose }: { piece: Piece; onClose: () => void }) {
+  const { t } = useTranslation();
   const updatePiece = usePiecesStore((s) => s.updatePiece);
   const deletePiece = usePiecesStore((s) => s.deletePiece);
 
@@ -46,7 +49,7 @@ function PieceEditForm({ piece, onClose }: { piece: Piece; onClose: () => void }
   async function onSave() {
     if (!isDirty) return;
     if (!values.title.trim()) {
-      setFormError('Title is required.');
+      setFormError(t('pieceEdit.titleRequired'));
       return;
     }
     setSaving(true);
@@ -58,7 +61,7 @@ function PieceEditForm({ piece, onClose }: { piece: Piece; onClose: () => void }
       });
       onClose();
     } catch {
-      setFormError('Failed to save. Please try again.');
+      setFormError(t('pieceEdit.saveFailed'));
     } finally {
       setSaving(false);
     }
@@ -67,12 +70,12 @@ function PieceEditForm({ piece, onClose }: { piece: Piece; onClose: () => void }
   function confirmDelete() {
     if (busy) return;
     Alert.alert(
-      'Delete piece?',
-      `Remove "${piece.title}" from your library? This cannot be undone.`,
+      t('pieceEdit.deleteTitle'),
+      t('pieceEdit.deleteMessage', { title: piece.title }),
       [
-        { text: 'Cancel', style: 'cancel' },
+        { text: t('common.cancel'), style: 'cancel' },
         {
-          text: 'Delete',
+          text: t('pieceEdit.deleteConfirm'),
           style: 'destructive',
           onPress: async () => {
             setDeleting(true);
@@ -92,7 +95,7 @@ function PieceEditForm({ piece, onClose }: { piece: Piece; onClose: () => void }
     <>
       {/* Header */}
       <View className="mb-4 flex-row items-center justify-between">
-        <Text className="flex-1 text-xl font-bold text-ash-grey-950">Edit piece</Text>
+        <Text className="flex-1 text-xl font-bold text-ash-grey-950">{t('pieceEdit.heading')}</Text>
         <Pressable onPress={onClose} hitSlop={12}>
           <AppIcon path={mdiClose} size={20} color={Colors.tabIconDefault} />
         </Pressable>
@@ -102,13 +105,13 @@ function PieceEditForm({ piece, onClose }: { piece: Piece; onClose: () => void }
         {/* Title */}
         <View className="gap-1">
           <Text className="text-[13px] font-semibold opacity-[0.85] text-ash-grey-950">
-            Title *
+            {t('pieceEdit.titleLabel')}
           </Text>
           <TextInput
             className="rounded-lg border border-ash-grey-500/35 bg-ash-grey-50 px-3 py-2 text-base text-ash-grey-950"
             value={values.title}
-            onChangeText={(t) => setValues((v) => ({ ...v, title: t }))}
-            placeholder="Title"
+            onChangeText={(v) => setValues((prev) => ({ ...prev, title: v }))}
+            placeholder={t('pieceEdit.titlePlaceholder')}
             placeholderTextColor={Colors.tabIconDefault}
             autoCapitalize="words"
             autoCorrect={false}
@@ -118,13 +121,13 @@ function PieceEditForm({ piece, onClose }: { piece: Piece; onClose: () => void }
         {/* Composer */}
         <View className="gap-1">
           <Text className="text-[13px] font-semibold opacity-[0.85] text-ash-grey-950">
-            Composer
+            {t('pieceEdit.composerLabel')}
           </Text>
           <TextInput
             className="rounded-lg border border-ash-grey-500/35 bg-ash-grey-50 px-3 py-2 text-base text-ash-grey-950"
             value={values.composer}
-            onChangeText={(t) => setValues((v) => ({ ...v, composer: t }))}
-            placeholder="Composer"
+            onChangeText={(v) => setValues((prev) => ({ ...prev, composer: v }))}
+            placeholder={t('pieceEdit.composerPlaceholder')}
             placeholderTextColor={Colors.tabIconDefault}
             autoCapitalize="words"
             autoCorrect={false}
@@ -140,7 +143,7 @@ function PieceEditForm({ piece, onClose }: { piece: Piece; onClose: () => void }
           {deleting ? (
             <ActivityIndicator color={Colors.error} />
           ) : (
-            <Text className="text-[15px] font-semibold text-mauve-shadow-800">Delete piece</Text>
+            <Text className="text-[15px] font-semibold text-mauve-shadow-800">{t('pieceEdit.deletePiece')}</Text>
           )}
         </Pressable>
 
@@ -155,7 +158,7 @@ function PieceEditForm({ piece, onClose }: { piece: Piece; onClose: () => void }
             <Text
               className={`text-base font-semibold ${!isDirty || busy ? 'text-ash-grey-400' : 'text-ash-grey-50'}`}
             >
-              Save
+              {t('common.save')}
             </Text>
           )}
         </Pressable>

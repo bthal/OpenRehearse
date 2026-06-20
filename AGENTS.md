@@ -27,6 +27,7 @@ This repository uses **`specs/`** as the source of truth for product intent and 
 | `client/src/domain/` | Pure TypeScript: loop math, MusicXML validation, tempo, ties, complexity caps — **no** Tone/OSMD/React |
 | `client/src/data/` | `LocalPieceRepository`, XML cache, file pickers — storage adapters |
 | `client/src/state/` | Zustand stores (`piecesStore`, `playViewStore`) |
+| `client/src/i18n/` | String catalogue (`locales/en.json`) and i18next init — import as side-effect only |
 | `client/score-web/` | OSMD surface, playback controller, cursor/loop web UI, Tone.js integration — **web-only** |
 | `client/app/` | Expo Router screens (Dashboard, PlayView route) |
 | `client/components/` | Shared UI (`AppIcon`, toolbars, modals) — NativeWind + MDI icons |

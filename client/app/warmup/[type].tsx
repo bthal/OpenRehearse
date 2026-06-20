@@ -9,6 +9,7 @@ import {
 } from '@mdi/js';
 import { router, Stack, useLocalSearchParams } from 'expo-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import {
   Animated,
   ActivityIndicator,
@@ -47,9 +48,10 @@ const HAND_OPTIONS = [
 ];
 
 export default function WarmUpView() {
+  const { t } = useTranslation();
   const { type } = useLocalSearchParams<{ type: string }>();
   const warmUpType = (type === 'hanon' || type === 'scales' ? type : 'scales') as WarmUpType;
-  const title = warmUpType === 'hanon' ? 'Hanon I' : 'Scales';
+  const title = warmUpType === 'hanon' ? t('dashboard.hanon') : t('dashboard.scales');
 
   const initSettings = useWarmUpStore((s) => s.initSettings);
   const updateHanon = useWarmUpStore((s) => s.updateHanon);
@@ -120,7 +122,7 @@ export default function WarmUpView() {
       webViewRef.current?.injectJavaScript(`window.__rn_load_xml(${JSON.stringify(xml)});void 0;`);
     } catch (err) {
       setLoadingScore(false);
-      setScoreError(err instanceof Error ? err.message : 'Failed to generate score.');
+      setScoreError(err instanceof Error ? err.message : t('warmup.failedToGenerate'));
     }
   }, [
     warmUpType,
@@ -380,7 +382,7 @@ export default function WarmUpView() {
                         </Text>
                       )}
                     </View>
-                    <Text className="text-[9px] text-black mt-0.5">BPM</Text>
+                    <Text className="text-[9px] text-black mt-0.5">{t('warmup.bpm')}</Text>
                   </TouchableOpacity>
                 </View>
 
@@ -396,13 +398,13 @@ export default function WarmUpView() {
                       style={{ color: openPanel === 'hand' ? '#4B7A6E' : '#374151' }}
                     >
                       {settings.hand === 'both'
-                        ? 'Both'
+                        ? t('warmup.both')
                         : settings.hand === 'right'
-                          ? 'Right'
-                          : 'Left'}
+                          ? t('warmup.right')
+                          : t('warmup.left')}
                     </Text>
                     <Text className="text-[9px] text-black mt-0.5">
-                      {settings.hand === 'both' ? 'Hands' : 'Hand'}
+                      {settings.hand === 'both' ? t('warmup.hands') : t('warmup.hand')}
                     </Text>
                   </TouchableOpacity>
                 </View>
@@ -420,7 +422,7 @@ export default function WarmUpView() {
                     >
                       {currentKeyLabel}
                     </Text>
-                    <Text className="text-[9px] text-black mt-0.5">Key</Text>
+                    <Text className="text-[9px] text-black mt-0.5">{t('warmup.key')}</Text>
                   </TouchableOpacity>
                 </View>
 
@@ -437,7 +439,7 @@ export default function WarmUpView() {
                     >
                       {settings.octaves}
                     </Text>
-                    <Text className="text-[9px] text-black mt-0.5">Octaves</Text>
+                    <Text className="text-[9px] text-black mt-0.5">{t('warmup.octaves')}</Text>
                   </TouchableOpacity>
                 </View>
               </View>
@@ -490,7 +492,7 @@ export default function WarmUpView() {
               },
             ]}
           >
-            {HAND_OPTIONS.map(({ value, label }) => (
+            {HAND_OPTIONS.map(({ value }) => (
               <TouchableOpacity
                 key={value}
                 onPress={() => handleHandChange(value)}
@@ -504,7 +506,7 @@ export default function WarmUpView() {
                     color: settings.hand === value ? '#4B7A6E' : '#9CA3AF',
                   }}
                 >
-                  {label}
+                  {value === 'both' ? t('warmup.both') : value === 'right' ? t('warmup.right') : t('warmup.left')}
                 </Text>
               </TouchableOpacity>
             ))}
@@ -588,7 +590,7 @@ export default function WarmUpView() {
           {!webViewReady && !scoreError && (
             <View className="absolute inset-0 items-center justify-center bg-white">
               <AppIcon path={mdiMusicNoteOutline} size={48} color="#D1D5DB" />
-              <Text className="mt-3 text-sm text-gray-400">Preparing score…</Text>
+              <Text className="mt-3 text-sm text-gray-400">{t('warmup.preparingScore')}</Text>
             </View>
           )}
 
@@ -596,7 +598,7 @@ export default function WarmUpView() {
           {isLoadingScore && (
             <View className="absolute inset-0 items-center justify-center bg-white">
               <ActivityIndicator size="large" color="#4B7A6E" />
-              <Text className="mt-3 text-sm text-gray-500">Loading score…</Text>
+              <Text className="mt-3 text-sm text-gray-500">{t('warmup.loadingScore')}</Text>
             </View>
           )}
 
@@ -605,14 +607,14 @@ export default function WarmUpView() {
             <View className="absolute inset-0 items-center justify-center bg-white px-8">
               <AppIcon path={mdiAlertCircleOutline} size={48} color="#9C6B8A" />
               <Text className="mt-3 text-base font-semibold text-gray-800 text-center">
-                Could not render score
+                {t('warmup.couldNotRender')}
               </Text>
               <Text className="mt-1 text-sm text-gray-500 text-center">{scoreError}</Text>
               <TouchableOpacity
                 className="mt-5 px-5 py-2.5 rounded-lg bg-seagrass-600 active:bg-seagrass-700"
                 onPress={() => resetPlayback()}
               >
-                <Text className="text-sm font-semibold text-ash-grey-50">Retry</Text>
+                <Text className="text-sm font-semibold text-ash-grey-50">{t('common.retry')}</Text>
               </TouchableOpacity>
             </View>
           )}

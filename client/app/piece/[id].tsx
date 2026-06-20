@@ -14,6 +14,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { Animated, ActivityIndicator, Text, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import WebView, { type WebViewMessageEvent } from 'react-native-webview';
+import { useTranslation } from 'react-i18next';
 
 import { AppIcon } from '@components/AppIcon';
 import { pieceRepository } from '@data/index';
@@ -31,6 +32,7 @@ const MULTIPLIER_LABEL: Record<number, string> = {
 const SPEED_PANEL_WIDTH = 132;
 
 export default function PlayView() {
+  const { t } = useTranslation();
   const { id } = useLocalSearchParams<{ id: string }>();
   const piece = usePiecesStore((s) => (id ? s.piecesById[id] : undefined));
 
@@ -111,7 +113,7 @@ export default function PlayView() {
       webViewRef.current?.injectJavaScript(`window.__rn_load_xml(${JSON.stringify(xml)});void 0;`);
     } catch (err) {
       setLoadingScore(false);
-      setScoreError(err instanceof Error ? err.message : 'Failed to read score file.');
+      setScoreError(err instanceof Error ? err.message : t('playView.failedToReadScore'));
     }
   }, [piece, setLoadingScore, setScoreError]);
 
@@ -198,9 +200,9 @@ export default function PlayView() {
       <>
         <Stack.Screen options={{ orientation: 'landscape' }} />
         <SafeAreaView className="flex-1 bg-white items-center justify-center px-6">
-          <Text className="text-base text-gray-500">Piece not found.</Text>
+          <Text className="text-base text-gray-500">{t('playView.pieceNotFound')}</Text>
           <TouchableOpacity onPress={() => router.back()} className="mt-4">
-            <Text className="text-blue-500 text-base">Go back</Text>
+            <Text className="text-blue-500 text-base">{t('common.goBack')}</Text>
           </TouchableOpacity>
         </SafeAreaView>
       </>
@@ -294,7 +296,7 @@ export default function PlayView() {
                         </Text>
                       )}
                     </View>
-                    <Text className="text-[9px] text-black mt-0.5">{effectiveBpm} BPM</Text>
+                    <Text className="text-[9px] text-black mt-0.5">{effectiveBpm} {t('playView.bpm')}</Text>
                   </TouchableOpacity>
                 </View>
               </View>
@@ -354,7 +356,7 @@ export default function PlayView() {
           {!webViewReady && !scoreError && (
             <View className="absolute inset-0 items-center justify-center bg-white">
               <AppIcon path={mdiMusicNoteOutline} size={48} color="#D1D5DB" />
-              <Text className="mt-3 text-sm text-gray-400">Preparing score…</Text>
+              <Text className="mt-3 text-sm text-gray-400">{t('playView.preparingScore')}</Text>
             </View>
           )}
 
@@ -362,7 +364,7 @@ export default function PlayView() {
           {isLoadingScore && (
             <View className="absolute inset-0 items-center justify-center bg-white">
               <ActivityIndicator size="large" color="#4B7A6E" />
-              <Text className="mt-3 text-sm text-gray-500">Loading score…</Text>
+              <Text className="mt-3 text-sm text-gray-500">{t('playView.loadingScore')}</Text>
             </View>
           )}
 
@@ -371,14 +373,14 @@ export default function PlayView() {
             <View className="absolute inset-0 items-center justify-center bg-white px-8">
               <AppIcon path={mdiAlertCircleOutline} size={48} color="#9C6B8A" />
               <Text className="mt-3 text-base font-semibold text-gray-800 text-center">
-                Could not render score
+                {t('playView.couldNotRender')}
               </Text>
               <Text className="mt-1 text-sm text-gray-500 text-center">{scoreError}</Text>
               <TouchableOpacity
                 className="mt-5 px-5 py-2.5 rounded-lg bg-seagrass-600 active:bg-seagrass-700"
                 onPress={() => reset()}
               >
-                <Text className="text-sm font-semibold text-ash-grey-50">Retry</Text>
+                <Text className="text-sm font-semibold text-ash-grey-50">{t('common.retry')}</Text>
               </TouchableOpacity>
             </View>
           )}

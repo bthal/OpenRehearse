@@ -3,6 +3,7 @@ import { router, Stack, useFocusEffect } from 'expo-router';
 import { useCallback, useState } from 'react';
 import { ActivityIndicator, Alert, FlatList, Pressable, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useTranslation } from 'react-i18next';
 
 import { AppIcon } from '@components/AppIcon';
 import { PieceEditModal } from '@components/PieceEditModal';
@@ -13,6 +14,7 @@ import { Colors } from '@theme/colors';
 import { usePiecesStore } from '@state/piecesStore';
 
 export default function Dashboard() {
+  const { t } = useTranslation();
   const pieceIds = usePiecesStore((s) => s.pieceIds);
   const piecesById = usePiecesStore((s) => s.piecesById);
   const isLoading = usePiecesStore((s) => s.isLoading);
@@ -30,7 +32,9 @@ export default function Dashboard() {
   );
 
   if (importError) {
-    Alert.alert('Import failed', importError, [{ text: 'OK', onPress: clearImportError }]);
+    Alert.alert(t('dashboard.importFailed'), importError, [
+      { text: t('common.ok'), onPress: clearImportError },
+    ]);
   }
 
   async function handleImport() {
@@ -41,7 +45,7 @@ export default function Dashboard() {
       await importPiece(file, fallbackTitle);
     } catch (err) {
       console.error('[handleImport] unexpected error:', err);
-      Alert.alert('Import failed', String(err instanceof Error ? err.message : err));
+      Alert.alert(t('dashboard.importFailed'), String(err instanceof Error ? err.message : err));
     }
   }
 
@@ -55,14 +59,14 @@ export default function Dashboard() {
         <View className="w-full max-w-[720px] flex-1 self-center">
           {/* Warm-ups section */}
           <View className="mb-4 pt-2">
-            <Text className="mb-2 text-[22px] font-bold text-ash-grey-950">Warm-ups</Text>
-            <WarmUpRow title="Hanon I" onPress={() => router.push('/warmup/hanon')} />
-            <WarmUpRow title="Scales" onPress={() => router.push('/warmup/scales')} />
+            <Text className="mb-2 text-[22px] font-bold text-ash-grey-950">{t('dashboard.warmUps')}</Text>
+            <WarmUpRow title={t('dashboard.hanon')} onPress={() => router.push('/warmup/hanon')} />
+            <WarmUpRow title={t('dashboard.scales')} onPress={() => router.push('/warmup/scales')} />
           </View>
 
           {/* Header */}
           <View className="mb-4 flex-row items-center justify-between">
-            <Text className="text-[22px] font-bold text-ash-grey-950">Pieces</Text>
+            <Text className="text-[22px] font-bold text-ash-grey-950">{t('dashboard.pieces')}</Text>
             {!isEmpty ? (
               <Pressable
                 className="h-9 w-9 items-center justify-center rounded-lg bg-seagrass-600 active:bg-seagrass-700"
@@ -90,11 +94,10 @@ export default function Dashboard() {
                   <AppIcon path={mdiMusicNote} size={32} color={Colors.primary} />
                 </View>
                 <Text className="text-center text-xl font-semibold text-ash-grey-950">
-                  No pieces yet
+                  {t('dashboard.emptyTitle')}
                 </Text>
                 <Text className="mb-2 text-center text-[15px] leading-[22px] opacity-[0.88] text-ash-grey-950">
-                  Import a MusicXML score to start practicing. Your files stay on this device —
-                  nothing is uploaded.
+                  {t('dashboard.emptyDescription')}
                 </Text>
                 <Pressable
                   className="min-w-[160px] flex-row items-center justify-center gap-2 rounded-lg bg-seagrass-600 px-5 py-3 active:bg-seagrass-700"
@@ -106,7 +109,7 @@ export default function Dashboard() {
                   ) : (
                     <>
                       <AppIcon path={mdiPlus} size={14} color={Colors.primaryForeground} />
-                      <Text className="text-base font-semibold text-ash-grey-50">Import score</Text>
+                      <Text className="text-base font-semibold text-ash-grey-50">{t('dashboard.importScore')}</Text>
                     </>
                   )}
                 </Pressable>
