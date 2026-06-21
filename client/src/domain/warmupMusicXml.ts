@@ -187,6 +187,8 @@ function buildXml(fifths: number, mode: WarmUpScaleMode, parts: PartDef[]): stri
 
   const modeStr = mode === 'major' ? 'major' : 'minor';
 
+  const finalBarline = `<barline location="right"><bar-style>light-heavy</bar-style></barline>`;
+
   const partXmls = parts.map(
     (p) =>
       `<part id="${p.id}">${p.measures
@@ -195,7 +197,8 @@ function buildXml(fifths: number, mode: WarmUpScaleMode, parts: PartDef[]): stri
             mi === 0
               ? `<attributes><divisions>2</divisions><key><fifths>${fifths}</fifths><mode>${modeStr}</mode></key><time><beats>4</beats><beat-type>4</beat-type></time><clef><sign>${p.clef.sign}</sign><line>${p.clef.line}</line></clef></attributes>`
               : '';
-          return `<measure number="${mi + 1}">${attrXml}${notes.join('')}</measure>`;
+          const barlineXml = mi === p.measures.length - 1 ? finalBarline : '';
+          return `<measure number="${mi + 1}">${attrXml}${notes.join('')}${barlineXml}</measure>`;
         })
         .join('')}</part>`,
   );
@@ -233,73 +236,148 @@ function scaleOffset(intervals: ScaleIntervals, i: number): number {
   return Math.floor(i / 7) * 12 + (intervals[i % 7] ?? 0);
 }
 
+function buildScaleMeasuresInternal(
+  rootMidi: number,
+  names: KeyInfo['names'],
+  intervals: ScaleIntervals,
+  octaves: number,
+): string[][] {
+  const top = 7 * octaves;
+  const seq: number[] = [];
+  for (let i = 0; i <= top; i++) seq.push(i);
+  for (let i = top - 1; i >= 0; i--) seq.push(i);
+
+  const N = seq.length;
+  const eighthMidis = seq.slice(0, N - 1).map((i) => rootMidi + scaleOffset(intervals, i));
+  const lastMidi = rootMidi + scaleOffset(intervals, seq[N - 1]!);
+
+  const eighthsBefore = N - 1;
+  const slotsInLastBar = eighthsBefore % 8;
+  const finalDuration = slotsInLastBar === 0 ? 8 : 8 - slotsInLastBar;
+
+  const bars: string[][] = [];
+  const BEAM_GROUP = 4;
+
+  for (let b = 0; b + 8 <= eighthsBefore; b += 8) {
+    bars.push(
+      eighthMidis.slice(b, b + 8).map((m, i) => eighth(m, names, beamFor(i, 8, BEAM_GROUP))),
+    );
+  }
+
+  const lastBarEighthMidis =
+    slotsInLastBar > 0 ? eighthMidis.slice(eighthsBefore - slotsInLastBar) : [];
+  const lastBarNotes = lastBarEighthMidis.map((m, i) =>
+    eighth(m, names, beamFor(i, slotsInLastBar, BEAM_GROUP)),
+  );
+  lastBarNotes.push(noteWithDuration(lastMidi, names, finalDuration));
+  bars.push(lastBarNotes);
+
+  return bars;
+}
+
+export function getScaleMeasureNotes(
+  pitchClass: number,
+  mode: WarmUpScaleMode,
+  hand: WarmUpHand,
+  octaves: number,
+): { rh: string[][] | null; lh: string[][] | null } {
+  const { names } = getKeyInfo(pitchClass, mode);
+  const intervals = mode === 'major' ? MAJOR_INTERVALS : MINOR_INTERVALS;
+  const rh =
+    hand === 'left' ? null : buildScaleMeasuresInternal(60 + pitchClass, names, intervals, octaves);
+  const lh =
+    hand === 'right'
+      ? null
+      : buildScaleMeasuresInternal(48 + pitchClass, names, intervals, octaves);
+  return { rh, lh };
+}
+
 export function generateScaleXml(
   pitchClass: number,
   mode: WarmUpScaleMode,
   hand: WarmUpHand,
   octaves = 1,
 ): string {
-  const { fifths, names } = getKeyInfo(pitchClass, mode);
-  const intervals = mode === 'major' ? MAJOR_INTERVALS : MINOR_INTERVALS;
-
-  function buildMeasures(rootMidi: number): string[][] {
-    // Ascending then descending; top note appears once, not duplicated.
-    const top = 7 * octaves;
-    const seq: number[] = [];
-    for (let i = 0; i <= top; i++) seq.push(i);
-    for (let i = top - 1; i >= 0; i--) seq.push(i);
-
-    // All notes except the final root are eighths; the last root is held to fill the bar.
-    const N = seq.length;
-    const eighthMidis = seq.slice(0, N - 1).map((i) => rootMidi + scaleOffset(intervals, i));
-    const lastMidi = rootMidi + scaleOffset(intervals, seq[N - 1]!);
-
-    const eighthsBefore = N - 1;
-    const slotsInLastBar = eighthsBefore % 8;
-    const finalDuration = slotsInLastBar === 0 ? 8 : 8 - slotsInLastBar;
-
-    const bars: string[][] = [];
-    const BEAM_GROUP = 4;
-
-    for (let b = 0; b + 8 <= eighthsBefore; b += 8) {
-      bars.push(
-        eighthMidis.slice(b, b + 8).map((m, i) => eighth(m, names, beamFor(i, 8, BEAM_GROUP))),
-      );
-    }
-
-    const lastBarEighthMidis =
-      slotsInLastBar > 0 ? eighthMidis.slice(eighthsBefore - slotsInLastBar) : [];
-    const lastBarNotes = lastBarEighthMidis.map((m, i) =>
-      eighth(m, names, beamFor(i, slotsInLastBar, BEAM_GROUP)),
-    );
-    lastBarNotes.push(noteWithDuration(lastMidi, names, finalDuration));
-    bars.push(lastBarNotes);
-
-    return bars;
-  }
-
-  const rhRoot = 60 + pitchClass;
-  const lhRoot = 48 + pitchClass;
-
+  const { fifths } = getKeyInfo(pitchClass, mode);
+  const { rh, lh } = getScaleMeasureNotes(pitchClass, mode, hand, octaves);
   const parts: PartDef[] = [];
-  if (hand === 'both' || hand === 'right') {
-    parts.push({
-      id: 'P1',
-      name: 'Right Hand',
-      clef: { sign: 'G', line: 2 },
-      measures: buildMeasures(rhRoot),
-    });
-  }
-  if (hand === 'both' || hand === 'left') {
+  if (rh) parts.push({ id: 'P1', name: 'Right Hand', clef: { sign: 'G', line: 2 }, measures: rh });
+  if (lh)
     parts.push({
       id: hand === 'both' ? 'P2' : 'P1',
       name: 'Left Hand',
       clef: { sign: 'F', line: 4 },
-      measures: buildMeasures(lhRoot),
+      measures: lh,
     });
-  }
-
   return buildXml(fifths, mode, parts);
+}
+
+// Correct Hanon No.1 cell: skip a third up, then step up to a 6th, then step back to 2nd.
+// In C major from C: C–E–F–G–A–G–F–E (diatonic offsets: 0,2,3,4,5,4,3,2)
+const HANON_CELL_UP = [0, 2, 3, 4, 5, 4, 3, 2] as const;
+// Descending mirror: D–A–G–F–E–F–G–A → offsets: 0,-2,-3,-4,-5,-4,-3,-2
+const HANON_CELL_DOWN = [0, -2, -3, -4, -5, -4, -3, -2] as const;
+const HANON_FINGER_UP = [1, 2, 3, 4, 5, 4, 3, 2] as const;
+const HANON_FINGER_DOWN = [5, 4, 3, 2, 1, 2, 3, 4] as const;
+
+function buildHanonMeasuresInternal(
+  rootMidi: number,
+  names: KeyInfo['names'],
+  steps: readonly number[],
+  octaves: number,
+  showFingering = true,
+): string[][] {
+  const measures: string[][] = [];
+  const BEAM_GROUP = 4;
+  for (let d = 0; d < 7 * octaves; d++) {
+    measures.push(
+      HANON_CELL_UP.map((offset, i) =>
+        eighth(
+          diatonicMidi(rootMidi, d + offset, steps),
+          names,
+          beamFor(i, 8, BEAM_GROUP),
+          showFingering && d < 2 ? HANON_FINGER_UP[i] : undefined,
+        ),
+      ),
+    );
+  }
+  const descentTop = 7 * octaves + 4;
+  for (let d = descentTop; d >= 5; d--) {
+    const cellIndex = descentTop - d;
+    measures.push(
+      HANON_CELL_DOWN.map((offset, i) =>
+        eighth(
+          diatonicMidi(rootMidi, d + offset, steps),
+          names,
+          beamFor(i, 8, BEAM_GROUP),
+          showFingering && cellIndex < 2 ? HANON_FINGER_DOWN[i] : undefined,
+        ),
+      ),
+    );
+  }
+  measures.push([wholeNote(rootMidi, names)]);
+  return measures;
+}
+
+export function getHanonMeasureNotes(
+  pitchClass: number,
+  mode: WarmUpScaleMode,
+  hand: WarmUpHand,
+  octaves: number,
+  showFingering = true,
+): { rh: string[][] | null; lh: string[][] | null } {
+  const { names } = getKeyInfo(pitchClass, mode);
+  const intervals = mode === 'major' ? MAJOR_INTERVALS : MINOR_INTERVALS;
+  const steps = scaleSteps(intervals);
+  const rh =
+    hand === 'left'
+      ? null
+      : buildHanonMeasuresInternal(60 + pitchClass, names, steps, octaves, showFingering);
+  const lh =
+    hand === 'right'
+      ? null
+      : buildHanonMeasuresInternal(48 + pitchClass, names, steps, octaves, showFingering);
+  return { rh, lh };
 }
 
 export function generateHanonXml(
@@ -308,75 +386,16 @@ export function generateHanonXml(
   hand: WarmUpHand,
   octaves = 1,
 ): string {
-  const { fifths, names } = getKeyInfo(pitchClass, mode);
-  const intervals = mode === 'major' ? MAJOR_INTERVALS : MINOR_INTERVALS;
-  const steps = scaleSteps(intervals);
-
-  // Correct Hanon No.1 cell: skip a third up, then step up to a 6th, then step back to 2nd.
-  // In C major from C: C–E–F–G–A–G–F–E (diatonic offsets: 0,2,3,4,5,4,3,2)
-  const CELL_UP = [0, 2, 3, 4, 5, 4, 3, 2] as const;
-  // Descending mirror: D–A–G–F–E–F–G–A → offsets: 0,-2,-3,-4,-5,-4,-3,-2
-  const CELL_DOWN = [0, -2, -3, -4, -5, -4, -3, -2] as const;
-
-  const FINGER_UP = [1, 2, 3, 4, 5, 4, 3, 2] as const;
-  const FINGER_DOWN = [5, 4, 3, 2, 1, 2, 3, 4] as const;
-
-  function buildMeasures(rootMidi: number): string[][] {
-    const measures: string[][] = [];
-    const BEAM_GROUP = 4;
-    // Ascending: 7*octaves cells (degrees 0 → 7*octaves-1); peak of last cell = degree 7*octaves+4
-    for (let d = 0; d < 7 * octaves; d++) {
-      measures.push(
-        CELL_UP.map((offset, i) =>
-          eighth(
-            diatonicMidi(rootMidi, d + offset, steps),
-            names,
-            beamFor(i, 8, BEAM_GROUP),
-            d < 2 ? FINGER_UP[i] : undefined,
-          ),
-        ),
-      );
-    }
-    // Descending: mirror, cells from degree (7*octaves+4) down to 5
-    const descentTop = 7 * octaves + 4;
-    for (let d = descentTop; d >= 5; d--) {
-      const cellIndex = descentTop - d;
-      measures.push(
-        CELL_DOWN.map((offset, i) =>
-          eighth(
-            diatonicMidi(rootMidi, d + offset, steps),
-            names,
-            beamFor(i, 8, BEAM_GROUP),
-            cellIndex < 2 ? FINGER_DOWN[i] : undefined,
-          ),
-        ),
-      );
-    }
-    // Final bar: whole note on the root to land cleanly
-    measures.push([wholeNote(rootMidi, names)]);
-    return measures;
-  }
-
-  const rhRoot = 60 + pitchClass;
-  const lhRoot = 48 + pitchClass;
-
+  const { fifths } = getKeyInfo(pitchClass, mode);
+  const { rh, lh } = getHanonMeasureNotes(pitchClass, mode, hand, octaves);
   const parts: PartDef[] = [];
-  if (hand === 'both' || hand === 'right') {
-    parts.push({
-      id: 'P1',
-      name: 'Right Hand',
-      clef: { sign: 'G', line: 2 },
-      measures: buildMeasures(rhRoot),
-    });
-  }
-  if (hand === 'both' || hand === 'left') {
+  if (rh) parts.push({ id: 'P1', name: 'Right Hand', clef: { sign: 'G', line: 2 }, measures: rh });
+  if (lh)
     parts.push({
       id: hand === 'both' ? 'P2' : 'P1',
       name: 'Left Hand',
       clef: { sign: 'F', line: 4 },
-      measures: buildMeasures(lhRoot),
+      measures: lh,
     });
-  }
-
   return buildXml(fifths, mode, parts);
 }

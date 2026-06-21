@@ -17,6 +17,7 @@ This repository uses **`specs/`** as the source of truth for product intent and 
 | Audio + cursor sync | `specs/features/playback-synthesis.md`, `specs/features/playview.md` |
 | State & domain | `specs/features/pieces-domain.md` |
 | Warm-up exercises | `specs/features/warmup.md` |
+| Routines (build + playback) | `specs/features/warmup.md` (Routines section) |
 
 ## Module map (where code goes)
 
@@ -26,7 +27,7 @@ This repository uses **`specs/`** as the source of truth for product intent and 
 | `compound-docs/` | Implementation memory (landmines, failed approaches) — **authority for how not to break things** |
 | `client/src/domain/` | Pure TypeScript: loop math, MusicXML validation, tempo, ties, complexity caps — **no** Tone/OSMD/React |
 | `client/src/data/` | `LocalPieceRepository`, XML cache, file pickers — storage adapters |
-| `client/src/state/` | Zustand stores (`piecesStore`, `playViewStore`) |
+| `client/src/state/` | Zustand stores (`piecesStore`, `playViewStore`, `routinesStore`) |
 | `client/src/i18n/` | String catalogue (`locales/en.json`) and i18next init — import as side-effect only |
 | `client/score-web/` | OSMD surface, playback controller, cursor/loop web UI, Tone.js integration — **web-only** |
 | `client/app/` | Expo Router screens (Dashboard, PlayView route) |

@@ -24,12 +24,15 @@ let osmd: OpenSheetMusicDisplay | null = null;
 // is never set. See compound-docs/osmd-webview.md.
 const w = window as unknown as Record<string, unknown>;
 
-w.__rn_load_xml = async (xml: string) => {
+w.__rn_load_xml = async (xml: string, scheduleJson?: string) => {
   if (!osmd) {
     postToNative({ type: 'ERROR', payload: 'OSMD not ready' });
     return;
   }
   disposePlayback();
+  const externalTempoSchedule = scheduleJson
+    ? (JSON.parse(scheduleJson) as import('./playback').ExternalTempoChange[])
+    : undefined;
   try {
     // Force single-system (one-line) layout.
     // PageWidth = 10000 prevents automatic line wrapping.
@@ -53,7 +56,7 @@ w.__rn_load_xml = async (xml: string) => {
     // still be 10000px since we set it before render; query the SVG directly).
     const svgEl = container.querySelector('svg');
     container.style.width = `${svgEl ? svgEl.scrollWidth : container.scrollWidth}px`;
-    initPlayback(osmd);
+    initPlayback(osmd, externalTempoSchedule);
     postToNative({ type: 'LOADED' });
   } catch (err) {
     postToNative({ type: 'ERROR', payload: err instanceof Error ? err.message : String(err) });

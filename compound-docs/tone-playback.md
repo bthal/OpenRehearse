@@ -678,6 +678,55 @@ newPx = clientX + initialOffset - scrollOffsetPx;
 As `scrollOffsetPx` changes (edge scroll), `newPx` is recomputed to compensate, keeping the
 handle locked to the finger in viewport space.
 
+## LANDMINE: `bpm.setValueAtTime("Xi")` is broken for multi-tempo scores — use `Transport.schedule`
+
+**LANDMINE:** Scheduling BPM changes in `initPlayback` via
+`Tone.Transport.bpm.setValueAtTime(bpm, "Xi")` has three failure modes for routine playback:
+
+1. **"One beat early":** `"Xi"` is converted to an absolute AudioContext time at call time.
+   If sample loading takes ~1–2 s before `Transport.start()`, the deadline is already that many
+   seconds in the past relative to when the transport actually starts — the BPM fires ~1 beat early
+   at 40 BPM.
+
+2. **Replay at wrong BPM:** AudioParam events are one-shot. After a full playthrough the
+   AudioParam is stuck at the last tempo (e.g. 160 BPM). The next `Transport.start()` has no
+   scheduled changes left; BPM stays at 160 for the entire replay.
+
+3. **Wrong BPM when starting mid-score:** `initPlayback` only sets the initial BPM for tick 0.
+   If the user scrolls to a later section and presses play, the BPM is at the initial value
+   until the scheduled AudioParam change fires — which may be well into the score.
+
+**Fix:** Register BPM changes via `Tone.Transport.schedule()` instead. Transport events fire
+relative to transport ticks, replay correctly on every `Transport.start()`, and are skipped when
+starting past their tick:
+
+```typescript
+for (const { ticks, bpm } of scheduledChanges) {
+  const id = Tone.Transport.schedule((time) => {
+    Tone.Transport.bpm.setValueAtTime(bpm, time);
+  }, `${ticks}i`);
+  tempoScheduleEventIds.push(id);
+}
+```
+
+Before each `Transport.start()`, cancel stale AudioParam values and set the BPM for the current
+position so the correct tempo is audible from the first note:
+
+```typescript
+Tone.Transport.bpm.cancelScheduledValues(0);
+const posTicks = Tone.Transport.ticks;
+let bpmForPos = initialBpmValue;
+for (const { ticks, bpm } of tempoChangeSchedule) {
+  if (ticks <= posTicks) bpmForPos = bpm;
+  else break;
+}
+Tone.Transport.bpm.value = bpmForPos;
+```
+
+Track event IDs in `tempoScheduleEventIds[]` and clear with `Tone.Transport.clear(id)` in
+`disposePlayback`. Also clear and re-register on every `initPlayback` call so stale events from
+a previous score load don't accumulate.
+
 ## PATTERN: run handle drag in a RAF loop, not only on `touchmove`
 
 `touchmove` fires only when the finger moves. Edge-scrolling must continue even when the finger

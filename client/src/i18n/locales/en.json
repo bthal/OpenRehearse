@@ -12,12 +12,18 @@
     "warmUps": "Warm-ups",
     "hanon": "Hanon I",
     "scales": "Scales",
+    "routines": "Routines",
+    "newRoutine": "New Routine",
+    "deleteRoutineTitle": "Delete routine?",
+    "deleteRoutineMessage": "Remove \"{{title}}\"? This cannot be undone.",
+    "deleteRoutinesTitle": "Delete {{count}} routines?",
+    "deleteRoutinesMessage": "Remove these {{count}} routines? This cannot be undone.",
+    "deleteConfirm": "Delete",
     "pieces": "Pieces",
     "emptyTitle": "No pieces yet",
-    "emptyDescription": "Import a MusicXML score to start practicing. Your files stay on this device — nothing is uploaded.",
     "importScore": "Import score",
     "importMxl": "Import .mxl-File",
-    "privacyNote": "Your files stay on this device — nothing is uploaded.",
+    "privacyNote": "Your files stay on this device — \nnothing is uploaded.",
     "importFailed": "Import failed"
   },
   "playView": {
@@ -58,6 +64,33 @@
     "deletePiece": "Delete piece"
   },
   "warmUpRow": {
-    "description": "Warm-up exercise"
+    "description": "Exercise"
+  },
+  "routineEdit": {
+    "newTitle": "New Routine",
+    "editTitle": "Edit Routine",
+    "namePlaceholder": "Routine name…",
+    "addExercise": "Add Exercise",
+    "addExerciseHanon": "Hanon I",
+    "addExerciseScales": "Scale",
+    "addExercisePause": "Pause",
+    "deleteBlockTitle": "Remove block?",
+    "deleteBlockConfirm": "Remove this block from the routine?",
+    "unsavedTitle": "Unsaved changes",
+    "unsavedMessage": "Discard changes and go back?",
+    "unsavedDiscard": "Discard",
+    "validationNoPause": "Last block cannot be a pause.",
+    "validationNoBlocks": "Add at least one exercise block."
+  },
+  "routineRow": {
+    "exercise_one": "{{count}} exercise",
+    "exercise_other": "{{count}} exercises"
+  },
+  "routinePlay": {
+    "preparingScore": "Preparing score…",
+    "loadingScore": "Loading score…",
+    "couldNotRender": "Could not render score",
+    "routineNotFound": "Routine not found.",
+    "failedToGenerate": "Failed to generate score."
   }
 }

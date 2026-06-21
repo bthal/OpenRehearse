@@ -100,6 +100,10 @@ let scrollMaxPx = 0; // translateX that puts the first note at center
 let momentumFrameId: number | null = null;
 let touchHandlersAttached = false;
 let loopRegion: LoopRegion | null = null;
+// Tempo change schedule — kept for BPM lookup at arbitrary seek positions.
+let tempoScheduleEventIds: number[] = [];
+let tempoChangeSchedule: TempoChange[] = [];
+let initialBpmValue = 120;
 // Set when a loop is created or its handles are moved; cleared on next startPlayback
 // so that play always jumps to loop A after a create/edit.
 let loopModified = false;
@@ -123,12 +127,24 @@ function hideCursorEl(): void {
 
 // ─── Build timelines ──────────────────────────────────────────────────────────
 
+interface TempoChange {
+  ticks: number;
+  bpm: number;
+}
+
+export interface ExternalTempoChange {
+  quarterBeat: number;
+  bpm: number;
+}
+
 function buildTimelines(osmd: OpenSheetMusicDisplay): {
   noteEvents: NoteEvent[];
   scoreBpm: number;
+  tempoChanges: TempoChange[];
 } {
   const noteEvents: NoteEvent[] = [];
   const steps: CursorStep[] = [];
+  const tempoChanges: TempoChange[] = [];
 
   osmd.cursor.reset();
   osmd.cursor.show();
@@ -146,6 +162,7 @@ function buildTimelines(osmd: OpenSheetMusicDisplay): {
   // next note only starts after the fermata has fully sounded.
   let tickShift = 0;
   let osmdIdx = 0; // cursor.next() call count — shared by hold steps at the same position
+  let lastBpm = scoreBpm;
   downbeatTicks = new Set();
 
   while (!osmd.cursor.Iterator.EndReached) {
@@ -253,6 +270,13 @@ function buildTimelines(osmd: OpenSheetMusicDisplay): {
       tickShift += fermataExtraTicks;
     }
 
+    // Track tempo changes so multi-tempo scores (routines) schedule BPM correctly.
+    const stepBpm = osmd.cursor.Iterator.CurrentBpm;
+    if (stepBpm > 0 && stepBpm < 400 && Math.abs(stepBpm - lastBpm) > 0.5) {
+      tempoChanges.push({ ticks: Math.round(expandedQuarters * TONE_PPQ), bpm: stepBpm });
+      lastBpm = stepBpm;
+    }
+
     osmdIdx++;
     osmd.cursor.next();
   }
@@ -273,7 +297,7 @@ function buildTimelines(osmd: OpenSheetMusicDisplay): {
   cursorSteps = steps;
   osmd.cursor.reset();
 
-  return { noteEvents, scoreBpm };
+  return { noteEvents, scoreBpm, tempoChanges };
 }
 
 // ─── Score translation ────────────────────────────────────────────────────────
@@ -775,11 +799,14 @@ export function toggleMetronome(): void {
 
 // ─── Public API ───────────────────────────────────────────────────────────────
 
-export function initPlayback(osmd: OpenSheetMusicDisplay): void {
+export function initPlayback(
+  osmd: OpenSheetMusicDisplay,
+  externalTempoSchedule?: ExternalTempoChange[],
+): void {
   osmdRef = osmd;
   disposePlayback();
 
-  const { noteEvents, scoreBpm } = buildTimelines(osmd);
+  const { noteEvents, scoreBpm, tempoChanges: detectedChanges } = buildTimelines(osmd);
 
   osmdEl = document.getElementById('osmd');
   handleAEl = document.getElementById('loop-handle-a');
@@ -824,8 +851,38 @@ export function initPlayback(osmd: OpenSheetMusicDisplay): void {
   hideCursorEl();
   applyTranslate(scrollMaxPx);
 
-  Tone.Transport.bpm.value = scoreBpm;
-  postToNative({ type: 'SCORE_BPM', payload: scoreBpm });
+  let initialBpm = scoreBpm;
+  const scheduledChanges: TempoChange[] = [];
+  if (externalTempoSchedule && externalTempoSchedule.length > 0) {
+    for (const { quarterBeat, bpm } of externalTempoSchedule) {
+      const ticks = Math.round(quarterBeat * TONE_PPQ);
+      if (ticks === 0) {
+        initialBpm = bpm;
+      } else {
+        scheduledChanges.push({ ticks, bpm });
+      }
+    }
+  } else {
+    scheduledChanges.push(...detectedChanges);
+  }
+
+  // Clear any events from a previous initPlayback before registering new ones.
+  for (const id of tempoScheduleEventIds) Tone.Transport.clear(id);
+  tempoScheduleEventIds = [];
+  initialBpmValue = initialBpm;
+  tempoChangeSchedule = scheduledChanges;
+
+  // Use Transport.schedule so BPM changes fire at the correct tick on every play/replay,
+  // independent of the gap between initPlayback and Transport.start (which would corrupt
+  // absolute audio-context times computed by setValueAtTime at init time).
+  Tone.Transport.bpm.value = initialBpm;
+  for (const { ticks, bpm } of scheduledChanges) {
+    const id = Tone.Transport.schedule((time) => {
+      Tone.Transport.bpm.setValueAtTime(bpm, time);
+    }, `${ticks}i`);
+    tempoScheduleEventIds.push(id);
+  }
+  postToNative({ type: 'SCORE_BPM', payload: initialBpm });
 
   sampler = new Tone.Sampler({
     urls: PIANO_URLS,
@@ -859,6 +916,20 @@ export async function startPlayback(): Promise<void> {
     cancelAnimationFrame(momentumFrameId);
     momentumFrameId = null;
   }
+
+  // Before each play, cancel any AudioParam BPM values left over from the previous
+  // playthrough (they've already been applied and won't replay on Transport.start),
+  // then set the BPM that matches the current transport position so the correct tempo
+  // is audible from the first note. Transport.schedule events will fire the remaining
+  // changes at the right ticks as playback progresses.
+  Tone.Transport.bpm.cancelScheduledValues(0);
+  const posTicks = Tone.Transport.ticks;
+  let bpmForPos = initialBpmValue;
+  for (const { ticks, bpm } of tempoChangeSchedule) {
+    if (ticks <= posTicks) bpmForPos = bpm;
+    else break;
+  }
+  Tone.Transport.bpm.value = bpmForPos;
 
   // If a loop is active and was just created/edited (loopModified), or transport is
   // outside [aTicks, bTicks], seek to A before starting.
@@ -915,6 +986,11 @@ export function disposePlayback(): void {
     momentumFrameId = null;
   }
   if (Tone.Transport.state !== 'stopped') Tone.Transport.stop();
+  Tone.Transport.bpm.cancelScheduledValues(0);
+  for (const id of tempoScheduleEventIds) Tone.Transport.clear(id);
+  tempoScheduleEventIds = [];
+  tempoChangeSchedule = [];
+  initialBpmValue = 120;
   part?.dispose();
   part = null;
   sampler?.dispose();
