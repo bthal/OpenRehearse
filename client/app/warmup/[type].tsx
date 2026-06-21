@@ -132,6 +132,7 @@ export default function WarmUpView() {
     settings.octaves,
     setLoadingScore,
     setScoreError,
+    t,
   ]);
 
   useEffect(() => {

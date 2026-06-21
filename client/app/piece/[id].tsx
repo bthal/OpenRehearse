@@ -115,7 +115,7 @@ export default function PlayView() {
       setLoadingScore(false);
       setScoreError(err instanceof Error ? err.message : t('playView.failedToReadScore'));
     }
-  }, [piece, setLoadingScore, setScoreError]);
+  }, [piece, setLoadingScore, setScoreError, t]);
 
   useEffect(() => {
     if (webViewReady) void sendXml();
