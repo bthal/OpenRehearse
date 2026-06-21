@@ -44,12 +44,14 @@ interface PickerState {
 // Omit 'type' from each member before intersecting so the patch is not `never`
 type BlockPatch = Partial<Omit<ExerciseBlock, 'type'> & Omit<PauseBlock, 'type'>>;
 
+type TFn = (key: string, opts?: Record<string, unknown>) => string;
+
 // ─── Constants (defined outside component) ────────────────────────────────────
 
-const HAND_OPTIONS: { label: string; value: WarmUpHand }[] = [
-  { label: 'Both Hands', value: 'both' },
-  { label: 'Right Hand', value: 'right' },
-  { label: 'Left Hand', value: 'left' },
+const HAND_OPTIONS: { tKey: string; value: WarmUpHand }[] = [
+  { tKey: 'routineEdit.handBoth', value: 'both' },
+  { tKey: 'routineEdit.handRight', value: 'right' },
+  { tKey: 'routineEdit.handLeft', value: 'left' },
 ];
 
 function defaultExerciseBlock(type: 'hanon' | 'scales'): ExerciseBlock {
@@ -63,14 +65,18 @@ function defaultExerciseBlock(type: 'hanon' | 'scales'): ExerciseBlock {
   };
 }
 
-function keyLabel(pitchClass: number, mode: 'major' | 'minor'): string {
+function keyLabel(pitchClass: number, mode: 'major' | 'minor', t: TFn): string {
   const label =
     WARMUP_KEYS.find((k) => k.pitchClass === pitchClass && k.mode === mode)?.label ?? 'C';
-  return label.replace(/m$/, '') + ' ' + mode;
+  return (
+    label.replace(/m$/, '') +
+    ' ' +
+    t(mode === 'major' ? 'routineEdit.modeMajor' : 'routineEdit.modeMinor')
+  );
 }
 
-function octavesLabel(octaves: WarmUpOctaves): string {
-  return `${octaves} ${octaves === 1 ? 'Octave' : 'Octaves'}`;
+function octavesLabel(octaves: WarmUpOctaves, t: TFn): string {
+  return t('routineEdit.octave', { count: octaves });
 }
 
 // ─── Small presentational components (defined outside to satisfy lint) ─────────
@@ -238,10 +244,10 @@ export default function RoutineEditScreen() {
       options = WARMUP_BPMS.map((b) => ({ label: String(b), value: b }));
       currentValue = block.bpm;
     } else if (type === 'hand' && block.type !== 'pause') {
-      options = HAND_OPTIONS.map((h) => ({ label: h.label, value: h.value }));
+      options = HAND_OPTIONS.map((h) => ({ label: t(h.tKey), value: h.value }));
       currentValue = block.hand;
     } else if (type === 'octaves' && block.type !== 'pause') {
-      options = WARMUP_OCTAVES.map((o) => ({ label: octavesLabel(o), value: o }));
+      options = WARMUP_OCTAVES.map((o) => ({ label: octavesLabel(o, t), value: o }));
       currentValue = block.octaves;
     }
 
@@ -254,7 +260,7 @@ export default function RoutineEditScreen() {
       blockKey: block._key,
       type: 'measures',
       options: PAUSE_MEASURES.map((m) => ({
-        label: `${m} ${m === 1 ? 'measure' : 'measures'}`,
+        label: t('routineEdit.measure', { count: m }),
         value: m,
       })),
       currentValue: block.measures,
@@ -272,7 +278,7 @@ export default function RoutineEditScreen() {
           atIndex,
           type: 'addMeasures',
           options: PAUSE_MEASURES.map((m) => ({
-            label: `${m} ${m === 1 ? 'Measure' : 'Measures'}`,
+            label: t('routineEdit.measure', { count: m }),
             value: m,
           })),
           currentValue: 1,
@@ -385,7 +391,7 @@ export default function RoutineEditScreen() {
                     {block.type !== 'pause' ? (
                       <View className="mt-2 flex-row flex-wrap gap-2">
                         <Pill
-                          label={keyLabel(block.pitchClass, block.mode)}
+                          label={keyLabel(block.pitchClass, block.mode, t)}
                           onPress={() => openPicker(block._key, 'key', block)}
                         />
                         <Pill
@@ -393,20 +399,21 @@ export default function RoutineEditScreen() {
                           onPress={() => openPicker(block._key, 'bpm', block)}
                         />
                         <Pill
-                          label={
-                            HAND_OPTIONS.find((h) => h.value === block.hand)?.label ?? 'Both Hands'
-                          }
+                          label={t(
+                            HAND_OPTIONS.find((h) => h.value === block.hand)?.tKey ??
+                              'routineEdit.handBoth',
+                          )}
                           onPress={() => openPicker(block._key, 'hand', block)}
                         />
                         <Pill
-                          label={octavesLabel(block.octaves)}
+                          label={octavesLabel(block.octaves, t)}
                           onPress={() => openPicker(block._key, 'octaves', block)}
                         />
                       </View>
                     ) : (
                       <View className="mt-2 flex-row">
                         <Pill
-                          label={`${block.measures} ${block.measures === 1 ? 'measure' : 'measures'}`}
+                          label={t('routineEdit.measure', { count: block.measures })}
                           onPress={() => openMeasuresPicker(block)}
                         />
                       </View>

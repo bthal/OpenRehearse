@@ -80,7 +80,16 @@
     "unsavedMessage": "Discard changes and go back?",
     "unsavedDiscard": "Discard",
     "validationNoPause": "Last block cannot be a pause.",
-    "validationNoBlocks": "Add at least one exercise block."
+    "validationNoBlocks": "Add at least one exercise block.",
+    "handBoth": "Both Hands",
+    "handRight": "Right Hand",
+    "handLeft": "Left Hand",
+    "modeMajor": "major",
+    "modeMinor": "minor",
+    "octave_one": "{{count}} Octave",
+    "octave_other": "{{count}} Octaves",
+    "measure_one": "{{count}} Measure",
+    "measure_other": "{{count}} Measures"
   },
   "routineRow": {
     "exercise_one": "{{count}} exercise",
