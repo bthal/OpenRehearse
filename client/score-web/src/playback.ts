@@ -588,11 +588,6 @@ function initTouchHandlers(): void {
 
 // ─── Loop handle dragging ─────────────────────────────────────────────────────
 
-function autoScrollForDrag(clientX: number): void {
-  const min = viewportWidth - scoreWidth;
-  if (clientX < EDGE_ZONE) applyTranslate(Math.min(0, scrollOffsetPx + 8));
-  else if (clientX > viewportWidth - EDGE_ZONE) applyTranslate(Math.max(min, scrollOffsetPx - 8));
-}
 
 function updateLoopOverlay(): void {
   if (!loopRegion) return;
@@ -611,19 +606,28 @@ function initLoopHandles(): void {
     if (!el) return;
     let startTouchX = 0;
     let startPx = 0;
+    let startScrollOffset = 0;
+    let currentClientX = 0;
+    let dragRafId: number | null = null;
 
-    el.addEventListener('touchstart', (e) => {
-      e.stopPropagation();
-      if (Tone.Transport.state === 'started') pausePlayback();
-      startTouchX = e.touches[0]?.clientX ?? 0;
-      startPx = which === 'a' ? (loopRegion?.aPx ?? 0) : (loopRegion?.bPx ?? 0);
-    }, { passive: false });
-
-    el.addEventListener('touchmove', (e) => {
-      e.preventDefault();
+    function dragFrame(): void {
       if (!loopRegion) return;
-      const dx = (e.touches[0]?.clientX ?? 0) - startTouchX;
-      let newPx = startPx + dx;
+
+      // Proportional edge-scroll: faster the closer the finger is to the viewport edge.
+      const edgeLeft = currentClientX < EDGE_ZONE ? (EDGE_ZONE - currentClientX) / EDGE_ZONE : 0;
+      const edgeRight = currentClientX > viewportWidth - EDGE_ZONE
+        ? (currentClientX - (viewportWidth - EDGE_ZONE)) / EDGE_ZONE : 0;
+      if (edgeLeft > 0) {
+        applyTranslate(Math.min(scrollMaxPx, scrollOffsetPx + Math.ceil(edgeLeft * 8)));
+      } else if (edgeRight > 0) {
+        applyTranslate(Math.max(scrollMinPx, scrollOffsetPx - Math.ceil(edgeRight * 8)));
+      }
+
+      // Project finger into score space, preserving the initial finger-to-handle offset.
+      // Using current scrollOffsetPx (possibly just updated above) keeps the handle
+      // locked to the finger even while the score scrolls under it.
+      const initialOffset = startPx + startScrollOffset - startTouchX;
+      let newPx = currentClientX + initialOffset - scrollOffsetPx;
       const scorePxMin = cursorSteps[0]?.pxLeft ?? 0;
       const scorePxMax = cursorSteps[cursorSteps.length - 1]?.pxLeft ?? scoreWidth;
 
@@ -640,10 +644,30 @@ function initLoopHandles(): void {
       }
 
       updateLoopOverlay();
-      autoScrollForDrag(e.touches[0]?.clientX ?? 0);
+      dragRafId = requestAnimationFrame(dragFrame);
+    }
+
+    el.addEventListener('touchstart', (e) => {
+      e.stopPropagation();
+      if (Tone.Transport.state === 'started') pausePlayback();
+      currentClientX = e.touches[0]?.clientX ?? 0;
+      startTouchX = currentClientX;
+      startPx = which === 'a' ? (loopRegion?.aPx ?? 0) : (loopRegion?.bPx ?? 0);
+      startScrollOffset = scrollOffsetPx;
+      if (dragRafId !== null) cancelAnimationFrame(dragRafId);
+      dragRafId = requestAnimationFrame(dragFrame);
+    }, { passive: false });
+
+    el.addEventListener('touchmove', (e) => {
+      e.preventDefault();
+      currentClientX = e.touches[0]?.clientX ?? 0;
     }, { passive: false });
 
     el.addEventListener('touchend', () => {
+      if (dragRafId !== null) {
+        cancelAnimationFrame(dragRafId);
+        dragRafId = null;
+      }
       loopModified = true;
     }, { passive: true });
   }
@@ -677,8 +701,8 @@ function createLoop(): void {
   Tone.Transport.loop = true;
   Tone.Transport.loopStart = `${aTicks}i`;
   Tone.Transport.loopEnd = `${bTicks}i`;
-  if (handleAEl) handleAEl.style.display = 'block';
-  if (handleBEl) handleBEl.style.display = 'block';
+  if (handleAEl) handleAEl.style.display = 'flex';
+  if (handleBEl) handleBEl.style.display = 'flex';
   if (shadeEl) shadeEl.style.display = 'block';
   updateLoopOverlay();
   loopModified = true;

@@ -650,3 +650,46 @@ interpolating toward a next-step that lies outside the loop:
 const rawPx = currPx + fraction * (nextPx - currPx);
 const interpolatedPx = loopRegion !== null ? Math.min(rawPx, loopRegion.bPx) : rawPx;
 ```
+
+## LANDMINE: `dx` accumulation for handle drag breaks when edge-scroll runs concurrently
+
+Computing `newPx = startPx + (clientX - startTouchX)` tracks the finger correctly while the
+score is stationary, but fails the moment edge-scrolling shifts `scrollOffsetPx`: the score
+moves while `startPx` stays fixed, so the handle drifts left relative to the finger on every
+auto-scroll step.
+
+**Fix:** project the finger's viewport position into score space on every frame using the
+*current* `scrollOffsetPx`. Capture `startScrollOffset = scrollOffsetPx` at `touchstart`,
+then in each frame:
+
+```typescript
+const initialOffset = startPx + startScrollOffset - startTouchX; // constant
+newPx = clientX + initialOffset - scrollOffsetPx;
+```
+
+As `scrollOffsetPx` changes (edge scroll), `newPx` is recomputed to compensate, keeping the
+handle locked to the finger in viewport space.
+
+## PATTERN: run handle drag in a RAF loop, not only on `touchmove`
+
+`touchmove` fires only when the finger moves. Edge-scrolling must continue even when the finger
+is stationary near the viewport edge.
+
+**Fix:** `touchmove` only updates a `currentClientX` variable (plus `e.preventDefault()`).
+All scroll + handle-reposition logic runs in a `requestAnimationFrame` loop started on
+`touchstart` and cancelled on `touchend`:
+
+```typescript
+function dragFrame(): void {
+  // 1. proportional edge scroll — update scrollOffsetPx
+  // 2. newPx = currentClientX + initialOffset - scrollOffsetPx
+  // 3. clamp, update loopRegion, updateLoopOverlay()
+  dragRafId = requestAnimationFrame(dragFrame);
+}
+el.addEventListener('touchstart', () => { dragRafId = requestAnimationFrame(dragFrame); });
+el.addEventListener('touchmove',  (e) => { e.preventDefault(); currentClientX = e.touches[0].clientX; });
+el.addEventListener('touchend',   () => { cancelAnimationFrame(dragRafId!); loopModified = true; });
+```
+
+Because auto-scroll runs before the `newPx` projection in each frame, `scrollOffsetPx` is
+already up-to-date when the handle position is computed — no single-frame lag.
