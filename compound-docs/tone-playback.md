@@ -73,23 +73,31 @@ Filter before scheduling:
 const notes = osmd.cursor.NotesUnderCursor();
 for (const note of notes) {
   if (note.isRest() || note.IsGraceNote) continue; // skip rests and grace notes
-  if (note.halfTone <= 0 || note.halfTone > 127) continue; // sanity-check MIDI range
+  // OSMD halfTone is semitones from C0; add 12 for standard MIDI. Piano range: A0=9, C8=96.
+  if (note.halfTone < 9 || note.halfTone > 115) continue;
   ...
+  noteEvents.push({ ..., midi: note.halfTone + 12, ... });
 }
 ```
 
-`Note.halfTone` is the transposed MIDI-pitch-equivalent value (C4 = 60 matching standard MIDI).
-For non-transposing instruments (piano) it equals the concert pitch.
+`Note.halfTone` is semitones from C0 (OSMD convention) — one octave below standard MIDI.
+Always add 12 before passing to any Tone.js MIDI function.
 
-## OSMD cursor halftone alignment with MIDI
+## LANDMINE: OSMD `Note.halfTone` is one octave below standard MIDI — add 12
 
-**PATTERN:** `Note.halfTone` in OSMD maps directly to standard MIDI pitch values.
-For concert-pitch instruments: C4 = 60, A4 = 69. The formula is:
-`halfTone = fundamentalNote (NoteEnum) + accidentalHalfTones + (octave + 1) * 12`
-where OSMD's octave numbering uses XML standard (C4 = octave 4).
+**LANDMINE:** `Note.halfTone` in OSMD counts semitones from C0 (octave * 12 + fundamentalNote).
+Standard MIDI counts from C-1 (C0 = 12, C4 = 60). OSMD's C4 = 48, which Tone.js maps to C3 —
+every note plays one octave too low.
 
-This means `Tone.Frequency(note.halfTone, 'midi').toFrequency()` gives the correct Hz value
-directly, with no offset.
+**Fix:** add 12 whenever feeding `halfTone` to a Tone.js MIDI function:
+
+```typescript
+const midi = note.halfTone + 12; // OSMD C0=0 → MIDI C0=12
+const noteName = Tone.Frequency(midi, 'midi').toNote();
+samplerRef.triggerAttackRelease(noteName, durSec, time);
+```
+
+Piano range after the offset: A0 = 21, C8 = 108 (standard MIDI).
 
 ## Tone.Sampler with Salamander piano samples (CDN, WebView cache)
 

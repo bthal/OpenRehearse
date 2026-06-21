@@ -178,7 +178,9 @@ function buildTimelines(osmd: OpenSheetMusicDisplay): {
       for (const note of notes) {
         if (note.isRest() || note.IsGraceNote) continue;
         if (note.NoteTie && note.NoteTie.StartNote !== note) continue;
-        if (note.halfTone <= 0 || note.halfTone > 127) continue;
+        // OSMD halfTone is semitones from C0; standard MIDI is semitones from C-1,
+        // so add 12 to align octaves. Valid piano range: A0 (9) to C8 (96).
+        if (note.halfTone < 9 || note.halfTone > 115) continue;
         const arp = note.ParentVoiceEntry.Arpeggio;
         if (arp) {
           const group = arpMap.get(arp);
@@ -198,7 +200,7 @@ function buildTimelines(osmd: OpenSheetMusicDisplay): {
         const normalDurQ = note.Length.RealValue * WHOLE_TO_QUARTER;
         const durQ = normalDurQ * (hasFermata ? FERMATA_DURATION_MULTIPLIER : 1);
         if (durQ <= 0) continue;
-        noteEvents.push({ time: `${baseTicks}i`, midi: note.halfTone, durQ });
+        noteEvents.push({ time: `${baseTicks}i`, midi: note.halfTone + 12, durQ });
         if (hasFermata) {
           const extra = Math.round(normalDurQ * (FERMATA_DURATION_MULTIPLIER - 1) * TONE_PPQ);
           if (extra > fermataExtraTicks) {
