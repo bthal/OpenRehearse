@@ -685,7 +685,16 @@ function setOverlayBounds(top: number, height: number): void {
 }
 
 function createLoop(): void {
-  const step = cursorSteps[currentCursorStep < 0 ? 0 : currentCursorStep];
+  // Stop momentum so the overlay is stationary from the moment it appears.
+  if (momentumFrameId !== null) {
+    cancelAnimationFrame(momentumFrameId);
+    momentumFrameId = null;
+  }
+  // currentCursorStep is only synced when momentum ends; compute the actual
+  // current center from scrollOffsetPx, which is up-to-date every RAF frame.
+  const centerInScore = viewportWidth / 2 - scrollOffsetPx;
+  const stepIdx = nearestStepToPx(centerInScore);
+  const step = cursorSteps[stepIdx < 0 ? 0 : stepIdx];
   if (!step) return;
   const scorePxMin = cursorSteps[0]?.pxLeft ?? 0;
   const scorePxMax = cursorSteps[cursorSteps.length - 1]?.pxLeft ?? scoreWidth;
