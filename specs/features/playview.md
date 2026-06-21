@@ -94,6 +94,11 @@ Slices: `activePieceId`, `webViewReady`, `isLoadingScore`, `scoreError`, `isPlay
 - [x] Loop handles are continuously draggable; A/B minimum gap (`LOOP_MIN_GAP_PX`) enforced. *(Phase 4)*
 - [x] Dragging a handle auto-scrolls the view to keep the active handle visible. *(Phase 4)*
 - [x] Playback wraps from B to A with immediate jump. *(Phase 4)*
+- [x] Cursor is visually clamped to the loop region [A, B]; never drifts into handle areas.
+- [x] Tapping the score (outside a handle) toggles play/pause.
+- [x] Creating or editing a loop pauses playback; play after any create/edit always seeks to A first.
+- [x] Handles clamp to first/last note pixel positions (not raw SVG width). Loop placed near
+  the end of the piece anchors B at the last note and derives A backward by `LOOP_DEFAULT_PX`.
 - [x] No separate title/composer header; back button lives at the top of the toolbar. *(Phase 5)*
 - [x] Speed picker collapses to active label; tapping pauses playback and expands a horizontal
   animated overlay; closes after selection. *(Phase 5)*

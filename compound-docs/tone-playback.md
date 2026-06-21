@@ -269,16 +269,31 @@ OSMD's cursor iterator follows repeats by default (`EngravingRules.CursorIgnoreR
 resulting linear timeline offset so `Tone.Part` events and cursor steps are both sequenced
 correctly.
 
-## `cursor.reset()` + repeated `cursor.next()` for backward seeks
+## LANDMINE: backward OSMD cursor seek inside RAF loop causes visual stall proportional to piece length
 
-**KNOWN COST:** OSMD's cursor has no random-access seek — the only way to move backward is
-`cursor.reset()` followed by N calls to `cursor.next()`. For a piece with N notes before the
-target, this is O(N). In practice, backward seeks happen only on stop/replay (target = 0, so 0
-`next()` calls) and are not called in the forward-play hot path. This is acceptable for MVP.
+**LANDMINE:** OSMD has no random-access seek. Moving the cursor backward requires `cursor.reset()`
+followed by N calls to `cursor.next()` to reach the target position. For a 30-measure piece with
+a loop near the end, N can exceed 200; at ~0.5 ms per call this is 100+ ms of synchronous
+main-thread work.
 
-If large-score performance becomes a concern (e.g. re-seeking mid-piece), pre-build a list of
-GraphicalNote DOM positions and use CSS `transform` to animate a custom caret instead of calling
-`cursor.next()`. That approach requires an ADR (see `specs/features/playview.md`).
+Every loop wrap triggers a backward seek from the loop-end step back to the loop-start step.
+Calling this inside `animateCursorLoop` blocks the RAF frame from returning, so the visual update
+(`el.style.left` + `translateX`) and Tone.js transport tick reads are both delayed. The lag grows
+linearly with piece length — a short piece or early loop is fast; a 30+ measure piece with a loop
+near the end stalls for hundreds of milliseconds per wrap. Deferring via `setTimeout(0)` does not
+help: the stall moves to a macrotask that still blocks the next RAF frame from being scheduled.
+
+**Fix:** Do not advance the OSMD cursor iterator inside the RAF hot path at all. The cursor
+element's visual position is driven by `cursorSteps[step].pxLeft` written directly to
+`el.style.left` every frame — OSMD's internal iterator state contributes nothing to rendered
+output (the cursor element is `visibility: hidden`; we override its `style.left` every frame
+anyway). In `animateCursorLoop`, only update `currentCursorStep = targetStep`. Reserve
+`advanceCursorTo` for `startPlayback` and `_stopInternal`, where it runs before
+`Transport.start()` and any synchronous cost is a one-time charge, not a per-wrap stall.
+
+Track the actual OSMD cursor position in a separate `osmdActualIdx` variable (updated in
+`advanceCursorTo`) so forward seeks from `startPlayback` can compute the right delta without
+relying on `currentCursorStep` (which now reflects the visual step, not the OSMD iterator step).
 
 ## One-line OSMD layout: `PageWidth` alone is not enough (Phase 4)
 
@@ -557,3 +572,81 @@ Cancel `momentumFrameId` on: new `touchstart` (user grabs again), `startPlayback
 conflict), `_stopInternal`, and `disposePlayback`. Call `syncCursorToCenter()` whenever
 momentum stops — naturally, at boundary, or on cancel — to keep `currentCursorStep` and
 `Tone.Transport.ticks` in sync with the resting scroll position.
+
+## Loop boundary tick semantics: ceiling for start, next-step for end
+
+**PATTERN:** Loop A (`loopStart`) and loop B (`loopEnd`) are set via `Tone.Transport.loopStart`
+/ `loopEnd`. Choosing the wrong tick for each boundary causes notes to be skipped (A) or the
+last note to not sound before the wrap (B).
+
+**`pxToLoopStartTicks` — ceiling search:**
+`aTicks` should be the first note AT OR AFTER the handle-A pixel position. Use a binary ceiling
+search over `cursorSteps` (first step whose `pxLeft >= aPx`). A floor search would include notes
+just before A that the user intended to exclude.
+
+**`pxToLoopEndTicks` — next-step ticks:**
+`bTicks` should be set to the ticks of the step AFTER the last included note, not the last included
+note's own ticks. If set to the last note's ticks, Tone fires the wrap at the same moment the last
+note is scheduled, so the note never sounds before the loop restarts. Use:
+```typescript
+function pxToLoopEndTicks(px: number): number {
+  const floorIdx = nearestStepToPx(px); // last step whose pxLeft ≤ bPx
+  const nextStep = cursorSteps[floorIdx + 1];
+  if (nextStep !== undefined) return Math.round(nextStep.quarters * TONE_PPQ);
+  return Math.round(totalQuarters * TONE_PPQ); // B is at the final note
+}
+```
+When B lands on the final note, there is no next step, so fall back to `totalQuarters * TONE_PPQ`
+(one quarter past the last note's onset).
+
+## LANDMINE: `Iterator.EndReached` fires while cursor is still AT the final note
+
+**LANDMINE:** Some OSMD builds set `cursor.Iterator.EndReached = true` while the cursor is still
+positioned AT the final note — not past it. The standard `while (!EndReached)` walk exits before
+pushing that position, so the final note is never captured in `cursorSteps`. Effects:
+- Handle B cannot reach the last note's pixel position (it clamps to the second-to-last note).
+- The cursor never visually reaches the final note during playback.
+- `pxToLoopEndTicks` returns wrong ticks for B set to the final note.
+
+**Fix:** After the while-loop, check whether the cursor element's current `style.left` is strictly
+beyond the last captured step's `pxLeft`. If so, capture it as an extra step:
+
+```typescript
+const finalPxLeft = parseFloat(el?.style.left ?? '0');
+const lastCapturedPx = steps[steps.length - 1]?.pxLeft ?? -1;
+if (finalPxLeft > lastCapturedPx) {
+  const q = osmd.cursor.Iterator.CurrentEnrolledTimestamp.RealValue * WHOLE_TO_QUARTER;
+  const expandedQ = q + tickShift / TONE_PPQ;
+  lastExpandedQuarters = expandedQ;
+  steps.push({ quarters: expandedQ, pxLeft: finalPxLeft, osmdIdx });
+}
+```
+
+Place this immediately after the while-loop, before setting `totalQuarters`.
+
+## PATTERN: `effectiveQE` snap — prevent cursor sitting at B for an extra RAF frame
+
+When Tone's transport loops, `Transport.ticks` wraps from `bTicks` back to `aTicks` on the audio
+thread. The main-thread RAF callback may fire one or more times while `Transport.ticks` still
+reflects the old (pre-wrap) value, leaving the cursor visually parked at the B position for a
+frame before jumping back.
+
+**Fix:** Compute an `effectiveQE` (effective quarters elapsed) that snaps to `aTicks/TONE_PPQ`
+the moment `quartersElapsed` reaches or passes `bTicks/TONE_PPQ`:
+
+```typescript
+const quartersElapsed = Tone.Transport.ticks / TONE_PPQ;
+const effectiveQE =
+  loopRegion !== null && quartersElapsed >= loopRegion.bTicks / TONE_PPQ
+    ? loopRegion.aTicks / TONE_PPQ
+    : quartersElapsed;
+```
+
+Use `effectiveQE` for the binary step search and the interpolation fraction. Also clamp the
+interpolated pixel to `loopRegion.bPx` so the cursor never drifts into the handle-B area when
+interpolating toward a next-step that lies outside the loop:
+
+```typescript
+const rawPx = currPx + fraction * (nextPx - currPx);
+const interpolatedPx = loopRegion !== null ? Math.min(rawPx, loopRegion.bPx) : rawPx;
+```

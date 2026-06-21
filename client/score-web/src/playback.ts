@@ -43,6 +43,7 @@ const SALAMANDER_BASE_URL = 'https://tonejs.github.io/audio/salamander/';
 
 const LOOP_MIN_GAP_PX = 40;
 const LOOP_DEFAULT_PX = 200;
+const HANDLE_WIDTH = 28;
 const EDGE_ZONE = 60;
 // Momentum scroll: fraction of velocity retained per 16 ms frame (increase toward 1 for longer glide).
 const MOMENTUM_DECELERATION = 0.95;
@@ -99,6 +100,14 @@ let scrollMaxPx = 0; // translateX that puts the first note at center
 let momentumFrameId: number | null = null;
 let touchHandlersAttached = false;
 let loopRegion: LoopRegion | null = null;
+// Set when a loop is created or its handles are moved; cleared on next startPlayback
+// so that play always jumps to loop A after a create/edit.
+let loopModified = false;
+// Tracks the actual OSMD cursor position (in terms of osmdIdx). Separate from
+// currentCursorStep so backward seeks can be deferred without losing visual sync.
+// Tracks actual OSMD cursor position (osmdIdx). Updated only in advanceCursorTo
+// (called from startPlayback/stop, never from the RAF hot path).
+let osmdActualIdx = -1;
 
 // ─── Cursor element access ────────────────────────────────────────────────────
 
@@ -250,6 +259,18 @@ function buildTimelines(osmd: OpenSheetMusicDisplay): {
     osmd.cursor.next();
   }
 
+  // Some OSMD builds set EndReached while the cursor is still AT the final note,
+  // not past it, so the while-loop exits before that position is pushed. Capture
+  // it here when pxLeft is strictly beyond the last captured step.
+  const finalPxLeft = parseFloat(el?.style.left ?? '0');
+  const lastCapturedPx = steps[steps.length - 1]?.pxLeft ?? -1;
+  if (finalPxLeft > lastCapturedPx) {
+    const q = osmd.cursor.Iterator.CurrentEnrolledTimestamp.RealValue * WHOLE_TO_QUARTER;
+    const expandedQ = q + tickShift / TONE_PPQ;
+    lastExpandedQuarters = expandedQ;
+    steps.push({ quarters: expandedQ, pxLeft: finalPxLeft, osmdIdx });
+  }
+
   totalQuarters = lastExpandedQuarters + 1;
   cursorSteps = steps;
   osmd.cursor.reset();
@@ -280,6 +301,7 @@ function advanceCursorTo(targetStep: number): void {
     osmdRef.cursor.show();
     hideCursorEl();
     currentCursorStep = -1;
+    osmdActualIdx = 0;
     return;
   }
 
@@ -287,21 +309,24 @@ function advanceCursorTo(targetStep: number): void {
   // Use osmdIdx — not the step array index — to decide how many cursor.next()
   // calls to make, so hold steps don't accidentally advance the OSMD cursor.
   const targetIdx = cursorSteps[targetStep]?.osmdIdx ?? 0;
-  const currentIdx = currentCursorStep < 0 ? -1 : (cursorSteps[currentCursorStep]?.osmdIdx ?? -1);
 
-  if (currentIdx < 0) {
+  if (osmdActualIdx < 0) {
     osmdRef.cursor.reset();
     osmdRef.cursor.show();
     hideCursorEl();
     for (let i = 0; i < targetIdx; i++) osmdRef.cursor.next();
-  } else if (targetIdx > currentIdx) {
-    for (let i = 0; i < targetIdx - currentIdx; i++) osmdRef.cursor.next();
-  } else if (targetIdx < currentIdx) {
-    // Backward seek (loop wrap or stop → replay).
+    osmdActualIdx = targetIdx;
+  } else if (targetIdx > osmdActualIdx) {
+    for (let i = 0; i < targetIdx - osmdActualIdx; i++) osmdRef.cursor.next();
+    osmdActualIdx = targetIdx;
+  } else if (targetIdx < osmdActualIdx) {
+    // Backward seek — only called from startPlayback (before Transport.start),
+    // never from the RAF hot path, so synchronous cost is acceptable.
     osmdRef.cursor.reset();
     osmdRef.cursor.show();
     hideCursorEl();
     for (let i = 0; i < targetIdx; i++) osmdRef.cursor.next();
+    osmdActualIdx = targetIdx;
   }
   currentCursorStep = targetStep;
 }
@@ -331,8 +356,32 @@ function ticksToStep(ticks: number): number {
   return best;
 }
 
-function pxToTicks(px: number): number {
-  return Math.round((cursorSteps[nearestStepToPx(px)]?.quarters ?? 0) * TONE_PPQ);
+// First step whose pxLeft ≥ px (ceiling). Used to find the first note inside the loop start.
+function ceilStepToPx(px: number): number {
+  let lo = 0, hi = cursorSteps.length - 1, best = cursorSteps.length - 1;
+  while (lo <= hi) {
+    const mid = (lo + hi) >> 1;
+    const step = cursorSteps[mid];
+    if (step !== undefined && step.pxLeft >= px) { best = mid; hi = mid - 1; }
+    else lo = mid + 1;
+  }
+  return best;
+}
+
+// Loop start snaps to the first note at or after aPx, so notes just before the
+// handle are excluded.
+function pxToLoopStartTicks(px: number): number {
+  return Math.round((cursorSteps[ceilStepToPx(px)]?.quarters ?? 0) * TONE_PPQ);
+}
+
+// Loop end is set to the step AFTER the last included note so that note has time
+// to play before the transport wraps. Falls back to totalQuarters when the last
+// included note is the final note in the piece.
+function pxToLoopEndTicks(px: number): number {
+  const floorIdx = nearestStepToPx(px);
+  const nextStep = cursorSteps[floorIdx + 1];
+  if (nextStep !== undefined) return Math.round(nextStep.quarters * TONE_PPQ);
+  return Math.round(totalQuarters * TONE_PPQ);
 }
 
 // ─── RAF animation loop ───────────────────────────────────────────────────────
@@ -345,19 +394,26 @@ function animateCursorLoop(): void {
 
   const quartersElapsed = Tone.Transport.ticks / TONE_PPQ;
 
+  // Tone.js may take a frame or two for Transport.ticks to wrap back to loopStart
+  // after the audio loop fires. Snap effectiveQE to loopStart the moment elapsed
+  // ticks pass loopEnd so the cursor jumps immediately rather than sitting at the end.
+  const effectiveQE =
+    loopRegion !== null && quartersElapsed >= loopRegion.bTicks / TONE_PPQ
+      ? loopRegion.aTicks / TONE_PPQ
+      : quartersElapsed;
+
   // Binary search for the last cursor step whose beat position ≤ current transport ticks.
   let lo = 0, hi = cursorSteps.length - 1, targetStep = 0;
   while (lo <= hi) {
     const mid = (lo + hi) >> 1;
     const step = cursorSteps[mid];
-    if (step !== undefined && step.quarters <= quartersElapsed) { targetStep = mid; lo = mid + 1; }
+    if (step !== undefined && step.quarters <= effectiveQE) { targetStep = mid; lo = mid + 1; }
     else hi = mid - 1;
   }
 
-  // Advance OSMD iterator when step changes (keeps it in sync for note highlighting).
-  if (targetStep !== currentCursorStep) {
-    advanceCursorTo(targetStep);
-  }
+  // Visual position is driven entirely by cursorSteps — OSMD iterator is not
+  // advanced here to avoid main-thread stalls on backward seeks (loop wraps).
+  currentCursorStep = targetStep;
 
   // Interpolate position between current step and the next for smooth scrolling.
   // The interpolated px is used for BOTH the score translation AND the cursor element's
@@ -366,8 +422,10 @@ function animateCursorLoop(): void {
   const nextPx = cursorSteps[targetStep + 1]?.pxLeft ?? currPx;
   const currQ = cursorSteps[targetStep]?.quarters ?? 0;
   const nextQ = cursorSteps[targetStep + 1]?.quarters ?? (currQ + 1);
-  const fraction = nextQ > currQ ? Math.min(1, (quartersElapsed - currQ) / (nextQ - currQ)) : 0;
-  const interpolatedPx = currPx + fraction * (nextPx - currPx);
+  const fraction = nextQ > currQ ? Math.min(1, (effectiveQE - currQ) / (nextQ - currQ)) : 0;
+  const rawInterpolatedPx = currPx + fraction * (nextPx - currPx);
+  // Clamp to the loop's right boundary so the cursor never wanders into handle B.
+  const interpolatedPx = loopRegion !== null ? Math.min(rawInterpolatedPx, loopRegion.bPx) : rawInterpolatedPx;
 
   // Move OSMD cursor element to interpolated position so it stays on the center line.
   const el = cursorEl();
@@ -375,7 +433,7 @@ function animateCursorLoop(): void {
 
   applyTranslate(viewportWidth / 2 - interpolatedPx);
 
-  if (quartersElapsed >= totalQuarters && totalQuarters > 0) {
+  if (quartersElapsed >= totalQuarters && totalQuarters > 0 && !Tone.Transport.loop) {
     _stopInternal();
     postToNative({ type: 'PLAYBACK_END' });
     return;
@@ -401,6 +459,9 @@ function _stopInternal(): void {
     osmdRef.cursor.reset();
     osmdRef.cursor.show();
     hideCursorEl();
+    osmdActualIdx = 0;
+  } else {
+    osmdActualIdx = -1;
   }
   currentCursorStep = 0;
   const px0 = cursorSteps[0]?.pxLeft ?? 0;
@@ -465,6 +526,9 @@ function initTouchHandlers(): void {
   let lastMoveTime = 0;
   let lastMoveX = 0;
 
+  let wasPlayingOnTouch = false;
+  let hasMoved = false;
+
   wrapper.addEventListener('touchstart', (e) => {
     if ((e.target as Element).closest('.loop-handle')) return;
     if (momentumFrameId !== null) {
@@ -472,19 +536,26 @@ function initTouchHandlers(): void {
       momentumFrameId = null;
     }
     dragging = true;
+    wasPlayingOnTouch = Tone.Transport.state === 'started';
+    hasMoved = false;
     const clientX = e.touches[0]?.clientX ?? 0;
     startX = clientX;
     startOffset = scrollOffsetPx;
     velocityPx = 0;
     lastMoveTime = 0;
     lastMoveX = clientX;
-    if (Tone.Transport.state === 'started') pausePlayback();
+    // Don't pause immediately — wait to see if this is a tap or a drag.
   }, { passive: true });
 
   wrapper.addEventListener('touchmove', (e) => {
     if (!dragging) return;
     const now = performance.now();
     const clientX = e.touches[0]?.clientX ?? 0;
+    // First significant movement: mark as drag and pause if playing.
+    if (!hasMoved && Math.abs(clientX - startX) > 8) {
+      hasMoved = true;
+      if (wasPlayingOnTouch) pausePlayback();
+    }
     if (lastMoveTime > 0 && now > lastMoveTime) {
       const dt = now - lastMoveTime;
       const inst = (clientX - lastMoveX) / dt;
@@ -498,6 +569,15 @@ function initTouchHandlers(): void {
   wrapper.addEventListener('touchend', () => {
     if (!dragging) return;
     dragging = false;
+    if (!hasMoved) {
+      // Tap: toggle play/pause.
+      if (Tone.Transport.state === 'started') {
+        pausePlayback();
+      } else {
+        void startPlayback();
+      }
+      return;
+    }
     if (Math.abs(velocityPx) > 0.05) {
       startMomentum(velocityPx);
     } else {
@@ -516,7 +596,8 @@ function autoScrollForDrag(clientX: number): void {
 
 function updateLoopOverlay(): void {
   if (!loopRegion) return;
-  if (handleAEl) handleAEl.style.left = `${loopRegion.aPx}px`;
+  // Handle A sits to the left of aPx (inner/right edge at aPx).
+  if (handleAEl) handleAEl.style.left = `${loopRegion.aPx - HANDLE_WIDTH}px`;
   if (handleBEl) handleBEl.style.left = `${loopRegion.bPx}px`;
   if (shadeEl) {
     shadeEl.style.left = `${loopRegion.aPx}px`;
@@ -533,6 +614,7 @@ function initLoopHandles(): void {
 
     el.addEventListener('touchstart', (e) => {
       e.stopPropagation();
+      if (Tone.Transport.state === 'started') pausePlayback();
       startTouchX = e.touches[0]?.clientX ?? 0;
       startPx = which === 'a' ? (loopRegion?.aPx ?? 0) : (loopRegion?.bPx ?? 0);
     }, { passive: false });
@@ -542,22 +624,28 @@ function initLoopHandles(): void {
       if (!loopRegion) return;
       const dx = (e.touches[0]?.clientX ?? 0) - startTouchX;
       let newPx = startPx + dx;
+      const scorePxMin = cursorSteps[0]?.pxLeft ?? 0;
+      const scorePxMax = cursorSteps[cursorSteps.length - 1]?.pxLeft ?? scoreWidth;
 
       if (which === 'a') {
-        newPx = Math.max(0, Math.min(loopRegion.bPx - LOOP_MIN_GAP_PX, newPx));
+        newPx = Math.max(scorePxMin, Math.min(loopRegion.bPx - LOOP_MIN_GAP_PX, newPx));
         loopRegion.aPx = newPx;
-        loopRegion.aTicks = pxToTicks(newPx);
+        loopRegion.aTicks = pxToLoopStartTicks(newPx);
         Tone.Transport.loopStart = `${loopRegion.aTicks}i`;
       } else {
-        newPx = Math.max(loopRegion.aPx + LOOP_MIN_GAP_PX, Math.min(scoreWidth, newPx));
+        newPx = Math.max(loopRegion.aPx + LOOP_MIN_GAP_PX, Math.min(scorePxMax, newPx));
         loopRegion.bPx = newPx;
-        loopRegion.bTicks = pxToTicks(newPx);
+        loopRegion.bTicks = pxToLoopEndTicks(newPx);
         Tone.Transport.loopEnd = `${loopRegion.bTicks}i`;
       }
 
       updateLoopOverlay();
       autoScrollForDrag(e.touches[0]?.clientX ?? 0);
     }, { passive: false });
+
+    el.addEventListener('touchend', () => {
+      loopModified = true;
+    }, { passive: true });
   }
 
   makeDrag('a');
@@ -577,10 +665,14 @@ function setOverlayBounds(top: number, height: number): void {
 function createLoop(): void {
   const step = cursorSteps[currentCursorStep < 0 ? 0 : currentCursorStep];
   if (!step) return;
-  const aPx = step.pxLeft;
-  const bPx = Math.min(aPx + LOOP_DEFAULT_PX, scoreWidth);
-  const aTicks = pxToTicks(aPx);
-  const bTicks = pxToTicks(bPx);
+  const scorePxMin = cursorSteps[0]?.pxLeft ?? 0;
+  const scorePxMax = cursorSteps[cursorSteps.length - 1]?.pxLeft ?? scoreWidth;
+  // Anchor B at cursor + default width, clamped to the last note. Then derive A
+  // so the loop is always LOOP_DEFAULT_PX wide (unless the score itself is shorter).
+  const bPx = Math.min(step.pxLeft + LOOP_DEFAULT_PX, scorePxMax);
+  const aPx = Math.max(scorePxMin, bPx - LOOP_DEFAULT_PX);
+  const aTicks = pxToLoopStartTicks(aPx);
+  const bTicks = pxToLoopEndTicks(bPx);
   loopRegion = { aPx, bPx, aTicks, bTicks };
   Tone.Transport.loop = true;
   Tone.Transport.loopStart = `${aTicks}i`;
@@ -589,6 +681,7 @@ function createLoop(): void {
   if (handleBEl) handleBEl.style.display = 'block';
   if (shadeEl) shadeEl.style.display = 'block';
   updateLoopOverlay();
+  loopModified = true;
   postToNative({ type: 'LOOP_STATE', payload: true });
   if (Tone.Transport.state === 'started') pausePlayback();
 }
@@ -600,6 +693,7 @@ function clearLoop(): void {
   if (handleBEl) handleBEl.style.display = 'none';
   if (shadeEl) shadeEl.style.display = 'none';
   postToNative({ type: 'LOOP_STATE', payload: false });
+  if (Tone.Transport.state === 'started') pausePlayback();
 }
 
 export function toggleLoop(): void {
@@ -735,10 +829,12 @@ export async function startPlayback(): Promise<void> {
     momentumFrameId = null;
   }
 
-  // If a loop is active and transport is outside [aTicks, bTicks], seek to A.
+  // If a loop is active and was just created/edited (loopModified), or transport is
+  // outside [aTicks, bTicks], seek to A before starting.
   if (loopRegion) {
     const ticks = Tone.Transport.ticks;
-    if (ticks < loopRegion.aTicks || ticks >= loopRegion.bTicks) {
+    if (loopModified || ticks < loopRegion.aTicks || ticks >= loopRegion.bTicks) {
+      loopModified = false;
       Tone.Transport.ticks = loopRegion.aTicks;
       const targetStep = ticksToStep(loopRegion.aTicks);
       advanceCursorTo(targetStep);
@@ -799,8 +895,10 @@ export function disposePlayback(): void {
   downbeatTicks = new Set();
   cursorSteps = [];
   currentCursorStep = -1;
+  osmdActualIdx = -1;
   totalQuarters = 0;
   loopRegion = null;
+  loopModified = false;
   Tone.Transport.loop = false;
   scrollMinPx = 0;
   scrollMaxPx = 0;

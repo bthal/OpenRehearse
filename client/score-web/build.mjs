@@ -25,7 +25,7 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
       background: rgba(100,149,237,0.20); pointer-events: none; display: none;
     }
     .loop-handle {
-      position: absolute; top: 0; width: 14px;
+      position: absolute; top: 0; width: 28px;
       background: rgba(75,122,110,0.75); cursor: ew-resize;
       touch-action: none; display: none; z-index: 10;
     }
