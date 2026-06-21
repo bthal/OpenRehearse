@@ -164,7 +164,6 @@ function buildTimelines(osmd: OpenSheetMusicDisplay): {
 
     // Extra ticks to insert after this position due to a fermata at this step.
     let fermataExtraTicks = 0;
-    let fermataMaxNormalDurQ = 0;
 
     try {
       const notes = osmd.cursor.NotesUnderCursor();
@@ -205,7 +204,6 @@ function buildTimelines(osmd: OpenSheetMusicDisplay): {
           const extra = Math.round(normalDurQ * (FERMATA_DURATION_MULTIPLIER - 1) * TONE_PPQ);
           if (extra > fermataExtraTicks) {
             fermataExtraTicks = extra;
-            fermataMaxNormalDurQ = normalDurQ;
           }
         }
       }
@@ -238,7 +236,6 @@ function buildTimelines(osmd: OpenSheetMusicDisplay): {
             const extra = Math.round(normalDurQ * (FERMATA_DURATION_MULTIPLIER - 1) * TONE_PPQ);
             if (extra > fermataExtraTicks) {
               fermataExtraTicks = extra;
-              fermataMaxNormalDurQ = normalDurQ;
             }
           }
         });
@@ -248,12 +245,11 @@ function buildTimelines(osmd: OpenSheetMusicDisplay): {
     }
 
     if (fermataExtraTicks > 0) {
-      // Insert a hold step so the cursor stays at the fermata note's pxLeft
-      // during the extended hold. The hold ends when the next real note begins
-      // (expandedQuarters + full fermata duration). This step shares osmdIdx
-      // with the preceding regular step so advanceCursorTo makes no extra calls.
-      const holdEndQ = expandedQuarters + fermataMaxNormalDurQ * FERMATA_DURATION_MULTIPLIER;
-      steps.push({ quarters: holdEndQ - 1 / TONE_PPQ, pxLeft, osmdIdx });
+      // Shift all subsequent steps right by the fermata's extra duration so the
+      // next note only begins after the hold has fully sounded. No hold step is
+      // inserted here — the interpolation between this step and the next will
+      // naturally drift the cursor slowly toward the next note over the expanded
+      // duration, matching the audio instead of freezing on the fermata symbol.
       tickShift += fermataExtraTicks;
     }
 

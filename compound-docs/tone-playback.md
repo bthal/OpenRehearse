@@ -528,11 +528,11 @@ the next note as "too early", not a held fermata.
 events and cursor steps use `expandedQuarters = quarters + tickShift / PPQ` so the next
 note only fires after the fermata expires.
 
-Insert a **hold step** (same `pxLeft`, same `osmdIdx` as the fermata step) at
-`expandedQ + normalDurQ * MULTIPLIER - epsilon` so the cursor stays on the fermata note
-during the hold. `advanceCursorTo` uses `CursorStep.osmdIdx` — not the array index — to
-decide how many `cursor.next()` calls to make; hold steps share the preceding `osmdIdx` and
-cause zero extra OSMD cursor advances.
+No hold step is inserted. The interpolation between the fermata note's step and the next
+note's step spans the full expanded duration, so the cursor drifts slowly toward the next
+note during the hold instead of freezing on the fermata symbol — matching visual motion to
+playback. `advanceCursorTo` uses `CursorStep.osmdIdx` — not the array index — to count
+`cursor.next()` calls; each step has a unique `osmdIdx` so forward seeks work correctly.
 
 **Detection:** `note.ParentVoiceEntry.Articulations` contains `Articulation` objects;
 check `a.articulationEnum === ArticulationEnum.fermata` (10) or `invertedfermata` (11).
