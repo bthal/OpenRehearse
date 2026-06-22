@@ -1,4 +1,4 @@
-import { OpenSheetMusicDisplay } from 'opensheetmusicdisplay';
+import { OpenSheetMusicDisplay, PageFormat } from 'opensheetmusicdisplay';
 import {
   initPlayback,
   startPlayback,
@@ -40,7 +40,7 @@ w.__rn_load_xml = async (xml: string, scheduleJson?: string) => {
     // The XML-attribute flags stop MusicXML <print new-system/new-page> markers from
     // overriding our layout (these are the cause of mid-score system breaks).
     // RenderSingleHorizontalStaffline tells OSMD's own layout engine to do the same.
-    osmd.EngravingRules.PageWidth = 10000;
+    osmd.EngravingRules.PageFormat = new PageFormat(10000, 40000);
     osmd.EngravingRules.NewSystemAtXMLNewSystemAttribute = false;
     osmd.EngravingRules.NewSystemAtXMLNewPageAttribute = false;
     osmd.EngravingRules.RenderSingleHorizontalStaffline = true;
