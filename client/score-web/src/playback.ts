@@ -1293,14 +1293,23 @@ function startMetronome(): void {
     Tone.Transport.clear(metronomeEventId);
     metronomeEventId = null;
   }
+  // If the piece has a pickup measure whose duration is not a quarter-note multiple
+  // (e.g. a single eighth-note anacrusis), the first full measure starts at a
+  // sub-quarter tick position. Offset the repeat so beats land on real measure
+  // boundaries instead of being perpetually misaligned.
+  const sortedDownbeats = [...downbeatTicks].sort((a, b) => a - b);
+  const pickupOffsetTicks =
+    sortedDownbeats.length >= 2 ? (sortedDownbeats[1]! % TONE_PPQ) : 0;
+
   metronomeEventId = Tone.Transport.scheduleRepeat((time) => {
     const ctx = Tone.getContext().rawContext as AudioContext;
 
     // downbeatTicks was built from OSMD measure boundaries — correct for any
     // time signature and handles mid-score signature changes.
-    const ticks = Tone.Transport.getTicksAtTime(time);
-    const nearestBeat = Math.round(ticks / TONE_PPQ) * TONE_PPQ;
-    const isDownbeat = downbeatTicks.has(nearestBeat);
+    // Round to nearest integer tick rather than nearest quarter so sub-quarter
+    // downbeats (e.g. after an eighth-note pickup) are matched correctly.
+    const ticks = Math.round(Tone.Transport.getTicksAtTime(time));
+    const isDownbeat = downbeatTicks.has(ticks);
 
     const osc = ctx.createOscillator();
     const gainNode = ctx.createGain();
@@ -1312,7 +1321,7 @@ function startMetronome(): void {
     gainNode.connect(ctx.destination);
     osc.start(time);
     osc.stop(time + 0.06);
-  }, '4n', 0);
+  }, '4n', pickupOffsetTicks > 0 ? `${pickupOffsetTicks}i` : 0);
 }
 
 export function toggleMetronome(): void {
