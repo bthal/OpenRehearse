@@ -4,6 +4,7 @@ import {
   mdiMetronome,
   mdiMusicNoteOutline,
   mdiPause,
+  mdiPencilOutline,
   mdiPlay,
 } from '@mdi/js';
 import { router, Stack, useLocalSearchParams } from 'expo-router';
@@ -229,6 +230,15 @@ export default function RoutinePlayView() {
                     size={26}
                     color={metronomeOn ? '#4B7A6E' : '#374151'}
                   />
+                </TouchableOpacity>
+
+                {/* Edit routine */}
+                <TouchableOpacity
+                  onPress={() => router.push({ pathname: '/routine/edit', params: { id } })}
+                  hitSlop={8}
+                  className="p-1"
+                >
+                  <AppIcon path={mdiPencilOutline} size={24} color="#374151" />
                 </TouchableOpacity>
               </View>
             </View>
