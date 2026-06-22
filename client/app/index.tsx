@@ -105,15 +105,15 @@ export default function Dashboard() {
     const count = selectedPieceIds.length;
     const firstId = selectedPieceIds[0];
     const title =
-      count === 1 ? t('pieceEdit.deleteTitle') : t('pieceEdit.deleteMultipleTitle', { count });
+      count === 1 ? t('pieceEdit.removeTitle') : t('pieceEdit.removeMultipleTitle', { count });
     const message =
       count === 1
-        ? t('pieceEdit.deleteMessage', { title: firstId ? (piecesById[firstId]?.title ?? '') : '' })
-        : t('pieceEdit.deleteMultipleMessage', { count });
+        ? t('pieceEdit.removeMessage', { title: firstId ? (piecesById[firstId]?.title ?? '') : '' })
+        : t('pieceEdit.removeMultipleMessage', { count });
     Alert.alert(title, message, [
       { text: t('common.cancel'), style: 'cancel' },
       {
-        text: t('pieceEdit.deleteConfirm'),
+        text: t('pieceEdit.remove'),
         style: 'destructive',
         onPress: async () => {
           setIsDeletingPieces(true);
@@ -157,16 +157,16 @@ export default function Dashboard() {
     const routine = routines.find((r) => r.id === firstId);
     const title =
       count === 1
-        ? t('dashboard.deleteRoutineTitle')
-        : t('dashboard.deleteRoutinesTitle', { count });
+        ? t('dashboard.removeRoutineTitle')
+        : t('dashboard.removeRoutinesTitle', { count });
     const message =
       count === 1
-        ? t('dashboard.deleteRoutineMessage', { title: routine?.title ?? '' })
-        : t('dashboard.deleteRoutinesMessage', { count });
+        ? t('dashboard.removeRoutineMessage', { title: routine?.title ?? '' })
+        : t('dashboard.removeRoutinesMessage', { count });
     Alert.alert(title, message, [
       { text: t('common.cancel'), style: 'cancel' },
       {
-        text: t('dashboard.deleteConfirm'),
+        text: t('dashboard.remove'),
         style: 'destructive',
         onPress: async () => {
           setIsDeletingRoutines(true);

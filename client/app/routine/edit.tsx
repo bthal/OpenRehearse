@@ -183,7 +183,7 @@ export default function RoutineEditScreen() {
   }
 
   function deleteBlock(blockKey: string) {
-    Alert.alert(t('routineEdit.deleteBlockTitle'), t('routineEdit.deleteBlockConfirm'), [
+    Alert.alert(t('routineEdit.removeBlockTitle'), t('routineEdit.removeBlockConfirm'), [
       { text: t('common.cancel'), style: 'cancel' },
       {
         text: t('common.remove'),
