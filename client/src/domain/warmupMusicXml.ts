@@ -380,6 +380,138 @@ export function getHanonMeasureNotes(
   return { rh, lh };
 }
 
+// ─── 4-5 Drill ────────────────────────────────────────────────────────────────
+// Fixed exercise: C major, one octave. Fingers 4+5 alternate in eighths;
+// fingers 1-3 play a contrary-motion half-note melody.
+
+// MIDI values used (C major — no accidentals needed)
+const D45_C5 = 72;
+const D45_B4 = 71;
+const D45_C3 = 48;
+const D45_D3 = 50;
+
+// RH lower-voice melody: two half notes per measure (last measure: one whole note)
+const D45_RH_MELODY: number[][] = [
+  [60, 62], // C4 D4
+  [64, 65], // E4 F4
+  [67, 69], // G4 A4
+  [67, 65], // G4 F4
+  [64, 62], // E4 D4
+  [60], // C4 (whole)
+];
+
+// LH upper-voice melody: contrary motion mirror
+const D45_LH_MELODY: number[][] = [
+  [60, 59], // C4 B3
+  [57, 55], // A3 G3
+  [53, 52], // F3 E3
+  [53, 55], // F3 G3
+  [57, 59], // A3 B3
+  [60], // C4 (whole)
+];
+
+function d45Eighth(
+  midi: number,
+  voice: 1 | 2,
+  stemUp: boolean,
+  beam: 'begin' | 'end',
+  names: KeyInfo['names'],
+  fingering?: number,
+): string {
+  const stem = stemUp ? '<stem>up</stem>' : '<stem>down</stem>';
+  const beamXml = `<beam number="1">${beam}</beam>`;
+  const fXml =
+    fingering !== undefined
+      ? `<notations><technical><fingering>${fingering}</fingering></technical></notations>`
+      : '';
+  return `<note>${pitchXml(midiToPitch(midi, names))}<duration>1</duration><voice>${voice}</voice><type>eighth</type>${stem}${beamXml}${fXml}</note>`;
+}
+
+function d45Half(midi: number, voice: 1 | 2, stemUp: boolean, names: KeyInfo['names']): string {
+  const stem = stemUp ? '<stem>up</stem>' : '<stem>down</stem>';
+  return `<note>${pitchXml(midiToPitch(midi, names))}<duration>4</duration><voice>${voice}</voice><type>half</type>${stem}</note>`;
+}
+
+function d45Whole(midi: number, voice: 1 | 2, names: KeyInfo['names']): string {
+  return `<note>${pitchXml(midiToPitch(midi, names))}<duration>8</duration><voice>${voice}</voice><type>whole</type></note>`;
+}
+
+const D45_BACKUP = '<backup><duration>8</duration></backup>';
+
+function buildDrill45RhMeasures(showFingering: boolean): string[][] {
+  const names = getKeyInfo(0, 'major').names;
+  return D45_RH_MELODY.map((melody, m) => {
+    const notes: string[] = [];
+    if (melody.length === 1) {
+      // Last measure: whole note per voice, no rhythm pattern
+      notes.push(d45Whole(D45_C5, 1, names));
+      notes.push(D45_BACKUP);
+      notes.push(d45Whole(melody[0]!, 2, names));
+    } else {
+      // Voice 1: C5 B4 × 4 (8 eighths, stems up)
+      for (let i = 0; i < 8; i++) {
+        const midi = i % 2 === 0 ? D45_C5 : D45_B4;
+        const beam = i % 2 === 0 ? ('begin' as const) : ('end' as const);
+        const f = showFingering && m === 0 ? (i === 0 ? 5 : i === 1 ? 4 : undefined) : undefined;
+        notes.push(d45Eighth(midi, 1, true, beam, names, f));
+      }
+      notes.push(D45_BACKUP);
+      // Voice 2: 2 half notes (stems down)
+      notes.push(d45Half(melody[0]!, 2, false, names));
+      notes.push(d45Half(melody[1]!, 2, false, names));
+    }
+    return notes;
+  });
+}
+
+function buildDrill45LhMeasures(showFingering: boolean): string[][] {
+  const names = getKeyInfo(0, 'major').names;
+  return D45_LH_MELODY.map((melody, m) => {
+    const notes: string[] = [];
+    if (melody.length === 1) {
+      notes.push(d45Whole(melody[0]!, 1, names));
+      notes.push(D45_BACKUP);
+      notes.push(d45Whole(D45_C3, 2, names));
+    } else {
+      // Voice 1: 2 half notes (contrary motion, stems up)
+      notes.push(d45Half(melody[0]!, 1, true, names));
+      notes.push(d45Half(melody[1]!, 1, true, names));
+      notes.push(D45_BACKUP);
+      // Voice 2: C3 D3 × 4 (8 eighths, stems down)
+      for (let i = 0; i < 8; i++) {
+        const midi = i % 2 === 0 ? D45_C3 : D45_D3;
+        const beam = i % 2 === 0 ? ('begin' as const) : ('end' as const);
+        const f = showFingering && m === 0 ? (i === 0 ? 5 : i === 1 ? 4 : undefined) : undefined;
+        notes.push(d45Eighth(midi, 2, false, beam, names, f));
+      }
+    }
+    return notes;
+  });
+}
+
+export function getDrill45MeasureNotes(
+  hand: WarmUpHand,
+  showFingering = true,
+): { rh: string[][] | null; lh: string[][] | null } {
+  const rh = hand === 'left' ? null : buildDrill45RhMeasures(showFingering);
+  const lh = hand === 'right' ? null : buildDrill45LhMeasures(showFingering);
+  return { rh, lh };
+}
+
+export function generateDrill45Xml(hand: WarmUpHand): string {
+  const { rh, lh } = getDrill45MeasureNotes(hand);
+  const parts: PartDef[] = [];
+  if (rh) parts.push({ id: 'P1', name: 'Right Hand', clef: { sign: 'G', line: 2 }, measures: rh });
+  if (lh)
+    parts.push({
+      id: hand === 'both' ? 'P2' : 'P1',
+      name: 'Left Hand',
+      clef: { sign: 'F', line: 4 },
+      measures: lh,
+    });
+  return buildXml(0, 'major', parts);
+}
+
 export function generateHanonXml(
   pitchClass: number,
   mode: WarmUpScaleMode,

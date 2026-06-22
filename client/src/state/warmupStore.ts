@@ -17,14 +17,21 @@ interface ExerciseSettings {
   octaves: WarmUpOctaves;
 }
 
+export interface Drill45Settings {
+  hand: WarmUpHand;
+  bpm: WarmUpBpm;
+}
+
 interface WarmUpSettings {
   hanon: ExerciseSettings;
   scales: ExerciseSettings;
+  drill45: Drill45Settings;
 }
 
 const DEFAULTS: WarmUpSettings = {
   hanon: { pitchClass: 0, mode: 'major', hand: 'both', bpm: DEFAULT_WARMUP_BPM, octaves: 1 },
   scales: { pitchClass: 0, mode: 'major', hand: 'both', bpm: DEFAULT_WARMUP_BPM, octaves: 1 },
+  drill45: { hand: 'both', bpm: DEFAULT_WARMUP_BPM },
 };
 
 const SETTINGS_PATH = (FileSystem.documentDirectory ?? '') + 'warmup-settings.json';
@@ -40,6 +47,7 @@ interface WarmUpState extends WarmUpSettings {
   initSettings: () => Promise<void>;
   updateHanon: (patch: Partial<ExerciseSettings>) => void;
   updateScales: (patch: Partial<ExerciseSettings>) => void;
+  updateDrill45: (patch: Partial<Drill45Settings>) => void;
   setWebViewReady: (v: boolean) => void;
   setLoadingScore: (v: boolean) => void;
   setScoreError: (v: string | null) => void;
@@ -75,19 +83,25 @@ export const useWarmUpStore = create<WarmUpState>()((set, get) => ({
 
   initSettings: async () => {
     const settings = await loadSettings();
-    set({ hanon: settings.hanon, scales: settings.scales });
+    set({ hanon: settings.hanon, scales: settings.scales, drill45: settings.drill45 });
   },
 
   updateHanon: (patch) => {
     const hanon = { ...get().hanon, ...patch };
     set({ hanon });
-    saveSettings({ hanon, scales: get().scales });
+    saveSettings({ hanon, scales: get().scales, drill45: get().drill45 });
   },
 
   updateScales: (patch) => {
     const scales = { ...get().scales, ...patch };
     set({ scales });
-    saveSettings({ hanon: get().hanon, scales });
+    saveSettings({ hanon: get().hanon, scales, drill45: get().drill45 });
+  },
+
+  updateDrill45: (patch) => {
+    const drill45 = { ...get().drill45, ...patch };
+    set({ drill45 });
+    saveSettings({ hanon: get().hanon, scales: get().scales, drill45 });
   },
 
   setWebViewReady: (v) => set({ webViewReady: v }),

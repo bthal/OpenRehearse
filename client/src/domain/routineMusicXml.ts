@@ -1,6 +1,10 @@
 import type { ExerciseBlock, Routine, RoutineBlock } from './routine';
 import { WARMUP_KEYS } from './warmup';
-import { getHanonMeasureNotes, getScaleMeasureNotes } from './warmupMusicXml';
+import {
+  getDrill45MeasureNotes,
+  getHanonMeasureNotes,
+  getScaleMeasureNotes,
+} from './warmupMusicXml';
 
 // Divisions per quarter note — must match warmupMusicXml.ts
 const DIVISIONS = 2;
@@ -55,6 +59,7 @@ const WHOLE_REST = `<note><rest measure="yes"/><duration>${DIVISIONS * 4}</durat
 // ─── Rehearsal label ──────────────────────────────────────────────────────────
 
 function exerciseRehearsalLabel(block: ExerciseBlock): string {
+  if (block.type === 'drill45') return '4-5 Drill';
   const keyLabel =
     WARMUP_KEYS.find((k) => k.pitchClass === block.pitchClass && k.mode === block.mode)?.label ??
     'C';
@@ -74,7 +79,9 @@ export function estimateRoutineSeconds(routine: Routine): number {
       const { rh, lh } =
         block.type === 'hanon'
           ? getHanonMeasureNotes(block.pitchClass, block.mode, block.hand, block.octaves, false)
-          : getScaleMeasureNotes(block.pitchClass, block.mode, block.hand, block.octaves);
+          : block.type === 'scales'
+            ? getScaleMeasureNotes(block.pitchClass, block.mode, block.hand, block.octaves)
+            : getDrill45MeasureNotes(block.hand, false);
       const measureCount = (rh ?? lh)!.length;
       totalSeconds += (measureCount * 4 * 60) / block.bpm;
     }
@@ -148,7 +155,9 @@ export function computeRoutineTempoSchedule(routine: Routine): RoutineTempoChang
       const { rh, lh } =
         block.type === 'hanon'
           ? getHanonMeasureNotes(pitchClass, mode, hand, octaves, false)
-          : getScaleMeasureNotes(pitchClass, mode, hand, octaves);
+          : block.type === 'scales'
+            ? getScaleMeasureNotes(pitchClass, mode, hand, octaves)
+            : getDrill45MeasureNotes(hand, false);
       const measureCount = (rh ?? lh)!.length;
       cumulativeQuarters += measureCount * 4;
     }
@@ -206,7 +215,9 @@ export function generateRoutineXml(routine: Routine): string {
     const { rh, lh } =
       block.type === 'hanon'
         ? getHanonMeasureNotes(pitchClass, mode, hand, octaves, false)
-        : getScaleMeasureNotes(pitchClass, mode, hand, octaves);
+        : block.type === 'scales'
+          ? getScaleMeasureNotes(pitchClass, mode, hand, octaves)
+          : getDrill45MeasureNotes(hand, false);
 
     const measureCount = (rh ?? lh)!.length;
 

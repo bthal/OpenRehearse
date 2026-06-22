@@ -54,7 +54,7 @@ const HAND_OPTIONS: { tKey: string; value: WarmUpHand }[] = [
   { tKey: 'routineEdit.handLeft', value: 'left' },
 ];
 
-function defaultExerciseBlock(type: 'hanon' | 'scales'): ExerciseBlock {
+function defaultExerciseBlock(type: 'hanon' | 'scales' | 'drill45'): ExerciseBlock {
   return {
     type,
     pitchClass: 0,
@@ -225,6 +225,7 @@ export default function RoutineEditScreen() {
       options: [
         { label: t('routineEdit.addExerciseHanon'), value: 'hanon' },
         { label: t('routineEdit.addExerciseScales'), value: 'scales' },
+        { label: t('routineEdit.addExerciseDrill45'), value: 'drill45' },
         { label: t('routineEdit.addExercisePause'), value: 'pause' },
       ],
       currentValue: '',
@@ -271,7 +272,7 @@ export default function RoutineEditScreen() {
     if (!picker) return;
     const { blockKey, atIndex, type } = picker;
     if (type === 'addType') {
-      if (value === 'hanon' || value === 'scales') {
+      if (value === 'hanon' || value === 'scales' || value === 'drill45') {
         insertBlock(atIndex!, defaultExerciseBlock(value));
       } else {
         setPicker({
@@ -376,7 +377,9 @@ export default function RoutineEditScreen() {
                           ? t('routineEdit.addExerciseHanon')
                           : block.type === 'scales'
                             ? t('routineEdit.addExerciseScales')
-                            : t('routineEdit.addExercisePause')}
+                            : block.type === 'drill45'
+                              ? t('routineEdit.addExerciseDrill45')
+                              : t('routineEdit.addExercisePause')}
                       </Text>
                       <Pressable
                         onPress={() => deleteBlock(block._key)}
@@ -390,10 +393,12 @@ export default function RoutineEditScreen() {
                     {/* Parameter pills */}
                     {block.type !== 'pause' ? (
                       <View className="mt-2 flex-row flex-wrap gap-2">
-                        <Pill
-                          label={keyLabel(block.pitchClass, block.mode, t)}
-                          onPress={() => openPicker(block._key, 'key', block)}
-                        />
+                        {block.type !== 'drill45' && (
+                          <Pill
+                            label={keyLabel(block.pitchClass, block.mode, t)}
+                            onPress={() => openPicker(block._key, 'key', block)}
+                          />
+                        )}
                         <Pill
                           label={`${block.bpm} BPM`}
                           onPress={() => openPicker(block._key, 'bpm', block)}
@@ -405,10 +410,12 @@ export default function RoutineEditScreen() {
                           )}
                           onPress={() => openPicker(block._key, 'hand', block)}
                         />
-                        <Pill
-                          label={octavesLabel(block.octaves, t)}
-                          onPress={() => openPicker(block._key, 'octaves', block)}
-                        />
+                        {block.type !== 'drill45' && (
+                          <Pill
+                            label={octavesLabel(block.octaves, t)}
+                            onPress={() => openPicker(block._key, 'octaves', block)}
+                          />
+                        )}
                       </View>
                     ) : (
                       <View className="mt-2 flex-row">

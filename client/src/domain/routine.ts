@@ -4,7 +4,7 @@ export const PAUSE_MEASURES = [1, 2, 3, 4] as const;
 export type PauseMeasures = (typeof PAUSE_MEASURES)[number];
 
 export interface ExerciseBlock {
-  type: 'hanon' | 'scales';
+  type: 'hanon' | 'scales' | 'drill45';
   pitchClass: number;
   mode: WarmUpScaleMode;
   hand: WarmUpHand;

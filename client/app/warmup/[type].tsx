@@ -24,7 +24,7 @@ import WebView, { type WebViewMessageEvent } from 'react-native-webview';
 import { AppIcon } from '@components/AppIcon';
 import { SCORE_WEB_HTML } from '@score-web/html';
 import type { WebToNativeMessage } from '@score-web/messageProtocol';
-import { generateHanonXml, generateScaleXml } from '@domain/warmupMusicXml';
+import { generateDrill45Xml, generateHanonXml, generateScaleXml } from '@domain/warmupMusicXml';
 import {
   WARMUP_BPMS,
   WARMUP_KEYS,
@@ -50,17 +50,39 @@ const HAND_OPTIONS = [
 export default function WarmUpView() {
   const { t } = useTranslation();
   const { type } = useLocalSearchParams<{ type: string }>();
-  const warmUpType = (type === 'hanon' || type === 'scales' ? type : 'scales') as WarmUpType;
-  const title = warmUpType === 'hanon' ? t('dashboard.hanon') : t('dashboard.scales');
+  const warmUpType = (
+    type === 'hanon' || type === 'scales' || type === 'drill45' ? type : 'scales'
+  ) as WarmUpType;
+  const title =
+    warmUpType === 'hanon'
+      ? t('dashboard.hanon')
+      : warmUpType === 'drill45'
+        ? t('dashboard.drill45')
+        : t('dashboard.scales');
 
   const initSettings = useWarmUpStore((s) => s.initSettings);
   const updateHanon = useWarmUpStore((s) => s.updateHanon);
   const updateScales = useWarmUpStore((s) => s.updateScales);
+  const updateDrill45 = useWarmUpStore((s) => s.updateDrill45);
   const hanonSettings = useWarmUpStore((s) => s.hanon);
   const scalesSettings = useWarmUpStore((s) => s.scales);
+  const drill45RawSettings = useWarmUpStore((s) => s.drill45);
+  // Pad drill45 with fixed key/octave so the shared settings shape is satisfied
+  const drill45Settings = {
+    ...drill45RawSettings,
+    pitchClass: 0,
+    mode: 'major' as const,
+    octaves: 1 as const,
+  };
 
-  const settings = warmUpType === 'hanon' ? hanonSettings : scalesSettings;
-  const updateSettings = warmUpType === 'hanon' ? updateHanon : updateScales;
+  const settings =
+    warmUpType === 'hanon'
+      ? hanonSettings
+      : warmUpType === 'drill45'
+        ? drill45Settings
+        : scalesSettings;
+  const updateSettings =
+    warmUpType === 'hanon' ? updateHanon : warmUpType === 'drill45' ? updateDrill45 : updateScales;
 
   const webViewReady = useWarmUpStore((s) => s.webViewReady);
   const isLoadingScore = useWarmUpStore((s) => s.isLoadingScore);
@@ -118,7 +140,9 @@ export default function WarmUpView() {
       const xml =
         warmUpType === 'hanon'
           ? generateHanonXml(settings.pitchClass, settings.mode, settings.hand, settings.octaves)
-          : generateScaleXml(settings.pitchClass, settings.mode, settings.hand, settings.octaves);
+          : warmUpType === 'drill45'
+            ? generateDrill45Xml(settings.hand)
+            : generateScaleXml(settings.pitchClass, settings.mode, settings.hand, settings.octaves);
       webViewRef.current?.injectJavaScript(`window.__rn_load_xml(${JSON.stringify(xml)});void 0;`);
     } catch (err) {
       setLoadingScore(false);
@@ -288,6 +312,7 @@ export default function WarmUpView() {
   }, [metronomeOn, setMetronomeOn]);
 
   const scoreReady = webViewReady && !isLoadingScore && !scoreError;
+  const showKeyOctave = warmUpType !== 'drill45';
 
   const currentKeyLabel =
     WARMUP_KEYS.find((k) => k.pitchClass === settings.pitchClass && k.mode === settings.mode)
@@ -410,39 +435,43 @@ export default function WarmUpView() {
                   </TouchableOpacity>
                 </View>
 
-                {/* Key trigger */}
-                <View ref={keyTriggerRef}>
-                  <TouchableOpacity
-                    onPress={() => togglePanel('key', keyTriggerRef)}
-                    hitSlop={8}
-                    className="items-center px-2 py-1"
-                  >
-                    <Text
-                      className="text-base font-semibold mt-0.5"
-                      style={{ color: openPanel === 'key' ? '#4B7A6E' : '#374151' }}
+                {/* Key trigger — hidden for drill45 */}
+                {showKeyOctave && (
+                  <View ref={keyTriggerRef}>
+                    <TouchableOpacity
+                      onPress={() => togglePanel('key', keyTriggerRef)}
+                      hitSlop={8}
+                      className="items-center px-2 py-1"
                     >
-                      {currentKeyLabel}
-                    </Text>
-                    <Text className="text-[9px] text-black mt-0.5">{t('warmup.key')}</Text>
-                  </TouchableOpacity>
-                </View>
+                      <Text
+                        className="text-base font-semibold mt-0.5"
+                        style={{ color: openPanel === 'key' ? '#4B7A6E' : '#374151' }}
+                      >
+                        {currentKeyLabel}
+                      </Text>
+                      <Text className="text-[9px] text-black mt-0.5">{t('warmup.key')}</Text>
+                    </TouchableOpacity>
+                  </View>
+                )}
 
-                {/* Octave trigger */}
-                <View ref={octaveTriggerRef}>
-                  <TouchableOpacity
-                    onPress={() => togglePanel('octave', octaveTriggerRef)}
-                    hitSlop={8}
-                    className="items-center px-2 py-1"
-                  >
-                    <Text
-                      className="text-base font-semibold mt-0.5"
-                      style={{ color: openPanel === 'octave' ? '#4B7A6E' : '#374151' }}
+                {/* Octave trigger — hidden for drill45 */}
+                {showKeyOctave && (
+                  <View ref={octaveTriggerRef}>
+                    <TouchableOpacity
+                      onPress={() => togglePanel('octave', octaveTriggerRef)}
+                      hitSlop={8}
+                      className="items-center px-2 py-1"
                     >
-                      {settings.octaves}
-                    </Text>
-                    <Text className="text-[9px] text-black mt-0.5">{t('warmup.octaves')}</Text>
-                  </TouchableOpacity>
-                </View>
+                      <Text
+                        className="text-base font-semibold mt-0.5"
+                        style={{ color: openPanel === 'octave' ? '#4B7A6E' : '#374151' }}
+                      >
+                        {settings.octaves}
+                      </Text>
+                      <Text className="text-[9px] text-black mt-0.5">{t('warmup.octaves')}</Text>
+                    </TouchableOpacity>
+                  </View>
+                )}
               </View>
             </View>
           )}
@@ -517,79 +546,83 @@ export default function WarmUpView() {
             ))}
           </Animated.View>
 
-          {/* Key panel */}
-          <Animated.View
-            pointerEvents={openPanel === 'key' ? 'auto' : 'none'}
-            style={[
-              panelBase,
-              {
-                top: panelLayout.key.top,
-                left: panelLayout.key.left,
-                width: panelWidthInterp('key', PANEL_WIDTH),
-              },
-            ]}
-          >
-            <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-              {WARMUP_KEYS.map((k) => {
-                const isActive = k.pitchClass === settings.pitchClass && k.mode === settings.mode;
-                return (
-                  <TouchableOpacity
-                    key={k.label}
-                    onPress={() => handleKeyChange(k.pitchClass, k.mode)}
-                    hitSlop={4}
-                    style={{
-                      width: 44,
-                      height: 44,
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                    }}
-                  >
-                    <Text
+          {/* Key panel — hidden for drill45 */}
+          {showKeyOctave && (
+            <Animated.View
+              pointerEvents={openPanel === 'key' ? 'auto' : 'none'}
+              style={[
+                panelBase,
+                {
+                  top: panelLayout.key.top,
+                  left: panelLayout.key.left,
+                  width: panelWidthInterp('key', PANEL_WIDTH),
+                },
+              ]}
+            >
+              <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+                {WARMUP_KEYS.map((k) => {
+                  const isActive = k.pitchClass === settings.pitchClass && k.mode === settings.mode;
+                  return (
+                    <TouchableOpacity
+                      key={k.label}
+                      onPress={() => handleKeyChange(k.pitchClass, k.mode)}
+                      hitSlop={4}
                       style={{
-                        fontSize: 13,
-                        fontWeight: '600',
-                        color: isActive ? '#4B7A6E' : '#9CA3AF',
+                        width: 44,
+                        height: 44,
+                        alignItems: 'center',
+                        justifyContent: 'center',
                       }}
                     >
-                      {k.label}
-                    </Text>
-                  </TouchableOpacity>
-                );
-              })}
-            </ScrollView>
-          </Animated.View>
+                      <Text
+                        style={{
+                          fontSize: 13,
+                          fontWeight: '600',
+                          color: isActive ? '#4B7A6E' : '#9CA3AF',
+                        }}
+                      >
+                        {k.label}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </ScrollView>
+            </Animated.View>
+          )}
 
-          {/* Octave panel */}
-          <Animated.View
-            pointerEvents={openPanel === 'octave' ? 'auto' : 'none'}
-            style={[
-              panelBase,
-              {
-                top: panelLayout.octave.top,
-                left: panelLayout.octave.left,
-                width: panelWidthInterp('octave', OCTAVE_PANEL_WIDTH),
-              },
-            ]}
-          >
-            {WARMUP_OCTAVES.map((n) => (
-              <TouchableOpacity
-                key={n}
-                onPress={() => handleOctaveChange(n)}
-                hitSlop={4}
-                style={{ width: 44, height: 44, alignItems: 'center', justifyContent: 'center' }}
-              >
-                <Text
-                  style={{
-                    fontSize: 14,
-                    fontWeight: '600',
-                    color: settings.octaves === n ? '#4B7A6E' : '#9CA3AF',
-                  }}
+          {/* Octave panel — hidden for drill45 */}
+          {showKeyOctave && (
+            <Animated.View
+              pointerEvents={openPanel === 'octave' ? 'auto' : 'none'}
+              style={[
+                panelBase,
+                {
+                  top: panelLayout.octave.top,
+                  left: panelLayout.octave.left,
+                  width: panelWidthInterp('octave', OCTAVE_PANEL_WIDTH),
+                },
+              ]}
+            >
+              {WARMUP_OCTAVES.map((n) => (
+                <TouchableOpacity
+                  key={n}
+                  onPress={() => handleOctaveChange(n)}
+                  hitSlop={4}
+                  style={{ width: 44, height: 44, alignItems: 'center', justifyContent: 'center' }}
                 >
-                  {n}
-                </Text>
-              </TouchableOpacity>
-            ))}
-          </Animated.View>
+                  <Text
+                    style={{
+                      fontSize: 14,
+                      fontWeight: '600',
+                      color: settings.octaves === n ? '#4B7A6E' : '#9CA3AF',
+                    }}
+                  >
+                    {n}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </Animated.View>
+          )}
 
           {/* Overlay: WebView loading */}
           {!webViewReady && !scoreError && (

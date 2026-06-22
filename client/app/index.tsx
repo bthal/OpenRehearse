@@ -254,6 +254,10 @@ export default function Dashboard() {
                 title={t('dashboard.scales')}
                 onPress={() => router.push('/warmup/scales')}
               />
+              <WarmUpRow
+                title={t('dashboard.drill45')}
+                onPress={() => router.push('/warmup/drill45')}
+              />
 
               {routines.map((routine) => (
                 <RoutineRow

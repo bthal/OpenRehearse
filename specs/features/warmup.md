@@ -2,18 +2,25 @@
 
 ## Goal
 
-Built-in exercises (Hanon No. 1 and major/minor scales) rendered as live score
-and played back with synthesis — no file import needed.
+Built-in exercises (Hanon No. 1, major/minor scales, and a 4-5 finger drill) rendered as
+live score and played back with synthesis — no file import needed.
 
 ## Parameters
 
-Both exercises share the same controls:
+Hanon I and Scales share the same controls:
 
 | Parameter | Options |
 |-----------|---------|
 | Key | All 12 pitch classes × major + minor |
 | Hand | Both / Right / Left |
 | Octaves | 1 / 2 / 3 |
+| BPM | 40, 50, 60, 70, 80, 100, 120, 140, 160, 180 |
+
+**4-5 Drill** has a reduced set (key and octave are fixed — always C major, one octave):
+
+| Parameter | Options |
+|-----------|---------|
+| Hand | Both / Right / Left |
 | BPM | 40, 50, 60, 70, 80, 100, 120, 140, 160, 180 |
 
 ## Score generation
@@ -24,6 +31,11 @@ Both exercises share the same controls:
 - **Hanon No. 1**: 7 ascending cells per octave (peak at degree 7n+4); symmetric
   descent; whole-note landing. First 16 ascending notes fingered 1-2-3-4-5-4-3-2 ×2;
   first 16 descending 5-4-3-2-1-2-3-4 ×2.
+- **4-5 Drill**: 6 measures of 4/4 in C major. Grand staff with two voices per hand.
+  RH voice 1 (fingers 4+5): C5/B4 alternating eighths. RH voice 2 (fingers 1–3): ascending
+  half-note melody C4→A4 then descending G4→C4. LH mirrors in contrary motion. Final measure:
+  whole notes, 5-4 eighths stop. Fingering notation on first 5 and first 4 only.
+  The Key and Octave toolbar panels are hidden for this exercise.
 - Eighth notes beamed in groups of 4. No tempo marking rendered in score;
   BPM injected via WebView bridge after LOADED.
 
@@ -60,7 +72,7 @@ A **Routine** is an ordered list of exercise blocks (Hanon I, Scales) and option
 - Accessible via **New Routine** (no id param) or **Edit** (id param) from the dashboard.
 - Header: back arrow (with unsaved-changes guard) | title "New Routine"/"Edit Routine" | Save button.
 - Body: name TextInput field, then a `FlatList` of blocks with **+ Add Exercise** buttons between/after every block.
-- Each exercise block row: up/down arrow buttons (reorder) | exercise name | delete (with confirm). Below: parameter pills (Key, BPM, Hand, Octaves) that open a centred picker Modal on tap.
+- Each exercise block row: up/down arrow buttons (reorder) | exercise name | delete (with confirm). Below: parameter pills (Key, BPM, Hand, Octaves) that open a centred picker Modal on tap. Key and Octave pills are hidden for drill45 blocks.
 - Each pause block row: up/down arrow buttons | "Pause" | delete. Below: a measures pill (1 / 2 / 3 / 4 measures) that opens the same centred picker Modal.
 - **Validation** (enforced before Save is enabled): at least one exercise block; last block is not a pause.
 
@@ -76,7 +88,7 @@ A **Routine** is an ordered list of exercise blocks (Hanon I, Scales) and option
 ### Acceptance criteria
 
 - [X] "New Routine" button creates an empty routine; edit view opens.
-- [X] Blocks can be added (Hanon I, Scales, Pause), reordered, and deleted with confirm.
+- [X] Blocks can be added (Hanon I, Scales, 4-5 Drill, Pause), reordered, and deleted with confirm.
 - [X] Exercise parameter pills update the block.
 - [X] Save is disabled until the routine has a title, ≥1 exercise block, and the last block is not a pause.
 - [X] Saved routine appears in the dashboard; persists after app restart.

@@ -1,4 +1,4 @@
-export type WarmUpType = 'hanon' | 'scales';
+export type WarmUpType = 'hanon' | 'scales' | 'drill45';
 export type WarmUpHand = 'both' | 'right' | 'left';
 export type WarmUpScaleMode = 'major' | 'minor';
 
