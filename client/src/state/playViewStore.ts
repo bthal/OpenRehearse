@@ -3,6 +3,8 @@ import { create } from 'zustand';
 export type TempoMultiplier = 0.5 | 0.75 | 1.0;
 export const TEMPO_MULTIPLIERS: TempoMultiplier[] = [0.5, 0.75, 1.0];
 
+export type ActiveHand = 'both' | 'right' | 'left';
+
 interface PlayViewState {
   activePieceId: string | null;
   webViewReady: boolean;
@@ -17,6 +19,8 @@ interface PlayViewState {
   loopActive: boolean;
   /** Whether the metronome click is enabled. */
   metronomeOn: boolean;
+  /** Which hand(s) are active for playback and score display. */
+  activeHand: ActiveHand;
 
   setActivePieceId: (id: string | null) => void;
   setWebViewReady: (ready: boolean) => void;
@@ -27,6 +31,7 @@ interface PlayViewState {
   setTempoMultiplier: (m: TempoMultiplier) => void;
   setLoopActive: (v: boolean) => void;
   setMetronomeOn: (v: boolean) => void;
+  setActiveHand: (h: ActiveHand) => void;
   reset: () => void;
 }
 
@@ -40,6 +45,7 @@ const initial = {
   tempoMultiplier: 1.0 as TempoMultiplier,
   loopActive: false,
   metronomeOn: false,
+  activeHand: 'both' as ActiveHand,
 };
 
 export const usePlayViewStore = create<PlayViewState>()((set) => ({
@@ -53,5 +59,6 @@ export const usePlayViewStore = create<PlayViewState>()((set) => ({
   setTempoMultiplier: (m) => set({ tempoMultiplier: m }),
   setLoopActive: (v) => set({ loopActive: v }),
   setMetronomeOn: (v) => set({ metronomeOn: v }),
+  setActiveHand: (h) => set({ activeHand: h }),
   reset: () => set(initial),
 }));

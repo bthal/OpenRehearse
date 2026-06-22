@@ -5,7 +5,8 @@ export type InboundMessage =
   | { type: 'STOP' }
   | { type: 'SET_TEMPO_BPM'; payload: number }
   | { type: 'TOGGLE_LOOP' }
-  | { type: 'TOGGLE_METRONOME' };
+  | { type: 'TOGGLE_METRONOME' }
+  | { type: 'SET_ACTIVE_HAND'; payload: 'both' | 'right' | 'left' };
 
 export type OutboundMessage =
   | { type: 'LOADED' }

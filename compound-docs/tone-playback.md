@@ -750,3 +750,71 @@ el.addEventListener('touchend',   () => { cancelAnimationFrame(dragRafId!); loop
 
 Because auto-scroll runs before the `newPx` projection in each frame, `scrollOffsetPx` is
 already up-to-date when the handle position is computed — no single-frame lag.
+
+## PATTERN: OSMD `GraphicSheet` note coloring for hand filtering
+
+To grey out one staff's notes without triggering a re-render, traverse the graphical tree and
+call `note.setColor()` directly on each `GraphicalNote`:
+
+```typescript
+const coloringOpts = {
+  applyToNoteheads: true, applyToBeams: true, applyToFlag: true,
+  applyToStem: true, applyToLedgerLines: true,
+};
+for (const measureRow of osmd.GraphicSheet.MeasureList) {
+  for (let si = 0; si < measureRow.length; si++) {
+    const measure = measureRow[si];
+    if (!measure) continue;
+    const greyed = (activeHand === 'right' && si === 1) || (activeHand === 'left' && si === 0);
+    for (const staffEntry of measure.staffEntries) {
+      for (const voiceEntry of staffEntry.graphicalVoiceEntries) {
+        for (const note of voiceEntry.notes) {
+          note.setColor(greyed ? '#B0B0B0' : '#000000', coloringOpts);
+        }
+      }
+    }
+  }
+}
+```
+
+Staff index mapping (0-based in `MeasureList`): `si === 0` → right hand (treble, MusicXML
+`<staff>1</staff>`); `si === 1` → left hand (bass, `<staff>2</staff>`). This matches
+`note.ParentStaff.idInMusicSheet` used to filter `noteEvents` in `buildTimelines`.
+
+The coloring persists across `Transport.start/stop` cycles because it is applied to the
+rendered SVG elements directly; it is re-applied on every `initPlayback` and on every
+`setActiveHand` call.
+
+## PATTERN: Rebuild `Tone.Part` without losing cursor position
+
+When rebuilding the Part on a hand-filter change, save position state **before** `stopPlayback()`
+resets it, then restore after Part creation:
+
+```typescript
+// 1. Capture before stop
+const savedTicks = Tone.Transport.ticks;
+const savedStep  = currentCursorStep; // -1 if never played
+const savedScrollPx = scrollOffsetPx;
+
+if (Tone.Transport.state !== 'stopped') stopPlayback();
+// stopPlayback → _stopInternal sets: currentCursorStep=0, osmdActualIdx=0, Transport.ticks=0
+
+// 2. Rebuild timelines (buildTimelines calls osmd.cursor.reset() at the end,
+//    leaving osmdActualIdx=0 and the OSMD cursor at position 0)
+const { noteEvents } = buildTimelines(osmdRef);
+
+// 3. Rebuild Part (hand-filtered noteEvents, same sampler + tempo schedule)
+part?.dispose();
+part = new Tone.Part(..., noteEvents);
+part.start(0);
+
+// 4. Restore position
+const step = Math.max(0, Math.min(savedStep < 0 ? 0 : savedStep, cursorSteps.length - 1));
+Tone.Transport.ticks = savedTicks;
+advanceCursorTo(step);   // advances from osmdActualIdx=0; must be called BEFORE setting currentCursorStep
+currentCursorStep = step; // advanceCursorTo early-returns if targetStep === currentCursorStep
+applyTranslate(savedScrollPx !== 0 ? savedScrollPx : scrollMaxPx);
+```
+
+Key ordering constraint: call `advanceCursorTo(step)` **before** assigning `currentCursorStep`,
+because `advanceCursorTo` short-circuits when `targetStep === currentCursorStep`.

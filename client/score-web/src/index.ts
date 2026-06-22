@@ -8,6 +8,7 @@ import {
   disposePlayback,
   toggleLoop,
   toggleMetronome,
+  setActiveHand,
 } from './playback';
 import type { OutboundMessage } from './types';
 
@@ -85,6 +86,10 @@ w.__rn_toggle_loop = () => {
 
 w.__rn_toggle_metronome = () => {
   toggleMetronome();
+};
+
+w.__rn_set_active_hand = (hand: 'both' | 'right' | 'left') => {
+  setActiveHand(hand);
 };
 
 const container = document.getElementById('osmd');

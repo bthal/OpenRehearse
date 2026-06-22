@@ -2,6 +2,7 @@ import {
   mdiAlertCircleOutline,
   mdiArrowLeft,
   mdiClose,
+  mdiHandBackLeft,
   mdiMetronome,
   mdiMusicNoteOutline,
   mdiPause,
@@ -21,7 +22,12 @@ import { pieceRepository } from '@data/index';
 import { SCORE_WEB_HTML } from '@score-web/html';
 import type { WebToNativeMessage } from '@score-web/messageProtocol';
 import { usePiecesStore } from '@state/piecesStore';
-import { TEMPO_MULTIPLIERS, type TempoMultiplier, usePlayViewStore } from '@state/playViewStore';
+import {
+  TEMPO_MULTIPLIERS,
+  type ActiveHand,
+  type TempoMultiplier,
+  usePlayViewStore,
+} from '@state/playViewStore';
 
 const MULTIPLIER_LABEL: Record<number, string> = {
   0.5: '×0.5',
@@ -30,6 +36,9 @@ const MULTIPLIER_LABEL: Record<number, string> = {
 };
 
 const SPEED_PANEL_WIDTH = 132;
+const HAND_PANEL_WIDTH = 132; // 3 × 44 px
+
+const HAND_OPTIONS: ActiveHand[] = ['both', 'right', 'left'];
 
 export default function PlayView() {
   const { t } = useTranslation();
@@ -44,6 +53,7 @@ export default function PlayView() {
   const tempoMultiplier = usePlayViewStore((s) => s.tempoMultiplier);
   const loopActive = usePlayViewStore((s) => s.loopActive);
   const metronomeOn = usePlayViewStore((s) => s.metronomeOn);
+  const activeHand = usePlayViewStore((s) => s.activeHand);
 
   const setWebViewReady = usePlayViewStore((s) => s.setWebViewReady);
   const setLoadingScore = usePlayViewStore((s) => s.setLoadingScore);
@@ -53,14 +63,20 @@ export default function PlayView() {
   const setTempoMultiplier = usePlayViewStore((s) => s.setTempoMultiplier);
   const setLoopActive = usePlayViewStore((s) => s.setLoopActive);
   const setMetronomeOn = usePlayViewStore((s) => s.setMetronomeOn);
+  const setActiveHand = usePlayViewStore((s) => s.setActiveHand);
   const reset = usePlayViewStore((s) => s.reset);
 
   const [speedOpen, setSpeedOpen] = useState(false);
   const [speedAnim] = useState(() => new Animated.Value(0));
   const [panelLayout, setPanelLayout] = useState({ top: 0, left: 0 });
 
+  const [handOpen, setHandOpen] = useState(false);
+  const [handAnim] = useState(() => new Animated.Value(0));
+  const [handPanelLayout, setHandPanelLayout] = useState({ top: 0, left: 0 });
+
   const scoreAreaRef = useRef<View>(null);
   const speedTriggerRef = useRef<View>(null);
+  const handTriggerRef = useRef<View>(null);
   const toolbarRef = useRef<View>(null);
   const webViewRef = useRef<WebView>(null);
   // Refs so the message handler and multiplier handler always see the latest values
@@ -79,6 +95,15 @@ export default function PlayView() {
   const toggleSpeed = useCallback(() => {
     const opening = !speedOpen;
     if (opening) {
+      if (handOpen) {
+        setHandOpen(false);
+        Animated.spring(handAnim, {
+          toValue: 0,
+          useNativeDriver: false,
+          bounciness: 4,
+          speed: 18,
+        }).start();
+      }
       if (isPlaying) {
         webViewRef.current?.injectJavaScript('window.__rn_pause();void 0;');
       }
@@ -101,7 +126,57 @@ export default function PlayView() {
       bounciness: 4,
       speed: 18,
     }).start();
-  }, [speedOpen, speedAnim, isPlaying]);
+  }, [speedOpen, speedAnim, isPlaying, handOpen, handAnim]);
+
+  const toggleHand = useCallback(() => {
+    const opening = !handOpen;
+    if (opening) {
+      if (speedOpen) {
+        setSpeedOpen(false);
+        Animated.spring(speedAnim, {
+          toValue: 0,
+          useNativeDriver: false,
+          bounciness: 4,
+          speed: 18,
+        }).start();
+      }
+      handTriggerRef.current?.measureLayout(
+        scoreAreaRef.current as never,
+        (_tx, ty, _tw, th) => {
+          toolbarRef.current?.measureLayout(
+            scoreAreaRef.current as never,
+            (_bx, _by, bw) => setHandPanelLayout({ top: ty + th / 2 - 22, left: bw }),
+            () => {},
+          );
+        },
+        () => {},
+      );
+    }
+    setHandOpen(opening);
+    Animated.spring(handAnim, {
+      toValue: opening ? 1 : 0,
+      useNativeDriver: false,
+      bounciness: 4,
+      speed: 18,
+    }).start();
+  }, [handOpen, handAnim, speedOpen, speedAnim]);
+
+  const handleHandChange = useCallback(
+    (hand: ActiveHand) => {
+      setActiveHand(hand);
+      setHandOpen(false);
+      Animated.spring(handAnim, {
+        toValue: 0,
+        useNativeDriver: false,
+        bounciness: 4,
+        speed: 18,
+      }).start();
+      webViewRef.current?.injectJavaScript(
+        `window.__rn_set_active_hand(${JSON.stringify(hand)});void 0;`,
+      );
+    },
+    [setActiveHand, handAnim],
+  );
 
   const sendXml = useCallback(async () => {
     if (!piece) return;
@@ -280,6 +355,28 @@ export default function PlayView() {
                   />
                 </TouchableOpacity>
 
+                {/* Hand selector trigger */}
+                <View ref={handTriggerRef}>
+                  <TouchableOpacity
+                    onPress={toggleHand}
+                    hitSlop={8}
+                    className="items-center px-2 py-1"
+                  >
+                    <AppIcon
+                      path={mdiHandBackLeft}
+                      size={22}
+                      color={activeHand !== 'both' ? '#4B7A6E' : '#374151'}
+                    />
+                    <Text className="text-[9px] text-black mt-0.5">
+                      {activeHand === 'right'
+                        ? t('warmup.right')
+                        : activeHand === 'left'
+                          ? t('warmup.left')
+                          : t('warmup.both')}
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+
                 {/* Speed trigger — icon when open, current speed label when closed */}
                 <View ref={speedTriggerRef}>
                   <TouchableOpacity
@@ -348,6 +445,58 @@ export default function PlayView() {
                     }}
                   >
                     {MULTIPLIER_LABEL[m]}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
+          </Animated.View>
+
+          {/* Hand panel — overlays the score, anchored to the hand trigger position */}
+          <Animated.View
+            pointerEvents={handOpen ? 'auto' : 'none'}
+            style={{
+              position: 'absolute',
+              top: handPanelLayout.top,
+              left: handPanelLayout.left,
+              width: handAnim.interpolate({
+                inputRange: [0, 1],
+                outputRange: [0, HAND_PANEL_WIDTH],
+                extrapolate: 'clamp',
+              }),
+              overflow: 'hidden',
+              flexDirection: 'row',
+              backgroundColor: 'rgba(255,255,255,0.92)',
+              borderRadius: 10,
+              elevation: 4,
+              shadowColor: '#000',
+              shadowOpacity: 0.12,
+              shadowRadius: 6,
+              shadowOffset: { width: 2, height: 0 },
+            }}
+          >
+            {HAND_OPTIONS.map((hand) => {
+              const isActive = activeHand === hand;
+              const label =
+                hand === 'right'
+                  ? t('warmup.right')
+                  : hand === 'left'
+                    ? t('warmup.left')
+                    : t('warmup.both');
+              return (
+                <TouchableOpacity
+                  key={hand}
+                  onPress={() => handleHandChange(hand)}
+                  hitSlop={4}
+                  style={{ width: 44, height: 44, alignItems: 'center', justifyContent: 'center' }}
+                >
+                  <Text
+                    style={{
+                      fontSize: 14,
+                      fontWeight: '600',
+                      color: isActive ? '#4B7A6E' : '#9CA3AF',
+                    }}
+                  >
+                    {label}
                   </Text>
                 </TouchableOpacity>
               );

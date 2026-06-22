@@ -64,6 +64,12 @@ The entire piece is rendered in a **single horizontal line** — all measures la
   - **Play / Pause**
   - **Metronome toggle** — when enabled, clicks every quarter note; first beat of each measure
     accented (higher pitch, louder). Works for any time signature.
+  - **Hand selector** — collapses to current selection label + hand icon (teal when filtering
+    active); tapping expands a spring-animated panel over the score with **Both / Right / Left**
+    buttons. Selecting a hand closes the panel without resuming playback. Cursor position is
+    preserved on change. Staff heuristic: MusicXML `<staff>1</staff>` = right hand (treble),
+    `<staff>2</staff>` = left hand (bass). Inactive staff notes are greyed in the score and
+    silenced in audio.
   - **Speed selector** — collapses to current speed label + effective BPM; tapping shows a
     speedometer icon and **pauses playback**; expands a horizontal spring-animated panel over
     the score with ×0.5 / ×0.75 / ×1.0 text buttons. Selecting a speed closes the panel.
@@ -72,6 +78,7 @@ The entire piece is rendered in a **single horizontal line** — all measures la
 
 Slices: `activePieceId`, `webViewReady`, `isLoadingScore`, `scoreError`, `isPlaying`,
 `scoreBpm` (from MusicXML), `tempoMultiplier` (×0.5/×0.75/×1.0), `metronomeOn: boolean`,
+`activeHand: 'both' | 'right' | 'left'` (resets to `'both'` on piece unmount),
 `loop: { start, end } | null`,
 `displayMode: 'one-line' | 'standard'` (global preference; `'one-line'` in MVP, no UI to change it yet).
 
@@ -104,4 +111,6 @@ Slices: `activePieceId`, `webViewReady`, `isLoadingScore`, `scoreError`, `isPlay
   animated overlay; closes after selection. *(Phase 5)*
 - [x] Metronome toggle present; clicks every quarter note; first-beat accent correct for any
   time signature. *(Phase 5)*
+- [x] Hand selector (Both/Right/Left): selected staff plays audio and notes stay black;
+  inactive staff notes greyed (`#B0B0B0`); switching hand preserves cursor position.
 - [ ] Works **offline** once the piece is loaded from local storage. *(Phase 2)*

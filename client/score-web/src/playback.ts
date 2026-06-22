@@ -77,6 +77,12 @@ function postToNative(msg: OutboundMessage): void {
   rn?.postMessage(JSON.stringify(msg));
 }
 
+type ActiveHand = 'both' | 'right' | 'left';
+let activeHand: ActiveHand = 'both';
+
+const HAND_GREY = '#B0B0B0';
+const NOTE_BLACK = '#000000';
+
 let sampler: Tone.Sampler | null = null;
 let part: Tone.Part<NoteEvent> | null = null;
 let metronomeEventId: number | null = null;
@@ -112,6 +118,34 @@ let loopModified = false;
 // Tracks actual OSMD cursor position (osmdIdx). Updated only in advanceCursorTo
 // (called from startPlayback/stop, never from the RAF hot path).
 let osmdActualIdx = -1;
+
+// ─── Hand coloring ────────────────────────────────────────────────────────────
+
+function applyHandColors(osmd: OpenSheetMusicDisplay): void {
+  const coloringOpts = {
+    applyToNoteheads: true,
+    applyToBeams: true,
+    applyToFlag: true,
+    applyToStem: true,
+    applyToLedgerLines: true,
+  };
+  for (const measureRow of osmd.GraphicSheet.MeasureList) {
+    for (let si = 0; si < measureRow.length; si++) {
+      const measure = measureRow[si];
+      if (!measure) continue;
+      const greyed =
+        (activeHand === 'right' && si === 1) || (activeHand === 'left' && si === 0);
+      const color = greyed ? HAND_GREY : NOTE_BLACK;
+      for (const staffEntry of measure.staffEntries) {
+        for (const voiceEntry of staffEntry.graphicalVoiceEntries) {
+          for (const note of voiceEntry.notes) {
+            note.setColor(color, coloringOpts);
+          }
+        }
+      }
+    }
+  }
+}
 
 // ─── Cursor element access ────────────────────────────────────────────────────
 
@@ -197,6 +231,11 @@ function buildTimelines(osmd: OpenSheetMusicDisplay): {
         // OSMD halfTone is semitones from C0; standard MIDI is semitones from C-1,
         // so add 12 to align octaves. Valid piano range: A0 (9) to C8 (96).
         if (note.halfTone < 9 || note.halfTone > 115) continue;
+        if (activeHand !== 'both') {
+          const si = note.ParentStaff?.idInMusicSheet ?? 0;
+          if (activeHand === 'right' && si !== 0) continue;
+          if (activeHand === 'left' && si !== 1) continue;
+        }
         const arp = note.ParentVoiceEntry.Arpeggio;
         if (arp) {
           const group = arpMap.get(arp);
@@ -908,6 +947,7 @@ export function initPlayback(
   initTouchHandlers();
   initLoopHandles();
   if (metronomeEnabled) startMetronome();
+  applyHandColors(osmd);
 }
 
 export async function startPlayback(): Promise<void> {
@@ -1009,4 +1049,49 @@ export function disposePlayback(): void {
   Tone.Transport.loop = false;
   scrollMinPx = 0;
   scrollMaxPx = 0;
+  activeHand = 'both';
+}
+
+export function setActiveHand(hand: ActiveHand): void {
+  activeHand = hand;
+  if (!osmdRef || !sampler) return;
+
+  // Capture position before stopPlayback resets it to 0.
+  const savedTicks = Tone.Transport.ticks;
+  const savedStep = currentCursorStep; // -1 if never played
+  const savedScrollPx = scrollOffsetPx;
+
+  if (Tone.Transport.state !== 'stopped') stopPlayback();
+
+  // Rebuild note events with new hand filter.
+  // buildTimelines resets the OSMD cursor to 0 and sets cursorSteps (same positions as before).
+  const { noteEvents } = buildTimelines(osmdRef);
+
+  // Replace Part only — keep sampler and tempo schedule intact.
+  part?.dispose();
+  const samplerRef = sampler;
+  part = new Tone.Part<NoteEvent>(
+    (time, event) => {
+      try {
+        const noteName = Tone.Frequency(event.midi, 'midi').toNote();
+        const durSec = Math.max(0.05, (event.durQ * 60) / Tone.Transport.bpm.value);
+        samplerRef.triggerAttackRelease(noteName, durSec, time);
+      } catch {
+        // ignore individual-note scheduling failures
+      }
+    },
+    noteEvents,
+  );
+  part.start(0);
+
+  applyHandColors(osmdRef);
+
+  // Restore cursor to saved position instead of jumping to start.
+  // buildTimelines leaves the OSMD cursor at 0 (reset) and osmdActualIdx is 0,
+  // so advanceCursorTo can correctly advance forward to the saved step.
+  const step = Math.max(0, Math.min(savedStep < 0 ? 0 : savedStep, cursorSteps.length - 1));
+  Tone.Transport.ticks = savedTicks;
+  advanceCursorTo(step);
+  currentCursorStep = step;
+  applyTranslate(savedScrollPx !== 0 ? savedScrollPx : scrollMaxPx);
 }
