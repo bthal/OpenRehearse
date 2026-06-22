@@ -727,6 +727,29 @@ Track event IDs in `tempoScheduleEventIds[]` and clear with `Tone.Transport.clea
 `disposePlayback`. Also clear and re-register on every `initPlayback` call so stale events from
 a previous score load don't accumulate.
 
+## LANDMINE: `startPlayback()` BPM reset overwrites user-set tempo
+
+**LANDMINE:** The BPM reset block in `startPlayback()` sets `Tone.Transport.bpm.value` to the
+score-position tempo on every play — including resume after a speed-picker change. This overwrites
+any multiplier or warm-up BPM that was applied via `setTempoBpm()`.
+
+**Fix:** Track the user-set BPM in a module variable `userBpmOverride: number | null`. Set it in
+`setTempoBpm()`; use `userBpmOverride ?? bpmForPos` in `startPlayback()`. Reset to `null` in
+`initPlayback()` and `disposePlayback()`. Multi-tempo routines never call `setTempoBpm()`, so the
+override stays `null` and score-position BPM is used unchanged.
+
+## LANDMINE: read `Tone.Transport.ticks` before `bpm.value` assignment in `startPlayback()`
+
+**LANDMINE:** The loop-seek condition in `startPlayback()` originally re-read `Tone.Transport.ticks`
+after `Tone.Transport.bpm.value = X`. Changing BPM while the transport is paused can cause Tone.js
+to recompute the paused tick position via the clock integral, producing a stale value that falls
+outside `[aTicks, bTicks)`. This falsely triggered the loop-start jump on every pause/play or
+speed-picker change.
+
+**Fix:** Read `Tone.Transport.ticks` once into `posTicks` **before** `cancelScheduledValues()` and
+`bpm.value` are set. Use `posTicks` for both the multi-tempo BPM lookup and the loop-seek condition
+— no second read.
+
 ## PATTERN: run handle drag in a RAF loop, not only on `touchmove`
 
 `touchmove` fires only when the finger moves. Edge-scrolling must continue even when the finger

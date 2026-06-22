@@ -110,6 +110,9 @@ let loopRegion: LoopRegion | null = null;
 let tempoScheduleEventIds: number[] = [];
 let tempoChangeSchedule: TempoChange[] = [];
 let initialBpmValue = 120;
+// Explicit BPM set by the user (piece tempo multiplier or warmup BPM). When non-null,
+// startPlayback uses this instead of the score BPM so the override survives replay.
+let userBpmOverride: number | null = null;
 // Set when a loop is created or its handles are moved; cleared on next startPlayback
 // so that play always jumps to loop A after a create/edit.
 let loopModified = false;
@@ -1447,25 +1450,27 @@ export async function startPlayback(): Promise<void> {
     momentumFrameId = null;
   }
 
-  // Before each play, cancel any AudioParam BPM values left over from the previous
-  // playthrough (they've already been applied and won't replay on Transport.start),
-  // then set the BPM that matches the current transport position so the correct tempo
-  // is audible from the first note. Transport.schedule events will fire the remaining
-  // changes at the right ticks as playback progresses.
-  Tone.Transport.bpm.cancelScheduledValues(0);
+  // Read position before any BPM manipulation — setting bpm.value can cause Tone.js to
+  // recompute the paused tick position via the clock integral, producing a stale value
+  // on the second read and falsely triggering the loop-seek below.
   const posTicks = Tone.Transport.ticks;
+
+  // Cancel any AudioParam BPM values left over from the previous playthrough
+  // (they've already been applied and won't replay on Transport.start), then set the
+  // BPM that matches the current transport position. Transport.schedule events will
+  // fire the remaining changes at the right ticks as playback progresses.
+  Tone.Transport.bpm.cancelScheduledValues(0);
   let bpmForPos = initialBpmValue;
   for (const { ticks, bpm } of tempoChangeSchedule) {
     if (ticks <= posTicks) bpmForPos = bpm;
     else break;
   }
-  Tone.Transport.bpm.value = bpmForPos;
+  Tone.Transport.bpm.value = userBpmOverride ?? bpmForPos;
 
   // If a loop is active and was just created/edited (loopModified), or transport is
   // outside [aTicks, bTicks], seek to A before starting.
   if (loopRegion) {
-    const ticks = Tone.Transport.ticks;
-    if (loopModified || ticks < loopRegion.aTicks || ticks >= loopRegion.bTicks) {
+    if (loopModified || posTicks < loopRegion.aTicks || posTicks >= loopRegion.bTicks) {
       loopModified = false;
       Tone.Transport.ticks = loopRegion.aTicks;
       const targetStep = ticksToStep(loopRegion.aTicks);
@@ -1503,7 +1508,9 @@ export function stopPlayback(): void {
 }
 
 export function setTempoBpm(bpm: number): void {
-  Tone.Transport.bpm.value = Math.max(20, Math.min(240, bpm));
+  const clamped = Math.max(20, Math.min(240, bpm));
+  userBpmOverride = clamped;
+  Tone.Transport.bpm.value = clamped;
 }
 
 export function disposePlayback(): void {
@@ -1521,6 +1528,7 @@ export function disposePlayback(): void {
   tempoScheduleEventIds = [];
   tempoChangeSchedule = [];
   initialBpmValue = 120;
+  userBpmOverride = null;
   part?.dispose();
   part = null;
   sampler?.dispose();
