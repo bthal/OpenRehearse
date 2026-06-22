@@ -114,3 +114,9 @@ Slices: `activePieceId`, `webViewReady`, `isLoadingScore`, `scoreError`, `isPlay
 - [x] Hand selector (Both/Right/Left): selected staff plays audio and notes stay black;
   inactive staff notes greyed (`#B0B0B0`); switching hand preserves cursor position.
 - [ ] Works **offline** once the piece is loaded from local storage. *(Phase 2)*
+- [x] Long-pressing a non-greyed note while paused opens a fingering selector overlay (fingers 1–5 + ✕ remove).
+- [x] Selecting a finger adds/replaces the fingering on the note; ✕ removes it; score re-renders immediately with cursor position preserved.
+- [x] Fingering annotations persist to SQLite (`piece_fingerings` table) and survive navigation away and back.
+- [x] Tapping outside the overlay (no drag) dismisses it without toggling play/pause.
+- [x] Long-pressing a greyed note (hand filter active) does not open the overlay.
+- [x] Long-pressing while playback is running does not open the overlay.

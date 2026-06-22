@@ -9,6 +9,9 @@ import {
   toggleLoop,
   toggleMetronome,
   setActiveHand,
+  setFingeringData,
+  buildFingeringXml,
+  debugFingeringAreas,
 } from './playback';
 import type { OutboundMessage } from './types';
 
@@ -25,7 +28,7 @@ let osmd: OpenSheetMusicDisplay | null = null;
 // is never set. See compound-docs/osmd-webview.md.
 const w = window as unknown as Record<string, unknown>;
 
-w.__rn_load_xml = async (xml: string, scheduleJson?: string) => {
+w.__rn_load_xml = async (xml: string, scheduleJson?: string, fingeringJson?: string) => {
   if (!osmd) {
     postToNative({ type: 'ERROR', payload: 'OSMD not ready' });
     return;
@@ -34,6 +37,10 @@ w.__rn_load_xml = async (xml: string, scheduleJson?: string) => {
   const externalTempoSchedule = scheduleJson
     ? (JSON.parse(scheduleJson) as import('./playback').ExternalTempoChange[])
     : undefined;
+  const storedFingering: Record<string, number> = fingeringJson ? JSON.parse(fingeringJson) : {};
+  // setFingeringData returns the resolved map: storedFingering if non-empty, otherwise
+  // fingerings extracted from the raw XML (so imported fingerings are tracked from day one).
+  const resolvedFingeringMap = setFingeringData(xml, storedFingering);
   try {
     // Force single-system (one-line) layout.
     // PageWidth = 10000 prevents automatic line wrapping.
@@ -49,9 +56,16 @@ w.__rn_load_xml = async (xml: string, scheduleJson?: string) => {
     osmd.EngravingRules.RenderComposer = false;
     osmd.EngravingRules.RenderLyricist = false;
     osmd.EngravingRules.RenderCopyright = false;
+    // PlacementEnum.Above = 0. Force all fingerings above their staff line so bass-clef
+    // fingerings appear between the staves rather than below the visible area.
+    osmd.EngravingRules.FingeringPosition = 0;
     const container = document.getElementById('osmd')!;
     container.style.width = '10000px';
-    await osmd.load(xml);
+    const xmlToLoad =
+      Object.keys(resolvedFingeringMap).length > 0
+        ? buildFingeringXml(xml, resolvedFingeringMap)
+        : xml;
+    await osmd.load(xmlToLoad);
     osmd.render();
     // Trim container to the SVG's actual rendered width (container.scrollWidth would
     // still be 10000px since we set it before render; query the SVG directly).
@@ -90,6 +104,10 @@ w.__rn_toggle_metronome = () => {
 
 w.__rn_set_active_hand = (hand: 'both' | 'right' | 'left') => {
   setActiveHand(hand);
+};
+
+w.__rn_debug_fingering_areas = (show: boolean) => {
+  debugFingeringAreas(show);
 };
 
 const container = document.getElementById('osmd');

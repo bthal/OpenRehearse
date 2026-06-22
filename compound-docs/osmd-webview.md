@@ -156,3 +156,50 @@ Web→Native: web page calls `window.ReactNativeWebView.postMessage(data)`; nati
 Native→Web: native calls `webViewRef.current.injectJavaScript(code)`; executed in the WebView's JS context.
 
 Readiness signal: native's `onLoadEnd` fires after inline scripts have run and `window.__rn_load_xml` is defined. Do not rely on a `READY` postMessage from the web page — `DOMContentLoaded` will never fire for inline scripts (see above).
+
+## OSMD `FingeringPosition` default hides bass-clef fingerings
+
+**LANDMINE:** `EngravingRules.FingeringPosition` defaults to `PlacementEnum.AboveOrBelow = 5`. When `calculateFingerings()` encounters `AboveOrBelow`, it overrides to `isUpperStaffOfInstrument() ? Above : Below`. Bass staves resolve to `Below` — fingerings are placed below the staff, outside the visible viewport (`overflow: hidden`).
+
+Per-note XML `placement="above"` is read into `TechnicalInstruction.placement` by `createTechnicalInstruction`, but `calculateFingerings` ignores it — only the global rule is used.
+
+**Fix:** Set `FingeringPosition` before each `osmd.load()`:
+```typescript
+osmd.EngravingRules.FingeringPosition = 0; // PlacementEnum.Above
+```
+This places all fingerings above their respective staff line. Bass fingerings appear between the staves; treble fingerings appear above.
+
+## MusicXML `<backup>` skipped by `querySelectorAll('note')`
+
+**LANDMINE:** In single-`<part>` piano MusicXML, treble notes appear first, then a `<backup>` element rewinds the time cursor, then bass notes follow. `querySelectorAll('note')` skips `<backup>`, so cumulative beat positions for bass notes stack on top of treble positions instead of being measured from the correct beat.
+
+Consequences:
+- Beat keys computed from the XML don't match OSMD's `VoiceEntry.Timestamp` — overlay hit-testing fails for all bass notes.
+- `buildFingeringXml` can't find bass notes at their OSMD-correct positions — fingerings are silently dropped from the output XML.
+
+**Fix:** Iterate `measureEl.children` directly and handle `backup`/`forward` tags:
+```typescript
+let cumPos = 0;
+let currentBeatPos = 0;
+for (const child of Array.from(measureEl.children)) {
+  const tag = child.tagName.toLowerCase();
+  if (tag === 'backup') {
+    const durEl = child.querySelector('duration');
+    if (durEl) cumPos -= parseInt(durEl.textContent ?? '0', 10);
+    continue;
+  }
+  if (tag === 'forward') {
+    const durEl = child.querySelector('duration');
+    if (durEl) cumPos += parseInt(durEl.textContent ?? '0', 10);
+    continue;
+  }
+  if (tag !== 'note') continue;
+  const isChord = !!child.querySelector('chord');
+  if (!isChord) currentBeatPos = cumPos;
+  // ... use currentBeatPos for the note ...
+  if (!isChord) {
+    const durEl = child.querySelector('duration');
+    if (durEl) cumPos += parseInt(durEl.textContent ?? '0', 10);
+  }
+}
+```
