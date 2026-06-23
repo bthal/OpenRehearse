@@ -23,13 +23,14 @@ function errorMessage(code: ReturnType<typeof validateMusicXml>): string {
 
 interface PiecesState {
   piecesById: Record<string, Piece>;
-  pieceIds: string[]; // sorted importedAt descending
+  pieceIds: string[]; // sorted by lastOpenedAt ?? importedAt descending
   isLoading: boolean;
   importError: string | null;
 
   loadPieces: () => Promise<void>;
   importPiece: (file: PickedFile, fallbackTitle: string) => Promise<string | null>;
   updatePiece: (id: string, updates: { title: string; composer: string | null }) => Promise<void>;
+  touchPiece: (id: string) => Promise<void>;
   deletePiece: (id: string) => Promise<void>;
   clearImportError: () => void;
 }
@@ -95,6 +96,24 @@ export const usePiecesStore = create<PiecesState>()((set, get) => ({
     const updated: Piece = { ...existing, ...updates };
     await pieceRepository.update(updated);
     set({ piecesById: { ...piecesById, [id]: updated } });
+  },
+
+  touchPiece: async (id) => {
+    const { piecesById, pieceIds } = get();
+    const existing = piecesById[id];
+    if (!existing) return;
+    const at = new Date().toISOString();
+    await pieceRepository.touch(id, at);
+    const updated: Piece = { ...existing, lastOpenedAt: at };
+    const nextById = { ...piecesById, [id]: updated };
+    const nextIds = [...pieceIds].sort((a, b) => {
+      const pa = nextById[a];
+      const pb = nextById[b];
+      const ta = pa?.lastOpenedAt ?? pa?.importedAt ?? '';
+      const tb = pb?.lastOpenedAt ?? pb?.importedAt ?? '';
+      return tb.localeCompare(ta);
+    });
+    set({ piecesById: nextById, pieceIds: nextIds });
   },
 
   deletePiece: async (id) => {

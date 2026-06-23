@@ -26,6 +26,7 @@ export default function RoutinePlayView() {
   const { t } = useTranslation();
   const { id } = useLocalSearchParams<{ id: string }>();
   const routine = useRoutinesStore((s) => s.routines.find((r) => r.id === id));
+  const touchRoutine = useRoutinesStore((s) => s.touchRoutine);
 
   const webViewReady = usePlayViewStore((s) => s.webViewReady);
   const isLoadingScore = usePlayViewStore((s) => s.isLoadingScore);
@@ -43,6 +44,9 @@ export default function RoutinePlayView() {
   const webViewRef = useRef<WebView>(null);
 
   useEffect(() => () => reset(), [reset]);
+  useEffect(() => {
+    if (id) void touchRoutine(id);
+  }, [id, touchRoutine]);
 
   // Generate XML + precise tempo schedule once per routine identity
   const { xml, tempoScheduleJson } = useMemo(() => {

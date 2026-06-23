@@ -12,6 +12,8 @@ export interface PieceRepository {
   save(piece: Piece, xmlContent: string): Promise<void>;
   /** Updates title and composer only — never touches the XML file. */
   update(piece: Piece): Promise<void>;
+  /** Records the current timestamp as lastOpenedAt for the given piece. */
+  touch(id: string, at: string): Promise<void>;
   delete(id: string): Promise<void>;
   /** Returns the XML content for a piece previously saved via save(). */
   readXml(piece: Piece): Promise<string>;

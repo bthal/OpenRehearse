@@ -53,6 +53,7 @@ export default function PlayView() {
   const { t } = useTranslation();
   const { id } = useLocalSearchParams<{ id: string }>();
   const piece = usePiecesStore((s) => (id ? s.piecesById[id] : undefined));
+  const touchPiece = usePiecesStore((s) => s.touchPiece);
 
   const webViewReady = usePlayViewStore((s) => s.webViewReady);
   const isLoadingScore = usePlayViewStore((s) => s.isLoadingScore);
@@ -100,6 +101,9 @@ export default function PlayView() {
   }, [tempoMultiplier]);
 
   useEffect(() => () => reset(), [reset]);
+  useEffect(() => {
+    if (id) void touchPiece(id);
+  }, [id, touchPiece]);
 
   const toggleSpeed = useCallback(() => {
     const opening = !speedOpen;

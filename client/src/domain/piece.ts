@@ -5,6 +5,7 @@ export interface Piece {
   /** Basename of the XML file in app-private storage — absolute path is a storage concern. */
   xmlFilename: string;
   importedAt: string; // ISO 8601
+  lastOpenedAt?: string; // ISO 8601; undefined for pieces never opened after this field was added
 }
 
 /** Loop region in musical time. Unit is determined by the score renderer (Phase 3). */

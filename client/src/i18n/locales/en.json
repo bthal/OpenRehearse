@@ -9,6 +9,7 @@
     "goBack": "Go back"
   },
   "dashboard": {
+    "title": "OpenRehearse",
     "warmUps": "Warm-ups",
     "hanon": "Hanon I",
     "scales": "Scales",
@@ -23,6 +24,7 @@
     "emptyTitle": "No pieces yet",
     "importScore": "Import score",
     "importMxl": "Import .mxl-File",
+    "warmUpsNote": "Use the exercises as building blocks for your personal warm-up routines.",
     "privacyNote": "Your files stay on this device — \nnothing is uploaded.",
     "importFailed": "Import failed"
   },
@@ -91,7 +93,8 @@
     "octave_one": "{{count}} Octave",
     "octave_other": "{{count}} Octaves",
     "measure_one": "{{count}} Measure",
-    "measure_other": "{{count}} Measures"
+    "measure_other": "{{count}} Measures",
+    "swapExercises": "Swap Exercises"
   },
   "routineRow": {
     "exercise_one": "{{count}} exercise",

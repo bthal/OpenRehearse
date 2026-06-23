@@ -1,4 +1,4 @@
-import { mdiArrowDown, mdiArrowLeft, mdiArrowUp, mdiDelete, mdiPlus } from '@mdi/js';
+import { mdiArrowLeft, mdiDelete, mdiPlus, mdiSwapVertical } from '@mdi/js';
 import * as Crypto from 'expo-crypto';
 import { router, Stack, useLocalSearchParams } from 'expo-router';
 import { useState } from 'react';
@@ -95,6 +95,23 @@ function AddButton({ atIndex, onPress, label }: AddButtonProps) {
     >
       <AppIcon path={mdiPlus} size={20} color={Colors.primary} />
       <Text className="text-base font-semibold text-seagrass-600">{label}</Text>
+    </Pressable>
+  );
+}
+
+interface SwapButtonProps {
+  onPress: () => void;
+  label: string;
+}
+
+function SwapButton({ onPress, label }: SwapButtonProps) {
+  return (
+    <Pressable
+      onPress={onPress}
+      className="my-2 flex-row items-center gap-1.5 rounded-xl px-3 py-3.5 active:bg-ash-grey-500/10"
+    >
+      <AppIcon path={mdiSwapVertical} size={20} color="#111827" />
+      <Text className="text-sm font-semibold text-ash-grey-950">{label}</Text>
     </Pressable>
   );
 }
@@ -203,14 +220,11 @@ export default function RoutineEditScreen() {
     setIsDirty(true);
   }
 
-  function moveBlock(blockKey: string, direction: 'up' | 'down') {
+  function swapBlocks(index: number) {
     setBlocks((prev) => {
-      const idx = prev.findIndex((b) => b._key === blockKey);
-      if (idx < 0) return prev;
-      const targetIdx = direction === 'up' ? idx - 1 : idx + 1;
-      if (targetIdx < 0 || targetIdx >= prev.length) return prev;
+      if (index <= 0 || index >= prev.length) return prev;
       const next = [...prev];
-      [next[idx], next[targetIdx]] = [next[targetIdx]!, next[idx]!];
+      [next[index - 1], next[index]] = [next[index]!, next[index - 1]!];
       return next;
     });
     setIsDirty(true);
@@ -334,61 +348,47 @@ export default function RoutineEditScreen() {
           keyExtractor={(item) => item._key}
           renderItem={({ item: block, index }) => (
             <View key={block._key}>
-              <AddButton
-                atIndex={index}
-                onPress={openAddPicker}
-                label={t('routineEdit.addExercise')}
-              />
+              {index === 0 ? (
+                <View className="items-end">
+                  <AddButton
+                    atIndex={index}
+                    onPress={openAddPicker}
+                    label={t('routineEdit.addExercise')}
+                  />
+                </View>
+              ) : (
+                <View className="flex-row items-center justify-between">
+                  <SwapButton
+                    onPress={() => swapBlocks(index)}
+                    label={t('routineEdit.swapExercises')}
+                  />
+                  <AddButton
+                    atIndex={index}
+                    onPress={openAddPicker}
+                    label={t('routineEdit.addExercise')}
+                  />
+                </View>
+              )}
               <View className="mb-1 rounded-xl border border-ash-grey-500/35 bg-white p-4">
                 <View className="flex-row items-stretch">
-                  {/* Left: arrows spanning full card height */}
-                  <View className="mr-4 flex-col items-center justify-center gap-4 pr-4 border-r border-ash-grey-500/20">
-                    <Pressable
-                      onPress={() => moveBlock(block._key, 'up')}
-                      disabled={index === 0}
-                      hitSlop={6}
-                      className="p-0.5"
-                    >
-                      <AppIcon
-                        path={mdiArrowUp}
-                        size={22}
-                        color={index === 0 ? Colors.tabIconDefault : '#374151'}
-                      />
-                    </Pressable>
-                    <Pressable
-                      onPress={() => moveBlock(block._key, 'down')}
-                      disabled={index === blocks.length - 1}
-                      hitSlop={6}
-                      className="p-0.5"
-                    >
-                      <AppIcon
-                        path={mdiArrowDown}
-                        size={22}
-                        color={index === blocks.length - 1 ? Colors.tabIconDefault : '#374151'}
-                      />
+                  {/* Left: delete button centered vertically */}
+                  <View className="mr-4 items-center justify-center border-r border-ash-grey-500/20 pr-4">
+                    <Pressable onPress={() => deleteBlock(block._key)} hitSlop={8} className="p-1">
+                      <AppIcon path={mdiDelete} size={20} color={Colors.destructive} />
                     </Pressable>
                   </View>
 
-                  {/* Right: title row + parameter pills */}
+                  {/* Right: title (centered) + parameter pills */}
                   <View className="flex-1">
-                    <View className="flex-row items-center">
-                      <Text className="flex-1 text-lg font-semibold text-ash-grey-950">
-                        {block.type === 'hanon'
-                          ? t('routineEdit.addExerciseHanon')
-                          : block.type === 'scales'
-                            ? t('routineEdit.addExerciseScales')
-                            : block.type === 'drill45'
-                              ? t('routineEdit.addExerciseDrill45')
-                              : t('routineEdit.addExercisePause')}
-                      </Text>
-                      <Pressable
-                        onPress={() => deleteBlock(block._key)}
-                        hitSlop={8}
-                        className="p-1"
-                      >
-                        <AppIcon path={mdiDelete} size={20} color={Colors.destructive} />
-                      </Pressable>
-                    </View>
+                    <Text className="text-center text-lg font-semibold text-ash-grey-950">
+                      {block.type === 'hanon'
+                        ? t('routineEdit.addExerciseHanon')
+                        : block.type === 'scales'
+                          ? t('routineEdit.addExerciseScales')
+                          : block.type === 'drill45'
+                            ? t('routineEdit.addExerciseDrill45')
+                            : t('routineEdit.addExercisePause')}
+                    </Text>
 
                     {/* Parameter pills */}
                     {block.type !== 'pause' ? (
@@ -458,11 +458,13 @@ export default function RoutineEditScreen() {
           }
           ListFooterComponent={
             <View className="pb-8">
-              <AddButton
-                atIndex={blocks.length}
-                onPress={openAddPicker}
-                label={t('routineEdit.addExercise')}
-              />
+              <View className="items-end">
+                <AddButton
+                  atIndex={blocks.length}
+                  onPress={openAddPicker}
+                  label={t('routineEdit.addExercise')}
+                />
+              </View>
               {validationError && blocks.length > 0 ? (
                 <Text className="mt-2 text-xs text-mauve-shadow-800">
                   {validationError === 'pauseAtEnd'
@@ -472,7 +474,10 @@ export default function RoutineEditScreen() {
               ) : null}
             </View>
           }
-          contentContainerStyle={{ paddingHorizontal: 16 }}
+          contentContainerStyle={{
+            paddingHorizontal: 16,
+            flexGrow: 1,
+          }}
         />
 
         {/* Parameter picker modal */}

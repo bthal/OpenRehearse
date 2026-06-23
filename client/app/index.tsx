@@ -45,6 +45,7 @@ export default function Dashboard() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [selectedPieceIds, setSelectedPieceIds] = useState<string[]>([]);
   const [isDeletingPieces, setIsDeletingPieces] = useState(false);
+  const [isPicking, setIsPicking] = useState(false);
 
   // Routine selection (mutually exclusive with piece selection)
   const [selectedRoutineIds, setSelectedRoutineIds] = useState<string[]>([]);
@@ -67,6 +68,7 @@ export default function Dashboard() {
   }
 
   async function handleImport() {
+    setIsPicking(true);
     try {
       const file = await pickXmlFile();
       if (!file) return;
@@ -75,6 +77,8 @@ export default function Dashboard() {
     } catch (err) {
       console.error('[handleImport] unexpected error:', err);
       Alert.alert(t('dashboard.importFailed'), String(err instanceof Error ? err.message : err));
+    } finally {
+      setIsPicking(false);
     }
   }
 
@@ -113,7 +117,7 @@ export default function Dashboard() {
     Alert.alert(title, message, [
       { text: t('common.cancel'), style: 'cancel' },
       {
-        text: t('pieceEdit.remove'),
+        text: t('common.remove'),
         style: 'destructive',
         onPress: async () => {
           setIsDeletingPieces(true);
@@ -166,7 +170,7 @@ export default function Dashboard() {
     Alert.alert(title, message, [
       { text: t('common.cancel'), style: 'cancel' },
       {
-        text: t('dashboard.remove'),
+        text: t('common.remove'),
         style: 'destructive',
         onPress: async () => {
           setIsDeletingRoutines(true);
@@ -190,9 +194,9 @@ export default function Dashboard() {
         <ScrollView showsVerticalScrollIndicator={false} contentContainerClassName="px-6 pb-12">
           <View className="w-full max-w-[720px] self-center">
             {/* Brand header */}
-            <View className="items-center pb-2 pt-10">
+            <View className="items-center pt-12 pb-8">
               <Text className="font-brand text-4xl font-semibold italic tracking-wide text-mauve-shadow-500">
-                OpenRehearse
+                {t('dashboard.title')}
               </Text>
             </View>
 
@@ -233,7 +237,10 @@ export default function Dashboard() {
                   ) : null}
                 </View>
               ) : (
-                <View className="mb-2 mt-1.5 items-end">
+                <View className="mb-2 mt-1.5 flex-row items-center gap-3">
+                  <Text className="flex-1 text-xs text-ash-grey-400">
+                    {t('dashboard.warmUpsNote')}
+                  </Text>
                   <Pressable
                     className="flex-row items-center gap-2 rounded-lg border border-seagrass-600 px-4 py-2 active:bg-seagrass-50"
                     onPress={() => router.push('/routine/edit')}
@@ -245,19 +252,6 @@ export default function Dashboard() {
                   </Pressable>
                 </View>
               )}
-
-              <WarmUpRow
-                title={t('dashboard.hanon')}
-                onPress={() => router.push('/warmup/hanon')}
-              />
-              <WarmUpRow
-                title={t('dashboard.scales')}
-                onPress={() => router.push('/warmup/scales')}
-              />
-              <WarmUpRow
-                title={t('dashboard.drill45')}
-                onPress={() => router.push('/warmup/drill45')}
-              />
 
               {routines.map((routine) => (
                 <RoutineRow
@@ -272,6 +266,19 @@ export default function Dashboard() {
                   }}
                 />
               ))}
+
+              <WarmUpRow
+                title={t('dashboard.drill45')}
+                onPress={() => router.push('/warmup/drill45')}
+              />
+              <WarmUpRow
+                title={t('dashboard.hanon')}
+                onPress={() => router.push('/warmup/hanon')}
+              />
+              <WarmUpRow
+                title={t('dashboard.scales')}
+                onPress={() => router.push('/warmup/scales')}
+              />
             </View>
 
             {/* Pieces header */}
@@ -320,9 +327,9 @@ export default function Dashboard() {
                 <Pressable
                   className="flex-row items-center gap-2 rounded-lg border border-seagrass-600 px-4 py-2 active:bg-seagrass-50"
                   onPress={handleImport}
-                  disabled={isLoading}
+                  disabled={isLoading || isPicking}
                 >
-                  {isLoading ? (
+                  {isLoading || isPicking ? (
                     <ActivityIndicator size="small" color={Colors.primary} />
                   ) : (
                     <>
@@ -337,12 +344,13 @@ export default function Dashboard() {
             )}
 
             {/* Pieces list */}
-            {isEmpty && !isLoading ? (
+            {isEmpty && !isLoading && !isPicking ? (
               <Text className="py-4 text-center text-sm text-ash-grey-400">
                 {t('dashboard.emptyTitle')}
               </Text>
             ) : (
               <>
+                {(isLoading || isPicking) && <PieceRowSkeleton />}
                 {pieceIds.map((id) => {
                   const piece = piecesById[id];
                   if (!piece) return null;
@@ -360,7 +368,6 @@ export default function Dashboard() {
                     />
                   );
                 })}
-                {isLoading && <PieceRowSkeleton />}
               </>
             )}
           </View>

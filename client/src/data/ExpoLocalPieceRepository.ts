@@ -27,6 +27,12 @@ export class ExpoLocalPieceRepository implements PieceRepository {
         map_json TEXT NOT NULL
       );
     `);
+    // Migration: add last_opened_at if it doesn't exist yet
+    try {
+      await db.execAsync('ALTER TABLE pieces ADD COLUMN last_opened_at TEXT');
+    } catch {
+      // column already exists — safe to ignore
+    }
     this.db = db;
     return db;
   }
@@ -43,8 +49,9 @@ export class ExpoLocalPieceRepository implements PieceRepository {
       composer: string | null;
       xml_filename: string;
       imported_at: string;
+      last_opened_at: string | null;
     }>(
-      'SELECT id, title, composer, xml_filename, imported_at FROM pieces ORDER BY imported_at DESC',
+      'SELECT id, title, composer, xml_filename, imported_at, last_opened_at FROM pieces ORDER BY COALESCE(last_opened_at, imported_at) DESC',
     );
     return rows.map((r) => ({
       id: r.id,
@@ -52,6 +59,7 @@ export class ExpoLocalPieceRepository implements PieceRepository {
       composer: r.composer,
       xmlFilename: r.xml_filename,
       importedAt: r.imported_at,
+      ...(r.last_opened_at ? { lastOpenedAt: r.last_opened_at } : {}),
     }));
   }
 
@@ -63,7 +71,11 @@ export class ExpoLocalPieceRepository implements PieceRepository {
       composer: string | null;
       xml_filename: string;
       imported_at: string;
-    }>('SELECT id, title, composer, xml_filename, imported_at FROM pieces WHERE id = ?', id);
+      last_opened_at: string | null;
+    }>(
+      'SELECT id, title, composer, xml_filename, imported_at, last_opened_at FROM pieces WHERE id = ?',
+      id,
+    );
     if (!row) return null;
     return {
       id: row.id,
@@ -71,7 +83,13 @@ export class ExpoLocalPieceRepository implements PieceRepository {
       composer: row.composer,
       xmlFilename: row.xml_filename,
       importedAt: row.imported_at,
+      ...(row.last_opened_at ? { lastOpenedAt: row.last_opened_at } : {}),
     };
+  }
+
+  async touch(id: string, at: string): Promise<void> {
+    const db = await this.getDb();
+    await db.runAsync('UPDATE pieces SET last_opened_at = ? WHERE id = ?', at, id);
   }
 
   async save(piece: Piece, xmlContent: string): Promise<void> {

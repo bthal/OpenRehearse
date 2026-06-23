@@ -24,6 +24,7 @@ export interface Routine {
   title: string;
   blocks: RoutineBlock[];
   createdAt: string;
+  lastOpenedAt?: string; // ISO 8601; undefined for routines never opened after this field was added
 }
 
 export function validateRoutine(blocks: RoutineBlock[]): string | null {
