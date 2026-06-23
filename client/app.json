@@ -19,13 +19,23 @@
         "monochromeImage": "./assets/android-icon-monochrome.png"
       },
       "package": "com.openrehearse.app",
+      "versionCode": 1,
       "predictiveBackGestureEnabled": false
     },
     "web": {
       "favicon": "./assets/favicon.png",
       "bundler": "metro"
     },
-    "plugins": ["expo-router", "expo-sqlite"],
-    "experiments": {}
+    "plugins": [
+      "expo-router",
+      "expo-sqlite"
+    ],
+    "experiments": {},
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "47ff663b-c18c-42bc-9d4d-44486f238487"
+      }
+    }
   }
 }
