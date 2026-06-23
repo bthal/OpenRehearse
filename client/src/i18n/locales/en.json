@@ -91,5 +91,14 @@
   "routinePlay": {
     "routineNotFound": "Routine not found.",
     "failedToGenerate": "Failed to generate score."
+  },
+  "about": {
+    "title": "About OpenRehearse",
+    "version": "Version {{version}}",
+    "privacyHeading": "Privacy",
+    "privacyBody": "OpenRehearse stores all your data — pieces, routines, and settings — exclusively on this device. Nothing is uploaded, transmitted, or shared with any server or third party.",
+    "licensesHeading": "Open-source notices",
+    "demoHeading": "Demo piece",
+    "demoBody": "Prelude I in C major, BWV 846 — Johann Sebastian Bach (1685–1750). Public domain. MusicXML file exported from MuseScore.com (score #117279) under a Creative Commons copyright waiver (CC0)."
   }
 }

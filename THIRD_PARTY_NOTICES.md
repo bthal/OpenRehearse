@@ -102,6 +102,20 @@ Source: https://github.com/Templarian/MaterialDesign-JS
 
 ---
 
+## Demo piece — Bach Prelude I in C major (BWV 846)
+
+Bundled in `client/assets/demo/bach-prelude-c-major-bwv846.mxl` and pre-imported
+on first install so the piece list is not empty out of the box.
+
+**Music:** Johann Sebastian Bach (1685–1750) — **public domain** (author died > 70 years ago).
+
+**MusicXML file:** Exported from MuseScore.com, score #117279
+(<https://musescore.com/user/101554/scores/117279>), encoded with MuseScore 4.2.1.
+The score is published under a **Creative Commons copyright waiver (CC0)**, effectively
+placing it in the public domain.
+
+---
+
 ## Other Dependencies
 
 All other runtime dependencies (React, React Native, Expo, Zustand, NativeWind,

@@ -1,4 +1,4 @@
-import { mdiDelete, mdiPencil, mdiPlus } from '@mdi/js';
+import { mdiDelete, mdiInformation, mdiPencil, mdiPlus } from '@mdi/js';
 import { router, Stack, useFocusEffect } from 'expo-router';
 import { useCallback, useState } from 'react';
 import {
@@ -14,11 +14,13 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useTranslation } from 'react-i18next';
 
 import { AppIcon } from '@components/AppIcon';
+import { WARMUP_FEATURES } from '../src/config/warmupFeatures';
 import { PieceEditModal } from '@components/PieceEditModal';
 import { PieceRow, PieceRowSkeleton } from '@components/PieceRow';
 import { RoutineRow } from '@components/RoutineRow';
 import { WarmUpRow } from '@components/WarmUpRow';
 import { pickXmlFile } from '@data/index';
+import { seedDemoDataIfNeeded } from '@data/seedDemoData';
 import { Colors } from '@theme/colors';
 import { usePiecesStore } from '@state/piecesStore';
 import { useRoutinesStore } from '@state/routinesStore';
@@ -56,7 +58,7 @@ export default function Dashboard() {
 
   useFocusEffect(
     useCallback(() => {
-      void loadPieces();
+      void seedDemoDataIfNeeded().then(() => loadPieces());
       void loadRoutines();
     }, [loadPieces, loadRoutines]),
   );
@@ -194,10 +196,20 @@ export default function Dashboard() {
         <ScrollView showsVerticalScrollIndicator={false} contentContainerClassName="px-6 pb-12">
           <View className="w-full max-w-[720px] self-center">
             {/* Brand header */}
-            <View className="items-center pt-12 pb-8">
+            <View className="flex-row items-center pt-12 pb-8">
+              <View className="flex-1" />
               <Text className="font-brand text-4xl font-semibold italic tracking-wide text-mauve-shadow-500">
                 {t('dashboard.title')}
               </Text>
+              <View className="flex-1 items-end">
+                <Pressable
+                  className="p-2 active:opacity-60"
+                  onPress={() => router.push('/about')}
+                  accessibilityLabel={t('about.title')}
+                >
+                  <AppIcon path={mdiInformation} size={22} color="#9c9aab" />
+                </Pressable>
+              </View>
             </View>
 
             {/* Warm-ups section (includes routines) */}
@@ -267,18 +279,24 @@ export default function Dashboard() {
                 />
               ))}
 
-              <WarmUpRow
-                title={t('dashboard.drill45')}
-                onPress={() => router.push('/warmup/drill45')}
-              />
-              <WarmUpRow
-                title={t('dashboard.hanon')}
-                onPress={() => router.push('/warmup/hanon')}
-              />
-              <WarmUpRow
-                title={t('dashboard.scales')}
-                onPress={() => router.push('/warmup/scales')}
-              />
+              {WARMUP_FEATURES.drill45 && (
+                <WarmUpRow
+                  title={t('dashboard.drill45')}
+                  onPress={() => router.push('/warmup/drill45')}
+                />
+              )}
+              {WARMUP_FEATURES.hanon && (
+                <WarmUpRow
+                  title={t('dashboard.hanon')}
+                  onPress={() => router.push('/warmup/hanon')}
+                />
+              )}
+              {WARMUP_FEATURES.scales && (
+                <WarmUpRow
+                  title={t('dashboard.scales')}
+                  onPress={() => router.push('/warmup/scales')}
+                />
+              )}
             </View>
 
             {/* Pieces header */}
