@@ -162,7 +162,7 @@ export default function RoutinePlayView() {
             <View className="absolute inset-0 items-center justify-center bg-white">
               <AppIcon path={mdiMusicNoteOutline} size={48} color="#9CA3AF" />
               <Text className="mt-3 text-sm text-ash-grey-400">
-                {t('routinePlay.preparingScore')}
+                {t('common.preparingScore')}
               </Text>
             </View>
           )}
@@ -172,7 +172,7 @@ export default function RoutinePlayView() {
             <View className="absolute inset-0 items-center justify-center bg-white">
               <ActivityIndicator size="large" color="#4B7A6E" />
               <Text className="mt-3 text-sm text-ash-grey-400">
-                {t('routinePlay.loadingScore')}
+                {t('common.loadingScore')}
               </Text>
             </View>
           )}
@@ -182,7 +182,7 @@ export default function RoutinePlayView() {
             <View className="absolute inset-0 items-center justify-center bg-white/80 px-8">
               <AppIcon path={mdiAlertCircleOutline} size={48} color="#9C6B8A" />
               <Text className="mt-3 text-center text-sm text-ash-grey-950">
-                {t('routinePlay.couldNotRender')}
+                {t('common.couldNotRender')}
               </Text>
               <Text className="mt-1 text-center text-xs text-ash-grey-400">{scoreError}</Text>
               <TouchableOpacity

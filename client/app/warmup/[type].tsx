@@ -415,7 +415,7 @@ export default function WarmUpView() {
                         </Text>
                       )}
                     </View>
-                    <Text className="text-[9px] text-black mt-0.5">{t('warmup.bpm')}</Text>
+                    <Text className="text-[9px] text-black mt-0.5">{t('common.bpm')}</Text>
                   </TouchableOpacity>
                 </View>
 
@@ -621,7 +621,7 @@ export default function WarmUpView() {
           {!webViewReady && !scoreError && (
             <View className="absolute inset-0 items-center justify-center bg-white">
               <AppIcon path={mdiMusicNoteOutline} size={48} color="#D1D5DB" />
-              <Text className="mt-3 text-sm text-gray-400">{t('warmup.preparingScore')}</Text>
+              <Text className="mt-3 text-sm text-gray-400">{t('common.preparingScore')}</Text>
             </View>
           )}
 
@@ -629,7 +629,7 @@ export default function WarmUpView() {
           {isLoadingScore && (
             <View className="absolute inset-0 items-center justify-center bg-white">
               <ActivityIndicator size="large" color="#4B7A6E" />
-              <Text className="mt-3 text-sm text-gray-500">{t('warmup.loadingScore')}</Text>
+              <Text className="mt-3 text-sm text-gray-500">{t('common.loadingScore')}</Text>
             </View>
           )}
 
@@ -638,7 +638,7 @@ export default function WarmUpView() {
             <View className="absolute inset-0 items-center justify-center bg-white px-8">
               <AppIcon path={mdiAlertCircleOutline} size={48} color="#9C6B8A" />
               <Text className="mt-3 text-base font-semibold text-gray-800 text-center">
-                {t('warmup.couldNotRender')}
+                {t('common.couldNotRender')}
               </Text>
               <Text className="mt-1 text-sm text-gray-500 text-center">{scoreError}</Text>
               <TouchableOpacity

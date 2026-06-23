@@ -6,7 +6,11 @@
     "save": "Save",
     "remove": "Remove",
     "edit": "Edit",
-    "goBack": "Go back"
+    "goBack": "Go back",
+    "bpm": "BPM",
+    "preparingScore": "Preparing score…",
+    "loadingScore": "Loading score…",
+    "couldNotRender": "Could not render score"
   },
   "dashboard": {
     "title": "OpenRehearse",
@@ -22,34 +26,19 @@
     "removeRoutinesMessage": "Remove these {{count}} routines? This cannot be undone.",
     "pieces": "Pieces",
     "emptyTitle": "No pieces yet",
-    "importScore": "Import score",
     "importMxl": "Import .mxl-File",
     "warmUpsNote": "Use the exercises as building blocks for your personal warm-up routines.",
     "privacyNote": "Your files stay on this device — \nnothing is uploaded.",
     "importFailed": "Import failed"
   },
   "playView": {
-    "bpm": "BPM",
-    "preparingScore": "Preparing score…",
-    "loadingScore": "Loading score…",
-    "couldNotRender": "Could not render score",
     "pieceNotFound": "Piece not found.",
     "failedToReadScore": "Failed to read score file."
   },
   "warmup": {
-    "bpm": "BPM",
     "key": "Key",
-    "octaves": "Octaves",
     "octave_one": "Octave",
     "octave_other": "Octaves",
-    "hands": "Hands",
-    "hand": "Hand",
-    "both": "Both",
-    "right": "Right",
-    "left": "Left",
-    "preparingScore": "Preparing score…",
-    "loadingScore": "Loading score…",
-    "couldNotRender": "Could not render score",
     "failedToGenerate": "Failed to generate score."
   },
   "pieceEdit": {
@@ -63,8 +52,7 @@
     "removeTitle": "Remove piece?",
     "removeMessage": "Remove \"{{title}}\" from your library? This cannot be undone.",
     "removeMultipleTitle": "Remove {{count}} pieces?",
-    "removeMultipleMessage": "Remove these {{count}} pieces from your library? This cannot be undone.",
-    "removePiece": "Remove piece"
+    "removeMultipleMessage": "Remove these {{count}} pieces from your library? This cannot be undone."
   },
   "warmUpRow": {
     "description": "Exercise"
@@ -101,9 +89,6 @@
     "exercise_other": "{{count}} exercises"
   },
   "routinePlay": {
-    "preparingScore": "Preparing score…",
-    "loadingScore": "Loading score…",
-    "couldNotRender": "Could not render score",
     "routineNotFound": "Routine not found.",
     "failedToGenerate": "Failed to generate score."
   }
