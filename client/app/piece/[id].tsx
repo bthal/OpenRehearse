@@ -3,7 +3,10 @@ import {
   mdiArrowLeft,
   mdiClose,
   mdiHandBackLeft,
+  mdiHandBackRight,
+  mdiHandClap,
   mdiMetronome,
+  mdiMetronomeTick,
   mdiMusicNoteOutline,
   mdiPause,
   mdiPlay,
@@ -38,7 +41,13 @@ const MULTIPLIER_LABEL: Record<number, string> = {
 const SPEED_PANEL_WIDTH = 132;
 const HAND_PANEL_WIDTH = 132; // 3 × 44 px
 
-const HAND_OPTIONS: ActiveHand[] = ['both', 'right', 'left'];
+const HAND_OPTIONS: ActiveHand[] = ['both', 'left', 'right'];
+
+const HAND_ICON: Record<ActiveHand, string> = {
+  both: mdiHandClap,
+  left: mdiHandBackLeft,
+  right: mdiHandBackRight,
+};
 
 export default function PlayView() {
   const { t } = useTranslation();
@@ -327,7 +336,7 @@ export default function PlayView() {
             >
               <View
                 ref={toolbarRef}
-                className="bg-white rounded-r-xl py-3 px-2 items-center gap-4"
+                className="bg-white rounded-xl py-3 px-2 items-center gap-4"
                 style={{
                   elevation: 4,
                   shadowColor: '#000',
@@ -358,7 +367,7 @@ export default function PlayView() {
                 {/* Metronome toggle */}
                 <TouchableOpacity onPress={handleMetronomeToggle} hitSlop={8} className="p-1.5">
                   <AppIcon
-                    path={mdiMetronome}
+                    path={metronomeOn ? mdiMetronome : mdiMetronomeTick}
                     size={26}
                     color={metronomeOn ? '#4B7A6E' : '#374151'}
                   />
@@ -366,23 +375,12 @@ export default function PlayView() {
 
                 {/* Hand selector trigger */}
                 <View ref={handTriggerRef}>
-                  <TouchableOpacity
-                    onPress={toggleHand}
-                    hitSlop={8}
-                    className="items-center px-2 py-1"
-                  >
+                  <TouchableOpacity onPress={toggleHand} hitSlop={8} className="p-1.5">
                     <AppIcon
-                      path={mdiHandBackLeft}
+                      path={HAND_ICON[activeHand]}
                       size={22}
                       color={activeHand !== 'both' ? '#4B7A6E' : '#374151'}
                     />
-                    <Text className="text-[9px] text-black mt-0.5">
-                      {activeHand === 'right'
-                        ? t('warmup.right')
-                        : activeHand === 'left'
-                          ? t('warmup.left')
-                          : t('warmup.both')}
-                    </Text>
                   </TouchableOpacity>
                 </View>
 
@@ -485,12 +483,6 @@ export default function PlayView() {
           >
             {HAND_OPTIONS.map((hand) => {
               const isActive = activeHand === hand;
-              const label =
-                hand === 'right'
-                  ? t('warmup.right')
-                  : hand === 'left'
-                    ? t('warmup.left')
-                    : t('warmup.both');
               return (
                 <TouchableOpacity
                   key={hand}
@@ -498,15 +490,11 @@ export default function PlayView() {
                   hitSlop={4}
                   style={{ width: 44, height: 44, alignItems: 'center', justifyContent: 'center' }}
                 >
-                  <Text
-                    style={{
-                      fontSize: 14,
-                      fontWeight: '600',
-                      color: isActive ? '#4B7A6E' : '#9CA3AF',
-                    }}
-                  >
-                    {label}
-                  </Text>
+                  <AppIcon
+                    path={HAND_ICON[hand]}
+                    size={22}
+                    color={isActive ? '#4B7A6E' : '#9CA3AF'}
+                  />
                 </TouchableOpacity>
               );
             })}

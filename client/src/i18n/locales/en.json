@@ -38,6 +38,8 @@
     "bpm": "BPM",
     "key": "Key",
     "octaves": "Octaves",
+    "octave_one": "Octave",
+    "octave_other": "Octaves",
     "hands": "Hands",
     "hand": "Hand",
     "both": "Both",

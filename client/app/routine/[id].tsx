@@ -2,6 +2,7 @@ import {
   mdiAlertCircleOutline,
   mdiArrowLeft,
   mdiMetronome,
+  mdiMetronomeTick,
   mdiMusicNoteOutline,
   mdiPause,
   mdiPencilOutline,
@@ -204,7 +205,7 @@ export default function RoutinePlayView() {
               }}
             >
               <View
-                className="items-center gap-4 rounded-r-xl bg-white px-2 py-3"
+                className="items-center gap-4 rounded-xl bg-white px-2 py-3"
                 style={{
                   elevation: 4,
                   shadowColor: '#000',
@@ -226,7 +227,7 @@ export default function RoutinePlayView() {
                 {/* Metronome toggle */}
                 <TouchableOpacity onPress={handleMetronomeToggle} hitSlop={8} className="p-1.5">
                   <AppIcon
-                    path={mdiMetronome}
+                    path={metronomeOn ? mdiMetronome : mdiMetronomeTick}
                     size={26}
                     color={metronomeOn ? '#4B7A6E' : '#374151'}
                   />

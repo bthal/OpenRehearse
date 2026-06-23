@@ -1,7 +1,11 @@
 import {
   mdiAlertCircleOutline,
   mdiArrowLeft,
+  mdiHandBackLeft,
+  mdiHandBackRight,
+  mdiHandClap,
   mdiMetronome,
+  mdiMetronomeTick,
   mdiMusicNoteOutline,
   mdiPause,
   mdiPlay,
@@ -30,6 +34,7 @@ import {
   WARMUP_KEYS,
   WARMUP_OCTAVES,
   type WarmUpBpm,
+  type WarmUpHand,
   type WarmUpOctaves,
   type WarmUpType,
 } from '@domain/warmup';
@@ -41,11 +46,13 @@ const PANEL_WIDTH = 176; // key panel (4 keys visible, scroll for more)
 const HAND_PANEL_WIDTH = 132; // 3 × 44
 const OCTAVE_PANEL_WIDTH = 132; // 3 × 44
 
-const HAND_OPTIONS = [
-  { value: 'both' as const, label: 'Both' },
-  { value: 'right' as const, label: 'Right' },
-  { value: 'left' as const, label: 'Left' },
-];
+const HAND_OPTIONS: WarmUpHand[] = ['both', 'left', 'right'];
+
+const HAND_ICON: Record<WarmUpHand, string> = {
+  both: mdiHandClap,
+  left: mdiHandBackLeft,
+  right: mdiHandBackRight,
+};
 
 export default function WarmUpView() {
   const { t } = useTranslation();
@@ -364,7 +371,7 @@ export default function WarmUpView() {
             >
               <View
                 ref={toolbarRef}
-                className="bg-white rounded-r-xl py-3 px-2 items-center gap-4"
+                className="bg-white rounded-xl py-3 px-2 items-center gap-4"
                 style={{
                   elevation: 4,
                   shadowColor: '#000',
@@ -386,7 +393,7 @@ export default function WarmUpView() {
                 {/* Metronome */}
                 <TouchableOpacity onPress={handleMetronomeToggle} hitSlop={8} className="p-1.5">
                   <AppIcon
-                    path={mdiMetronome}
+                    path={metronomeOn ? mdiMetronome : mdiMetronomeTick}
                     size={26}
                     color={metronomeOn ? '#4B7A6E' : '#374151'}
                   />
@@ -417,21 +424,13 @@ export default function WarmUpView() {
                   <TouchableOpacity
                     onPress={() => togglePanel('hand', handTriggerRef)}
                     hitSlop={8}
-                    className="items-center px-2 py-1"
+                    className="p-1.5"
                   >
-                    <Text
-                      className="text-base font-semibold mt-0.5"
-                      style={{ color: openPanel === 'hand' ? '#4B7A6E' : '#374151' }}
-                    >
-                      {settings.hand === 'both'
-                        ? t('warmup.both')
-                        : settings.hand === 'right'
-                          ? t('warmup.right')
-                          : t('warmup.left')}
-                    </Text>
-                    <Text className="text-[9px] text-black mt-0.5">
-                      {settings.hand === 'both' ? t('warmup.hands') : t('warmup.hand')}
-                    </Text>
+                    <AppIcon
+                      path={HAND_ICON[settings.hand]}
+                      size={22}
+                      color={settings.hand !== 'both' ? '#4B7A6E' : '#374151'}
+                    />
                   </TouchableOpacity>
                 </View>
 
@@ -468,7 +467,9 @@ export default function WarmUpView() {
                       >
                         {settings.octaves}
                       </Text>
-                      <Text className="text-[9px] text-black mt-0.5">{t('warmup.octaves')}</Text>
+                      <Text className="text-[9px] text-black mt-0.5">
+                        {t('warmup.octave', { count: settings.octaves })}
+                      </Text>
                     </TouchableOpacity>
                   </View>
                 )}
@@ -522,26 +523,18 @@ export default function WarmUpView() {
               },
             ]}
           >
-            {HAND_OPTIONS.map(({ value }) => (
+            {HAND_OPTIONS.map((hand) => (
               <TouchableOpacity
-                key={value}
-                onPress={() => handleHandChange(value)}
+                key={hand}
+                onPress={() => handleHandChange(hand)}
                 hitSlop={4}
                 style={{ width: 44, height: 44, alignItems: 'center', justifyContent: 'center' }}
               >
-                <Text
-                  style={{
-                    fontSize: 14,
-                    fontWeight: '600',
-                    color: settings.hand === value ? '#4B7A6E' : '#9CA3AF',
-                  }}
-                >
-                  {value === 'both'
-                    ? t('warmup.both')
-                    : value === 'right'
-                      ? t('warmup.right')
-                      : t('warmup.left')}
-                </Text>
+                <AppIcon
+                  path={HAND_ICON[hand]}
+                  size={22}
+                  color={settings.hand === hand ? '#4B7A6E' : '#9CA3AF'}
+                />
               </TouchableOpacity>
             ))}
           </Animated.View>
