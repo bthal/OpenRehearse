@@ -324,6 +324,24 @@ export default function Dashboard() {
                   onPress={() => router.push('/warmup/scales')}
                 />
               )}
+              {WARMUP_FEATURES.arpeggio && (
+                <WarmUpRow
+                  title={t('dashboard.arpeggio')}
+                  onPress={() => router.push('/warmup/arpeggio')}
+                />
+              )}
+              {WARMUP_FEATURES.chromatic && (
+                <WarmUpRow
+                  title={t('dashboard.chromatic')}
+                  onPress={() => router.push('/warmup/chromatic')}
+                />
+              )}
+              {WARMUP_FEATURES.fiveScale && (
+                <WarmUpRow
+                  title={t('dashboard.fiveScale')}
+                  onPress={() => router.push('/warmup/fiveScale')}
+                />
+              )}
             </View>
 
             {/* Pieces header */}

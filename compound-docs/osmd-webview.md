@@ -203,3 +203,22 @@ for (const child of Array.from(measureEl.children)) {
   }
 }
 ```
+
+## `autoResize: false` means layout must be re-centered on viewport changes
+
+**LANDMINE:** OSMD is initialised with `autoResize: false` (single-line layout sets `PageWidth`
+manually per load). `initPlayback` therefore computes the score's vertical centering
+(`#osmd` `style.top` from `window.innerHeight`) and horizontal scroll bounds **once, at load**.
+Nothing recomputes them when the WebView's viewport changes size — e.g. leaving the landscape
+routine/warm-up play view for the **portrait** routine editor and coming back. The score stays
+centered for the previous (taller portrait) height and slides half-off the bottom of the screen.
+
+**Fix:** A single `window.addEventListener('resize', …)` in `playback.ts` recomputes the
+viewport-dependent values via `recomputeViewportMetrics()` (vertical centering + scroll bounds).
+Intrinsic geometry (`systemTopPx`/`systemHeightPx`, cursor-step positions) is cached at load, so
+this needs **no OSMD re-render** — do not re-enable `autoResize` (its full re-render is expensive
+and breaks the manual single-line `PageWidth`).
+
+**Note:** `score-web/**` is excluded from `client/tsconfig.json`, so `npm run typecheck` does
+**not** cover `playback.ts`. Type-check it separately with `cd score-web && npx tsc --noEmit`, and
+rebuild the bundle (`npm run build:score-web`) after any `score-web/src` change.

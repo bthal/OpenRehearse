@@ -54,7 +54,26 @@ const HAND_OPTIONS: { tKey: string; value: WarmUpHand }[] = [
   { tKey: 'routineEdit.handLeft', value: 'left' },
 ];
 
-function defaultExerciseBlock(type: 'hanon' | 'scales' | 'drill45'): ExerciseBlock {
+// Exercise types offered in the "Add Exercise" picker, in display order.
+const EXERCISE_TYPES: ExerciseBlock['type'][] = [
+  'hanon',
+  'scales',
+  'arpeggio',
+  'chromatic',
+  'fiveScale',
+  'drill45',
+];
+
+const EXERCISE_LABEL_KEY: Record<ExerciseBlock['type'], string> = {
+  hanon: 'routineEdit.addExerciseHanon',
+  scales: 'routineEdit.addExerciseScales',
+  arpeggio: 'routineEdit.addExerciseArpeggio',
+  chromatic: 'routineEdit.addExerciseChromatic',
+  fiveScale: 'routineEdit.addExerciseFiveScale',
+  drill45: 'routineEdit.addExerciseDrill45',
+};
+
+function defaultExerciseBlock(type: ExerciseBlock['type']): ExerciseBlock {
   return {
     type,
     pitchClass: 0,
@@ -237,9 +256,10 @@ export default function RoutineEditScreen() {
       atIndex,
       type: 'addType',
       options: [
-        { label: t('routineEdit.addExerciseHanon'), value: 'hanon' },
-        { label: t('routineEdit.addExerciseScales'), value: 'scales' },
-        { label: t('routineEdit.addExerciseDrill45'), value: 'drill45' },
+        ...EXERCISE_TYPES.map((exType) => ({
+          label: t(EXERCISE_LABEL_KEY[exType]),
+          value: exType,
+        })),
         { label: t('routineEdit.addExercisePause'), value: 'pause' },
       ],
       currentValue: '',
@@ -286,8 +306,8 @@ export default function RoutineEditScreen() {
     if (!picker) return;
     const { blockKey, atIndex, type } = picker;
     if (type === 'addType') {
-      if (value === 'hanon' || value === 'scales' || value === 'drill45') {
-        insertBlock(atIndex!, defaultExerciseBlock(value));
+      if (value !== 'pause') {
+        insertBlock(atIndex!, defaultExerciseBlock(value as ExerciseBlock['type']));
       } else {
         setPicker({
           atIndex,
@@ -381,13 +401,9 @@ export default function RoutineEditScreen() {
                   {/* Right: title (centered) + parameter pills */}
                   <View className="flex-1">
                     <Text className="text-center text-lg font-semibold text-ash-grey-950">
-                      {block.type === 'hanon'
-                        ? t('routineEdit.addExerciseHanon')
-                        : block.type === 'scales'
-                          ? t('routineEdit.addExerciseScales')
-                          : block.type === 'drill45'
-                            ? t('routineEdit.addExerciseDrill45')
-                            : t('routineEdit.addExercisePause')}
+                      {block.type === 'pause'
+                        ? t('routineEdit.addExercisePause')
+                        : t(EXERCISE_LABEL_KEY[block.type])}
                     </Text>
 
                     {/* Parameter pills */}

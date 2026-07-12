@@ -121,6 +121,11 @@ let scoreWidth = 0;
 let viewportWidth = 0;
 let scrollMinPx = 0; // translateX that puts the last note at center
 let scrollMaxPx = 0; // translateX that puts the first note at center
+// Intrinsic geometry of the rendered staff system (independent of viewport size), cached at
+// load so the layout can be re-centered on viewport changes without re-rendering OSMD.
+let systemTopPx = 0;
+let systemHeightPx = 0;
+let resizeListenerAttached = false;
 let momentumFrameId: number | null = null;
 let touchHandlersAttached = false;
 let loopRegion: LoopRegion | null = null;
@@ -399,6 +404,39 @@ function applyTranslate(px: number): void {
   if (!osmdEl) return;
   osmdEl.style.transition = 'none';
   osmdEl.style.transform = `translateX(${px}px)`;
+}
+
+// Recomputes every viewport-dependent layout value: the vertical centering of the staff
+// system and the horizontal scroll bounds. Intrinsic geometry (systemTopPx/systemHeightPx
+// and the cursor-step positions) is cached at load and unaffected by resize, so this needs
+// no OSMD re-render. Does not move the score — callers apply the translate they want.
+function recomputeViewportMetrics(): void {
+  if (!osmdEl) return;
+  viewportWidth = window.innerWidth;
+
+  const viewportHeight = window.innerHeight;
+  const centeredTop = Math.round((viewportHeight - systemHeightPx) / 2);
+  osmdEl.style.top = `${centeredTop - systemTopPx}px`;
+  osmdTopOffset = centeredTop - systemTopPx;
+
+  const px0 = cursorSteps[0]?.pxLeft ?? 0;
+  const pxLast = cursorSteps[cursorSteps.length - 1]?.pxLeft ?? scoreWidth;
+  scrollMaxPx = viewportWidth / 2 - px0;
+  scrollMinPx = viewportWidth / 2 - pxLast;
+}
+
+// Orientation changes (e.g. leaving the landscape play view for the portrait routine editor
+// and coming back) resize the WebView while OSMD's autoResize is off. Without recomputing,
+// the score stays centered for the previous viewport height and slides off the bottom of the
+// screen. Keeps whatever score position is currently centered still centered after a width
+// change; during playback the RAF loop re-drives the translate on the next frame anyway.
+function onViewportResize(): void {
+  if (!osmdEl) return;
+  const prevViewportWidth = viewportWidth;
+  const centeredScoreX = prevViewportWidth > 0 ? prevViewportWidth / 2 - scrollOffsetPx : 0;
+  recomputeViewportMetrics();
+  const target = prevViewportWidth > 0 ? viewportWidth / 2 - centeredScoreX : scrollMaxPx;
+  applyTranslate(clampTranslate(target));
 }
 
 // ─── OSMD cursor iterator advance (no translate — RAF handles that) ───────────
@@ -1445,6 +1483,12 @@ export function initPlayback(
   scoreWidth = osmdEl?.scrollWidth ?? 0;
   viewportWidth = window.innerWidth;
 
+  // Re-center on orientation/viewport changes (autoResize is off). Attached once.
+  if (!resizeListenerAttached) {
+    window.addEventListener('resize', onViewportResize);
+    resizeListenerAttached = true;
+  }
+
   // Size the overlay elements to the rendered system.
   osmd.cursor.show();
   hideCursorEl();
@@ -1460,23 +1504,18 @@ export function initPlayback(
   }
   setOverlayBounds(systemTop, systemH);
 
-  // Center the staff system vertically in the viewport.
-  const viewportHeight = window.innerHeight;
-  const centeredTop = Math.round((viewportHeight - systemH) / 2);
-  if (osmdEl) osmdEl.style.top = `${centeredTop - systemTop}px`;
-  osmdTopOffset = centeredTop - systemTop;
+  // Cache intrinsic geometry, then compute all viewport-dependent layout (vertical centering
+  // + horizontal scroll bounds). recomputeViewportMetrics is reused on every resize.
+  systemTopPx = systemTop;
+  systemHeightPx = systemH;
+  recomputeViewportMetrics();
 
   // Cursor is already shown above; reset to step 0 for debugging.
   osmd.cursor.reset();
   currentCursorStep = 0;
 
-  // Clamp bounds: first note centered at max, last note centered at min.
+  // Snap score to the first note, centered.
   const px0 = cursorSteps[0]?.pxLeft ?? 0;
-  const pxLast = cursorSteps[cursorSteps.length - 1]?.pxLeft ?? scoreWidth;
-  scrollMaxPx = viewportWidth / 2 - px0;
-  scrollMinPx = viewportWidth / 2 - pxLast;
-
-  // Snap score to position 0 at center.
   const el = cursorEl();
   if (el) el.style.left = `${px0}px`;
   hideCursorEl();

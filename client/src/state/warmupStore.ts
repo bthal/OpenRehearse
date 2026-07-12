@@ -25,12 +25,26 @@ export interface Drill45Settings {
 interface WarmUpSettings {
   hanon: ExerciseSettings;
   scales: ExerciseSettings;
+  arpeggio: ExerciseSettings;
+  chromatic: ExerciseSettings;
+  fiveScale: ExerciseSettings;
   drill45: Drill45Settings;
 }
 
+const defaultExerciseSettings = (): ExerciseSettings => ({
+  pitchClass: 0,
+  mode: 'major',
+  hand: 'both',
+  bpm: DEFAULT_WARMUP_BPM,
+  octaves: 1,
+});
+
 const DEFAULTS: WarmUpSettings = {
-  hanon: { pitchClass: 0, mode: 'major', hand: 'both', bpm: DEFAULT_WARMUP_BPM, octaves: 1 },
-  scales: { pitchClass: 0, mode: 'major', hand: 'both', bpm: DEFAULT_WARMUP_BPM, octaves: 1 },
+  hanon: defaultExerciseSettings(),
+  scales: defaultExerciseSettings(),
+  arpeggio: defaultExerciseSettings(),
+  chromatic: defaultExerciseSettings(),
+  fiveScale: defaultExerciseSettings(),
   drill45: { hand: 'both', bpm: DEFAULT_WARMUP_BPM },
 };
 
@@ -47,6 +61,9 @@ interface WarmUpState extends WarmUpSettings {
   initSettings: () => Promise<void>;
   updateHanon: (patch: Partial<ExerciseSettings>) => void;
   updateScales: (patch: Partial<ExerciseSettings>) => void;
+  updateArpeggio: (patch: Partial<ExerciseSettings>) => void;
+  updateChromatic: (patch: Partial<ExerciseSettings>) => void;
+  updateFiveScale: (patch: Partial<ExerciseSettings>) => void;
   updateDrill45: (patch: Partial<Drill45Settings>) => void;
   setWebViewReady: (v: boolean) => void;
   setLoadingScore: (v: boolean) => void;
@@ -72,6 +89,18 @@ function saveSettings(settings: WarmUpSettings): void {
   FileSystem.writeAsStringAsync(SETTINGS_PATH, JSON.stringify(settings)).catch(() => {});
 }
 
+// Extracts just the persisted settings slice from the full store state.
+function snapshotSettings(state: WarmUpState): WarmUpSettings {
+  return {
+    hanon: state.hanon,
+    scales: state.scales,
+    arpeggio: state.arpeggio,
+    chromatic: state.chromatic,
+    fiveScale: state.fiveScale,
+    drill45: state.drill45,
+  };
+}
+
 export const useWarmUpStore = create<WarmUpState>()((set, get) => ({
   ...DEFAULTS,
   webViewReady: false,
@@ -83,25 +112,44 @@ export const useWarmUpStore = create<WarmUpState>()((set, get) => ({
 
   initSettings: async () => {
     const settings = await loadSettings();
-    set({ hanon: settings.hanon, scales: settings.scales, drill45: settings.drill45 });
+    set({
+      hanon: settings.hanon,
+      scales: settings.scales,
+      arpeggio: settings.arpeggio,
+      chromatic: settings.chromatic,
+      fiveScale: settings.fiveScale,
+      drill45: settings.drill45,
+    });
   },
 
   updateHanon: (patch) => {
-    const hanon = { ...get().hanon, ...patch };
-    set({ hanon });
-    saveSettings({ hanon, scales: get().scales, drill45: get().drill45 });
+    set((s) => ({ hanon: { ...s.hanon, ...patch } }));
+    saveSettings(snapshotSettings(get()));
   },
 
   updateScales: (patch) => {
-    const scales = { ...get().scales, ...patch };
-    set({ scales });
-    saveSettings({ hanon: get().hanon, scales, drill45: get().drill45 });
+    set((s) => ({ scales: { ...s.scales, ...patch } }));
+    saveSettings(snapshotSettings(get()));
+  },
+
+  updateArpeggio: (patch) => {
+    set((s) => ({ arpeggio: { ...s.arpeggio, ...patch } }));
+    saveSettings(snapshotSettings(get()));
+  },
+
+  updateChromatic: (patch) => {
+    set((s) => ({ chromatic: { ...s.chromatic, ...patch } }));
+    saveSettings(snapshotSettings(get()));
+  },
+
+  updateFiveScale: (patch) => {
+    set((s) => ({ fiveScale: { ...s.fiveScale, ...patch } }));
+    saveSettings(snapshotSettings(get()));
   },
 
   updateDrill45: (patch) => {
-    const drill45 = { ...get().drill45, ...patch };
-    set({ drill45 });
-    saveSettings({ hanon: get().hanon, scales: get().scales, drill45 });
+    set((s) => ({ drill45: { ...s.drill45, ...patch } }));
+    saveSettings(snapshotSettings(get()));
   },
 
   setWebViewReady: (v) => set({ webViewReady: v }),
