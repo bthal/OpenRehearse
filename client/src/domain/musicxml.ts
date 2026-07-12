@@ -207,3 +207,62 @@ export function scrapeMusicXmlMetadata(content: string): MusicXmlMetadata {
 
   return { title, composer };
 }
+
+// MusicXML <beat-unit> value → its length in quarter notes, for converting a
+// metronome mark to the quarter-note BPM that OSMD/Tone use as the transport unit.
+const BEAT_UNIT_QUARTERS: Record<string, number> = {
+  long: 16,
+  breve: 8,
+  whole: 4,
+  half: 2,
+  quarter: 1,
+  eighth: 0.5,
+  '16th': 0.25,
+  '32nd': 0.125,
+  '64th': 0.0625,
+};
+
+/**
+ * Reads the piece's initial tempo as quarter-note BPM, or `null` when the score
+ * declares no tempo at all.
+ *
+ * Priority: an explicit `<sound tempo="…">` (already quarter-note BPM — what
+ * MuseScore and most exporters write) wins; otherwise the first `<metronome>`
+ * mark is converted from its beat-unit to quarter-note BPM. Values outside
+ * (0, 400) are treated as absent, matching the WebView's own clamp.
+ *
+ * Returns `null` — not a default — when nothing is found, so callers can tell
+ * "the file says 120" apart from "the file says nothing." Inventing a default
+ * here would be wrong twice over: it would mislabel the imported speed, and (via
+ * the PlayView target reference) it would override OSMD's own default tempo,
+ * which is 100 rather than 120 for a tempo-less score.
+ *
+ * Deliberately uses targeted first-match extraction rather than structural
+ * parsing: we only need the single earliest tempo in document order, and a full
+ * traversal of the measure/direction tree to establish ordering would be far
+ * more code for no gain. Input is already validated MusicXML.
+ */
+export function scrapeTempoBpm(content: string): number | null {
+  const stripped = stripBom(content);
+
+  const sound = stripped.match(/<sound\b[^>]*\btempo\s*=\s*"([\d.]+)"/i);
+  if (sound) {
+    const bpm = Number(sound[1]);
+    if (bpm > 0 && bpm < 400) return Math.round(bpm);
+  }
+
+  const metronome = stripped.match(/<metronome\b[^>]*>([\s\S]*?)<\/metronome>/i);
+  if (metronome) {
+    const block = metronome[1] ?? '';
+    const beatUnit = block.match(/<beat-unit>\s*([^<\s]+)\s*<\/beat-unit>/i)?.[1]?.toLowerCase();
+    const dotted = /<beat-unit-dot\s*\/?>/i.test(block);
+    const perMinute = Number(block.match(/<per-minute>\s*([\d.]+)\s*<\/per-minute>/i)?.[1]);
+    const unitQuarters = beatUnit ? BEAT_UNIT_QUARTERS[beatUnit] : undefined;
+    if (unitQuarters && perMinute > 0) {
+      const bpm = perMinute * unitQuarters * (dotted ? 1.5 : 1);
+      if (bpm > 0 && bpm < 400) return Math.round(bpm);
+    }
+  }
+
+  return null;
+}

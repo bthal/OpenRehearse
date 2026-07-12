@@ -15,7 +15,8 @@ import { useTranslation } from 'react-i18next';
 
 import { AppIcon } from '@components/AppIcon';
 import { WARMUP_FEATURES } from '../src/config/warmupFeatures';
-import { PieceEditModal } from '@components/PieceEditModal';
+import { PieceEditModal, type PieceEditMode } from '@components/PieceEditModal';
+import { isPieceComplete } from '@domain/piece';
 import { PieceRow, PieceRowSkeleton } from '@components/PieceRow';
 import { RoutineRow } from '@components/RoutineRow';
 import { SettingsModal } from '@components/SettingsModal';
@@ -50,7 +51,7 @@ export default function Dashboard() {
   const [settingsOpen, setSettingsOpen] = useState(false);
 
   // Piece selection
-  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editTarget, setEditTarget] = useState<{ id: string; mode: PieceEditMode } | null>(null);
   const [selectedPieceIds, setSelectedPieceIds] = useState<string[]>([]);
   const [isDeletingPieces, setIsDeletingPieces] = useState(false);
   const [isPicking, setIsPicking] = useState(false);
@@ -82,7 +83,15 @@ export default function Dashboard() {
       const file = await pickXmlFile();
       if (!file) return;
       const fallbackTitle = file.name.replace(/\.(xml|mxl)$/i, '');
-      await importPiece(file, fallbackTitle);
+      const id = await importPiece(file, fallbackTitle);
+      if (id) {
+        // If the file lacked a title, composer, or tempo, force the user to
+        // supply them before the piece is usable (non-dismissable "Input needed").
+        const piece = usePiecesStore.getState().piecesById[id];
+        if (piece && !isPieceComplete(piece)) {
+          setEditTarget({ id, mode: 'import' });
+        }
+      }
     } catch (err) {
       console.error('[handleImport] unexpected error:', err);
       Alert.alert(t('dashboard.importFailed'), String(err instanceof Error ? err.message : err));
@@ -111,7 +120,7 @@ export default function Dashboard() {
   function handleEditPiece() {
     const id = selectedPieceIds[0] ?? null;
     setSelectedPieceIds([]);
-    setEditingId(id);
+    setEditTarget(id ? { id, mode: 'edit' } : null);
   }
 
   function handleRemovePieces() {
@@ -409,8 +418,17 @@ export default function Dashboard() {
           </View>
         </ScrollView>
 
-        <PieceEditModal pieceId={editingId} onClose={() => setEditingId(null)} />
         <SettingsModal visible={settingsOpen} onClose={() => setSettingsOpen(false)} />
+        <PieceEditModal
+          pieceId={editTarget?.id ?? null}
+          mode={editTarget?.mode ?? 'edit'}
+          onClose={() => setEditTarget(null)}
+          onCancelImport={() => {
+            const id = editTarget?.id;
+            setEditTarget(null);
+            if (id) void deletePiece(id); // discard the incomplete piece
+          }}
+        />
       </SafeAreaView>
     </>
   );

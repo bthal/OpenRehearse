@@ -2,7 +2,7 @@ import * as Crypto from 'expo-crypto';
 import { create } from 'zustand';
 
 import type { Piece } from '@domain/piece';
-import { scrapeMusicXmlMetadata, validateMusicXml } from '@domain/musicxml';
+import { scrapeMusicXmlMetadata, scrapeTempoBpm, validateMusicXml } from '@domain/musicxml';
 import type { PickedFile } from '@data/index';
 import { pieceRepository } from '@data/index';
 
@@ -29,7 +29,10 @@ interface PiecesState {
 
   loadPieces: () => Promise<void>;
   importPiece: (file: PickedFile, fallbackTitle: string) => Promise<string | null>;
-  updatePiece: (id: string, updates: { title: string; composer: string | null }) => Promise<void>;
+  updatePiece: (
+    id: string,
+    updates: { title: string; composer: string | null; targetBpm?: number },
+  ) => Promise<void>;
   touchPiece: (id: string) => Promise<void>;
   deletePiece: (id: string) => Promise<void>;
   clearImportError: () => void;
@@ -65,12 +68,16 @@ export const usePiecesStore = create<PiecesState>()((set, get) => ({
     const metadata = scrapeMusicXmlMetadata(file.content);
     const title = metadata.title || fallbackTitle;
     const id = Crypto.randomUUID();
+    const importedBpm = scrapeTempoBpm(file.content);
     const piece: Piece = {
       id,
       title,
       composer: metadata.composer,
       xmlFilename: id + '.xml',
       importedAt: new Date().toISOString(),
+      // Only set when the file actually declares a tempo — a tempo-less score
+      // keeps importedBpm undefined and plays at OSMD's own default.
+      ...(importedBpm != null ? { importedBpm } : {}),
     };
 
     try {

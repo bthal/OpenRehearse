@@ -94,12 +94,19 @@ export default function PlayView() {
   // without recreating callbacks on every state change.
   const scoreBpmRef = useRef(120);
   const tempoMultiplierRef = useRef<TempoMultiplier>(1.0);
+  // The user's target speed (or imported tempo) overrides the score's native BPM
+  // as the 100% reference the multiplier applies to. Undefined → fall back to the
+  // score BPM reported by the WebView.
+  const overrideBpmRef = useRef<number | undefined>(undefined);
   useEffect(() => {
     scoreBpmRef.current = scoreBpm;
   }, [scoreBpm]);
   useEffect(() => {
     tempoMultiplierRef.current = tempoMultiplier;
   }, [tempoMultiplier]);
+  useEffect(() => {
+    overrideBpmRef.current = piece?.targetBpm ?? piece?.importedBpm;
+  }, [piece?.targetBpm, piece?.importedBpm]);
 
   useEffect(() => () => reset(), [reset]);
   useEffect(() => {
@@ -227,15 +234,19 @@ export default function PlayView() {
         return;
       }
       switch (msg.type) {
-        case 'SCORE_BPM':
+        case 'SCORE_BPM': {
           setScoreBpm(msg.payload);
-          // Transport BPM is already set in the WebView by initPlayback at this value.
-          // No need to re-send unless the user has a non-1.0 multiplier selected already.
-          if (tempoMultiplierRef.current !== 1.0) {
-            const bpm = Math.round(msg.payload * tempoMultiplierRef.current);
-            webViewRef.current?.injectJavaScript(`window.__rn_set_tempo(${bpm});void 0;`);
+          // The WebView initialised its transport at the score's own BPM (payload).
+          // Re-send only when our effective target differs — i.e. the user set a
+          // target speed and/or a non-1.0 multiplier — so the BPM we show matches
+          // what actually plays.
+          const reference = overrideBpmRef.current ?? msg.payload;
+          const desired = Math.round(reference * tempoMultiplierRef.current);
+          if (desired !== msg.payload) {
+            webViewRef.current?.injectJavaScript(`window.__rn_set_tempo(${desired});void 0;`);
           }
           break;
+        }
         case 'LOADED':
           setLoadingScore(false);
           break;
@@ -277,7 +288,8 @@ export default function PlayView() {
         webViewRef.current?.injectJavaScript('window.__rn_pause();void 0;');
       }
       setTempoMultiplier(m);
-      const bpm = Math.round(scoreBpmRef.current * m);
+      const reference = overrideBpmRef.current ?? scoreBpmRef.current;
+      const bpm = Math.round(reference * m);
       webViewRef.current?.injectJavaScript(`window.__rn_set_tempo(${bpm});void 0;`);
     },
     [setTempoMultiplier, isPlaying],
@@ -292,7 +304,8 @@ export default function PlayView() {
     setMetronomeOn(!metronomeOn);
   }, [metronomeOn, setMetronomeOn]);
 
-  const effectiveBpm = Math.round(scoreBpm * tempoMultiplier);
+  const referenceBpm = piece?.targetBpm ?? piece?.importedBpm ?? scoreBpm;
+  const effectiveBpm = Math.round(referenceBpm * tempoMultiplier);
   const scoreReady = webViewReady && !isLoadingScore && !scoreError;
 
   if (!piece) {

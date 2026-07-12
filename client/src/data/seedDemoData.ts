@@ -1,7 +1,7 @@
 import { Asset } from 'expo-asset';
 import * as FileSystem from 'expo-file-system/legacy';
 
-import { scrapeMusicXmlMetadata } from '@domain/musicxml';
+import { scrapeMusicXmlMetadata, scrapeTempoBpm } from '@domain/musicxml';
 import { pieceRepository } from './index';
 import { extractXmlFromMxl } from './mxlExtract';
 
@@ -31,6 +31,7 @@ export async function seedDemoDataIfNeeded(): Promise<void> {
 
     const xmlContent = extractXmlFromMxl(base64);
     const metadata = scrapeMusicXmlMetadata(xmlContent);
+    const importedBpm = scrapeTempoBpm(xmlContent);
 
     await pieceRepository.save(
       {
@@ -40,6 +41,11 @@ export async function seedDemoDataIfNeeded(): Promise<void> {
         xmlFilename: DEMO_PIECE_ID + '.xml',
         // Fixed timestamp so the demo piece always sorts last (oldest)
         importedAt: '2026-01-01T00:00:00.000Z',
+        // The bundled Bach prelude declares no tempo, so importedBpm stays
+        // undefined — do not fabricate an imported speed. Ship a curated target
+        // of 80 BPM so the demo plays at a musical tempo out of the box.
+        ...(importedBpm != null ? { importedBpm } : {}),
+        targetBpm: 80,
       },
       xmlContent,
     );
