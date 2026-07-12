@@ -16,9 +16,14 @@ Let users add **pieces** from **MusicXML 2.x–4.x** files, both uncompressed (`
 1. User picks file (Android document picker / SAF).
 2. Read file as UTF-8 text (handle BOM); size limit TBD (document in code, e.g. max MB).
 3. **Validate**: well-formed XML; root / DOCTYPE checks for MusicXML; version check.
-4. **Scrape metadata**: extract `work-title`, `movement-title`, `composer` for display.
+4. **Scrape metadata**: extract `work-title`, `movement-title`, `composer`, and tempo
+   (`scrapeTempoBpm` → `importedBpm`) for display and playback.
 5. Persist **full XML** (or path to copied file) under app storage; save **metadata** record (id, title, composer, createdAt, localUri or internal path).
-6. Navigate or toast success.
+6. **Complete required metadata**: a piece needs a title, a composer, and a target speed
+   (`isPieceComplete`). If the file omits any of these (e.g. no tempo marking, no composer),
+   open the edit modal in **"Input needed"** mode — non-dismissable, missing fields marked, the
+   **Import** button disabled until all are provided. A fully-described file imports with no prompt.
+   A **Cancel** action in this mode discards the in-progress piece (nothing is kept).
 
 ## Errors
 
@@ -36,7 +41,8 @@ Let users add **pieces** from **MusicXML 2.x–4.x** files, both uncompressed (`
 - [ ] Both `.xml` and `.mxl` MusicXML 2.x–4.x files can be imported.
 - [ ] Invalid inputs never corrupt the local piece index.
 - [ ] Imported piece is available offline immediately after import.
-- [ ] Title (and composer if present) are scraped and stored on import.
+- [ ] Title, composer, and tempo are scraped and stored on import.
+- [ ] A file missing title, composer, or tempo opens a non-dismissable "Input needed" modal; import completes only once all required fields are provided.
 
 ## Post-MVP: PDF import via OMR
 

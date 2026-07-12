@@ -144,6 +144,26 @@ Send the score BPM to native **before** sending `LOADED` so the native store has
 transport controls appear. Set `Tone.Transport.bpm.value = scoreBpm` in the WebView immediately;
 native only needs to re-send if the user has a non-1.0 multiplier already selected.
 
+## PATTERN: target speed drives the multiplier reference (native side)
+
+The PlayView speed selector (×0.5/×0.75/×1.0) multiplies a **target speed**, not the raw score
+BPM. The reference resolves to `piece.targetBpm ?? piece.importedBpm ?? scoreBpm`:
+
+- `importedBpm` is scraped from the MusicXML at import (`domain/musicxml.ts` → `scrapeTempoBpm`):
+  an explicit `<sound tempo>` wins, else the first `<metronome>` mark converted to quarter-note
+  BPM. It is persisted on the piece so the edit modal can show the file's original speed without
+  opening the score. A tempo-less score scrapes to `null` and leaves `importedBpm` **unset** — do
+  not fabricate a default, because OSMD's own default for such a score is **100**, not 120, and
+  forcing a scraped 120 onto the transport plays it ~20% too fast (regression fixed here).
+- `targetBpm` is the user override set in the edit modal.
+
+Native (`app/piece/[id].tsx`) sends `__rn_set_tempo(round(reference × multiplier))` on load — only
+when it differs from the score's own BPM, so a piece with no override still plays at its native
+tempo — and on every multiplier change. Because `setTempoBpm` clamps to **[20, 240]**, the target
+range is bounded **40–240** (`domain/tempo.ts`): ×0.5 of the min (20) and ×1.0 of the max (240)
+both land on the clamp edges, so the displayed effective BPM always equals what actually plays —
+no silent clamp mismatch.
+
 ## OSMD cursor invisible: `#osmd` needs `position: relative`
 
 **LANDMINE:** OSMD appends the cursor element with `position: absolute` inside the `#osmd` div.

@@ -39,6 +39,12 @@ The entire piece is rendered in a **single horizontal line** — all measures la
   adjusts speed via a **×0.5 / ×0.75 / ×1.0 multiplier selector** — effective BPM is shown above
   the selector. Chosen approach: multiplier over arbitrary BPM input (simpler UX, directly tied
   to the composer's intent).
+- **Target speed** is the 100% reference the multiplier scales. It defaults to the tempo read from
+  the file at import (`importedBpm`) but can be overridden per piece in the edit modal
+  (`targetBpm`) — e.g. import at 100 BPM offers 50/75/100; setting the target to 80 offers
+  40/60/80. The reference resolves to `targetBpm ?? importedBpm ?? scoreBpm`; effective BPM =
+  reference × multiplier. Bounds are **40–240** (`domain/tempo.ts`), chosen so every selectable
+  speed stays inside the synth's `[20, 240]` clamp and the displayed BPM always equals playback.
 
 ## Loop ("bit") — MVP rules
 
@@ -90,6 +96,8 @@ Slices: `activePieceId`, `webViewReady`, `isLoadingScore`, `scoreError`, `isPlay
 - [x] Changing tempo updates playback speed and cursor alignment. *(Phase 3)*
 - [x] Realistic piano audio (Salamander Grand Piano via CDN; cached offline after first play). *(Phase 3b)*
 - [x] Score BPM read from MusicXML; speed selector ×0.5/×0.75/×1.0 applied as multiplier. *(Phase 3b)*
+- [x] Target speed defaults to the imported tempo and is adjustable per piece; the speed selector
+  scales the target (`targetBpm ?? importedBpm ?? scoreBpm` × multiplier).
 - [x] Cursor visible at position 0 after load and after stop; smooth left-slide between beats. *(Phase 3b)*
 - [x] Score renders in one-line mode (single horizontal system; cursor pinned to center). *(Phase 4)*
 - [x] Manual horizontal scroll pauses playback; play resumes from scrolled position, or from loop start if a loop is active. *(Phase 4)*

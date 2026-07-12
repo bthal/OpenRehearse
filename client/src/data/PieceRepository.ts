@@ -10,7 +10,7 @@ export interface PieceRepository {
   get(id: string): Promise<Piece | null>;
   /** Persists piece metadata and its XML content to device storage. */
   save(piece: Piece, xmlContent: string): Promise<void>;
-  /** Updates title and composer only — never touches the XML file. */
+  /** Updates editable metadata (title, composer, target speed) — never touches the XML file. */
   update(piece: Piece): Promise<void>;
   /** Records the current timestamp as lastOpenedAt for the given piece. */
   touch(id: string, at: string): Promise<void>;

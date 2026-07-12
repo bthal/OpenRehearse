@@ -1,4 +1,9 @@
-import { MAX_XML_BYTES, scrapeMusicXmlMetadata, validateMusicXml } from '../musicxml';
+import {
+  MAX_XML_BYTES,
+  scrapeMusicXmlMetadata,
+  scrapeTempoBpm,
+  validateMusicXml,
+} from '../musicxml';
 
 // Minimal valid MusicXML wrapper — just enough structure for the parser.
 function makeScore(version: string | null, root: string, inner = ''): string {
@@ -159,5 +164,66 @@ describe('scrapeMusicXmlMetadata', () => {
   test('no metadata at all → empty title, null composer', () => {
     const xml = makeScore('2.0', 'score-partwise');
     expect(scrapeMusicXmlMetadata(xml)).toEqual({ title: '', composer: null });
+  });
+});
+
+// ── scrapeTempoBpm ──────────────────────────────────────────────────────────
+
+function metronome(beatUnit: string, perMinute: number, dotted = false): string {
+  const dot = dotted ? '<beat-unit-dot/>' : '';
+  return (
+    `<direction><direction-type><metronome>` +
+    `<beat-unit>${beatUnit}</beat-unit>${dot}<per-minute>${perMinute}</per-minute>` +
+    `</metronome></direction-type></direction>`
+  );
+}
+
+describe('scrapeTempoBpm', () => {
+  test('reads an explicit <sound tempo>', () => {
+    const xml = makeScore('4.0', 'score-partwise', '<sound tempo="100"/>');
+    expect(scrapeTempoBpm(xml)).toBe(100);
+  });
+
+  test('rounds a fractional <sound tempo>', () => {
+    const xml = makeScore('4.0', 'score-partwise', '<sound tempo="92.5"/>');
+    expect(scrapeTempoBpm(xml)).toBe(93);
+  });
+
+  test('reads a quarter-note metronome mark directly', () => {
+    const xml = makeScore('4.0', 'score-partwise', metronome('quarter', 90));
+    expect(scrapeTempoBpm(xml)).toBe(90);
+  });
+
+  test('converts a half-note metronome mark to quarter-note BPM', () => {
+    const xml = makeScore('4.0', 'score-partwise', metronome('half', 60));
+    expect(scrapeTempoBpm(xml)).toBe(120);
+  });
+
+  test('applies the dot to a dotted metronome mark', () => {
+    const xml = makeScore('4.0', 'score-partwise', metronome('quarter', 80, true));
+    expect(scrapeTempoBpm(xml)).toBe(120);
+  });
+
+  test('<sound tempo> wins over a metronome mark regardless of order', () => {
+    const xml = makeScore(
+      '4.0',
+      'score-partwise',
+      metronome('quarter', 60) + '<sound tempo="100"/>',
+    );
+    expect(scrapeTempoBpm(xml)).toBe(100);
+  });
+
+  test('no tempo → null (not a fabricated default)', () => {
+    expect(scrapeTempoBpm(makeScore('4.0', 'score-partwise'))).toBeNull();
+  });
+
+  test('out-of-range <sound tempo> is ignored → null', () => {
+    const xml = makeScore('4.0', 'score-partwise', '<sound tempo="500"/>');
+    expect(scrapeTempoBpm(xml)).toBeNull();
+  });
+
+  test('handles a BOM-prefixed document', () => {
+    const xml = '﻿' + makeScore('4.0', 'score-partwise', '<sound tempo="72"/>');
+    expect(scrapeTempoBpm(xml)).toBe(72);
   });
 });

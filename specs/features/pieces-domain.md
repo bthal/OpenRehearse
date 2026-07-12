@@ -9,6 +9,10 @@
 - `localStorageKey` or filesystem path to XML copy
 - `importedAt` (ISO timestamp)
 - Optional: `composer` from XML metadata
+- Optional: `importedBpm` — score tempo (quarter-note BPM) read from the XML at import
+  (`scrapeTempoBpm`); surfaced to the user as the file's original speed
+- Optional: `targetBpm` — user-chosen target speed that overrides `importedBpm` as the PlayView
+  100% reference; valid range and helpers live in `domain/tempo.ts`
 
 ### Bit (active loop)
 

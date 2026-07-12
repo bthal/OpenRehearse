@@ -7,6 +7,17 @@ import type { PieceRepository } from './PieceRepository';
 const DB_NAME = 'openrehearse.db';
 const XML_DIR = (FileSystem.documentDirectory ?? '') + 'pieces/';
 
+interface PieceRow {
+  id: string;
+  title: string;
+  composer: string | null;
+  xml_filename: string;
+  imported_at: string;
+  last_opened_at: string | null;
+  imported_bpm: number | null;
+  target_bpm: number | null;
+}
+
 export class ExpoLocalPieceRepository implements PieceRepository {
   private db: SQLite.SQLiteDatabase | null = null;
 
@@ -27,11 +38,18 @@ export class ExpoLocalPieceRepository implements PieceRepository {
         map_json TEXT NOT NULL
       );
     `);
-    // Migration: add last_opened_at if it doesn't exist yet
-    try {
-      await db.execAsync('ALTER TABLE pieces ADD COLUMN last_opened_at TEXT');
-    } catch {
-      // column already exists — safe to ignore
+    // Migrations: additive columns for existing installs. Each ALTER throws if
+    // the column already exists — safe to ignore per column.
+    for (const sql of [
+      'ALTER TABLE pieces ADD COLUMN last_opened_at TEXT',
+      'ALTER TABLE pieces ADD COLUMN imported_bpm INTEGER',
+      'ALTER TABLE pieces ADD COLUMN target_bpm INTEGER',
+    ]) {
+      try {
+        await db.execAsync(sql);
+      } catch {
+        // column already exists — safe to ignore
+      }
     }
     this.db = db;
     return db;
@@ -41,50 +59,37 @@ export class ExpoLocalPieceRepository implements PieceRepository {
     return XML_DIR + xmlFilename;
   }
 
-  async list(): Promise<Piece[]> {
-    const db = await this.getDb();
-    const rows = await db.getAllAsync<{
-      id: string;
-      title: string;
-      composer: string | null;
-      xml_filename: string;
-      imported_at: string;
-      last_opened_at: string | null;
-    }>(
-      'SELECT id, title, composer, xml_filename, imported_at, last_opened_at FROM pieces ORDER BY COALESCE(last_opened_at, imported_at) DESC',
-    );
-    return rows.map((r) => ({
+  private static readonly SELECT_COLUMNS =
+    'id, title, composer, xml_filename, imported_at, last_opened_at, imported_bpm, target_bpm';
+
+  private static rowToPiece(r: PieceRow): Piece {
+    return {
       id: r.id,
       title: r.title,
       composer: r.composer,
       xmlFilename: r.xml_filename,
       importedAt: r.imported_at,
       ...(r.last_opened_at ? { lastOpenedAt: r.last_opened_at } : {}),
-    }));
+      ...(r.imported_bpm != null ? { importedBpm: r.imported_bpm } : {}),
+      ...(r.target_bpm != null ? { targetBpm: r.target_bpm } : {}),
+    };
+  }
+
+  async list(): Promise<Piece[]> {
+    const db = await this.getDb();
+    const rows = await db.getAllAsync<PieceRow>(
+      `SELECT ${ExpoLocalPieceRepository.SELECT_COLUMNS} FROM pieces ORDER BY COALESCE(last_opened_at, imported_at) DESC`,
+    );
+    return rows.map(ExpoLocalPieceRepository.rowToPiece);
   }
 
   async get(id: string): Promise<Piece | null> {
     const db = await this.getDb();
-    const row = await db.getFirstAsync<{
-      id: string;
-      title: string;
-      composer: string | null;
-      xml_filename: string;
-      imported_at: string;
-      last_opened_at: string | null;
-    }>(
-      'SELECT id, title, composer, xml_filename, imported_at, last_opened_at FROM pieces WHERE id = ?',
+    const row = await db.getFirstAsync<PieceRow>(
+      `SELECT ${ExpoLocalPieceRepository.SELECT_COLUMNS} FROM pieces WHERE id = ?`,
       id,
     );
-    if (!row) return null;
-    return {
-      id: row.id,
-      title: row.title,
-      composer: row.composer,
-      xmlFilename: row.xml_filename,
-      importedAt: row.imported_at,
-      ...(row.last_opened_at ? { lastOpenedAt: row.last_opened_at } : {}),
-    };
+    return row ? ExpoLocalPieceRepository.rowToPiece(row) : null;
   }
 
   async touch(id: string, at: string): Promise<void> {
@@ -104,12 +109,14 @@ export class ExpoLocalPieceRepository implements PieceRepository {
     try {
       const db = await this.getDb();
       await db.runAsync(
-        'INSERT INTO pieces (id, title, composer, xml_filename, imported_at) VALUES (?, ?, ?, ?, ?)',
+        'INSERT INTO pieces (id, title, composer, xml_filename, imported_at, imported_bpm, target_bpm) VALUES (?, ?, ?, ?, ?, ?, ?)',
         piece.id,
         piece.title,
         piece.composer ?? null,
         piece.xmlFilename,
         piece.importedAt,
+        piece.importedBpm ?? null,
+        piece.targetBpm ?? null,
       );
     } catch (err) {
       // Roll back the file write to avoid orphaned XML files
@@ -121,9 +128,10 @@ export class ExpoLocalPieceRepository implements PieceRepository {
   async update(piece: Piece): Promise<void> {
     const db = await this.getDb();
     await db.runAsync(
-      'UPDATE pieces SET title = ?, composer = ? WHERE id = ?',
+      'UPDATE pieces SET title = ?, composer = ?, target_bpm = ? WHERE id = ?',
       piece.title,
       piece.composer ?? null,
+      piece.targetBpm ?? null,
       piece.id,
     );
   }

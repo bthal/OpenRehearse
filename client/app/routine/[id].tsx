@@ -161,9 +161,7 @@ export default function RoutinePlayView() {
           {!webViewReady && (
             <View className="absolute inset-0 items-center justify-center bg-white">
               <AppIcon path={mdiMusicNoteOutline} size={48} color="#9CA3AF" />
-              <Text className="mt-3 text-sm text-ash-grey-400">
-                {t('common.preparingScore')}
-              </Text>
+              <Text className="mt-3 text-sm text-ash-grey-400">{t('common.preparingScore')}</Text>
             </View>
           )}
 
@@ -171,9 +169,7 @@ export default function RoutinePlayView() {
           {webViewReady && isLoadingScore && (
             <View className="absolute inset-0 items-center justify-center bg-white">
               <ActivityIndicator size="large" color="#4B7A6E" />
-              <Text className="mt-3 text-sm text-ash-grey-400">
-                {t('common.loadingScore')}
-              </Text>
+              <Text className="mt-3 text-sm text-ash-grey-400">{t('common.loadingScore')}</Text>
             </View>
           )}
 
