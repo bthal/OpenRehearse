@@ -123,6 +123,13 @@ export default function RoutinePlayView() {
     setMetronomeOn(!metronomeOn);
   }, [metronomeOn, setMetronomeOn]);
 
+  // Navigating to Edit pushes on top of this screen, so the WebView stays mounted and would
+  // keep playing in the background. Stop playback before leaving.
+  const handleEdit = useCallback(() => {
+    if (isPlaying) webViewRef.current?.injectJavaScript('window.__rn_pause();void 0;');
+    router.push({ pathname: '/routine/edit', params: { id } });
+  }, [isPlaying, id]);
+
   const scoreReady = webViewReady && !isLoadingScore && !scoreError;
 
   if (!routine) {
@@ -161,9 +168,7 @@ export default function RoutinePlayView() {
           {!webViewReady && (
             <View className="absolute inset-0 items-center justify-center bg-white">
               <AppIcon path={mdiMusicNoteOutline} size={48} color="#9CA3AF" />
-              <Text className="mt-3 text-sm text-ash-grey-400">
-                {t('common.preparingScore')}
-              </Text>
+              <Text className="mt-3 text-sm text-ash-grey-400">{t('common.preparingScore')}</Text>
             </View>
           )}
 
@@ -171,9 +176,7 @@ export default function RoutinePlayView() {
           {webViewReady && isLoadingScore && (
             <View className="absolute inset-0 items-center justify-center bg-white">
               <ActivityIndicator size="large" color="#4B7A6E" />
-              <Text className="mt-3 text-sm text-ash-grey-400">
-                {t('common.loadingScore')}
-              </Text>
+              <Text className="mt-3 text-sm text-ash-grey-400">{t('common.loadingScore')}</Text>
             </View>
           )}
 
@@ -238,11 +241,7 @@ export default function RoutinePlayView() {
                 </TouchableOpacity>
 
                 {/* Edit routine */}
-                <TouchableOpacity
-                  onPress={() => router.push({ pathname: '/routine/edit', params: { id } })}
-                  hitSlop={8}
-                  className="p-1"
-                >
+                <TouchableOpacity onPress={handleEdit} hitSlop={8} className="p-1">
                   <AppIcon path={mdiPencilOutline} size={24} color="#374151" />
                 </TouchableOpacity>
               </View>
