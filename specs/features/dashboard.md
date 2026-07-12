@@ -7,6 +7,8 @@ Home surface listing the user's **pieces** and entry points to **import** and **
 ## MVP UI
 
 - **Brand header**: "OpenRehearse" in italic serif at the top of the screen.
+- **Settings**: a **cog icon** (MDI) just below the brand title, on the right, opens the Settings
+  modal (see `settings.md`).
 - **Warm-ups** section: Hanon I and Scales quick-launch rows.
 - **Pieces** section:
   - **Privacy note** always visible above the list: "Your files stay on this device — nothing is uploaded."

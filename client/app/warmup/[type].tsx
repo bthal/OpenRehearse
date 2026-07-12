@@ -28,6 +28,7 @@ import WebView, { type WebViewMessageEvent } from 'react-native-webview';
 import { AppIcon } from '@components/AppIcon';
 import { SCORE_WEB_HTML } from '@score-web/html';
 import type { WebToNativeMessage } from '@score-web/messageProtocol';
+import { useCountInSync } from '@score-web/useCountInSync';
 import { generateDrill45Xml, generateHanonXml, generateScaleXml } from '@domain/warmupMusicXml';
 import {
   WARMUP_BPMS,
@@ -169,6 +170,8 @@ export default function WarmUpView() {
   useEffect(() => {
     if (webViewReady) void sendScore();
   }, [webViewReady, sendScore]);
+
+  useCountInSync(webViewRef, webViewReady);
 
   const handleMessage = useCallback(
     (event: WebViewMessageEvent) => {

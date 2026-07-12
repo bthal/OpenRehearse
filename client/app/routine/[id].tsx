@@ -19,6 +19,7 @@ import { AppIcon } from '@components/AppIcon';
 import { computeRoutineTempoSchedule, generateRoutineXml } from '@domain/routineMusicXml';
 import { SCORE_WEB_HTML } from '@score-web/html';
 import type { WebToNativeMessage } from '@score-web/messageProtocol';
+import { useCountInSync } from '@score-web/useCountInSync';
 import { usePlayViewStore } from '@state/playViewStore';
 import { useRoutinesStore } from '@state/routinesStore';
 
@@ -77,6 +78,8 @@ export default function RoutinePlayView() {
   useEffect(() => {
     if (webViewReady) sendXml();
   }, [webViewReady, sendXml]);
+
+  useCountInSync(webViewRef, webViewReady);
 
   const handleMessage = useCallback(
     (event: WebViewMessageEvent) => {
@@ -161,9 +164,7 @@ export default function RoutinePlayView() {
           {!webViewReady && (
             <View className="absolute inset-0 items-center justify-center bg-white">
               <AppIcon path={mdiMusicNoteOutline} size={48} color="#9CA3AF" />
-              <Text className="mt-3 text-sm text-ash-grey-400">
-                {t('common.preparingScore')}
-              </Text>
+              <Text className="mt-3 text-sm text-ash-grey-400">{t('common.preparingScore')}</Text>
             </View>
           )}
 
@@ -171,9 +172,7 @@ export default function RoutinePlayView() {
           {webViewReady && isLoadingScore && (
             <View className="absolute inset-0 items-center justify-center bg-white">
               <ActivityIndicator size="large" color="#4B7A6E" />
-              <Text className="mt-3 text-sm text-ash-grey-400">
-                {t('common.loadingScore')}
-              </Text>
+              <Text className="mt-3 text-sm text-ash-grey-400">{t('common.loadingScore')}</Text>
             </View>
           )}
 

@@ -199,6 +199,12 @@ Tone.Transport.start(); // state becomes 'started' immediately
 Tone.js's built-in 100 ms lookahead pre-schedules tick-0 events before they need to fire, so
 removing the explicit offset does not cause missed notes.
 
+**Deliberate exception — the count-in.** The count-in feature *requires* a future start time so
+the metronome pre-roll can sound before the first note (see "Count-in pre-roll" below). It keeps
+the RAF loop alive across the offset window via a `countingIn` flag rather than dropping the
+offset. Do **not** "simplify" `Tone.Transport.start(startAt + delaySec)` in `startPlayback` to a
+bare `start()` — that removes the pre-roll gap and the piece begins immediately.
+
 ## Cursor smooth movement: interpolation-based RAF (Phase 4)
 
 **PATTERN (replaces CSS `left` transition):** The CSS `left` transition approach causes visible
@@ -841,3 +847,44 @@ applyTranslate(savedScrollPx !== 0 ? savedScrollPx : scrollMaxPx);
 
 Key ordering constraint: call `advanceCursorTo(step)` **before** assigning `currentCursorStep`,
 because `advanceCursorTo` short-circuits when `targetStep === currentCursorStep`.
+
+## PATTERN: Count-in pre-roll (metronome before a fresh start)
+
+The count-in setting (0/1/2 measures, `settings.md`) plays N measures of metronome clicks before
+a piece, routine, or loop begins. The pure schedule math lives in `src/domain/countIn.ts`
+(`computeCountIn`); `playback.ts` supplies the meter/tempo it reads from OSMD.
+
+**Meter + pickup come from OSMD `SourceMeasure`, captured in `buildTimelines`:**
+```typescript
+const sm = measure as { ActiveTimeSignature?: {...}; ImplicitMeasure?: boolean };
+measureMeta.push({ startTicks, num: sm.ActiveTimeSignature.Numerator,
+                   den: sm.ActiveTimeSignature.Denominator, implicit: sm.ImplicitMeasure });
+```
+Beats per measure = numerator; one beat = `(60/bpm) * (4/den)` seconds. A pickup is an
+`ImplicitMeasure` first measure — its duration (`measureMeta[1].startTicks - measureMeta[0]`) is
+folded into the LAST counted measure, so the audio starts that many beats early and the prelude
+sounds as the tail of the count-in. A loop that starts partway through a measure is folded the same
+way via `loopLeadInBeats(beatOffset, beatsPerMeasure)` — the beats from the measure's downbeat to
+the loop start become the count-in's tail, so the loop enters on its natural beat and the count-in's
+downbeats stay aligned with the loop's bar grid. A loop on a downbeat has no lead-in.
+
+**Timing — clicks on the raw audio clock, transport deferred to a sample-accurate future time:**
+```typescript
+const startAt = ctx.currentTime + 0.12;               // small lead so click 1 isn't clipped
+countInNodes = clicks.map((c) => playClick(ctx, startAt + c.offsetSec, c.accented));
+countingIn = true;
+Tone.Transport.start(startAt + delaySec);             // first note lands exactly on the beat
+```
+
+**LANDMINE (interacts with the `Transport.start(offset)` state trap above):** because the
+transport is scheduled to start in the future, `Tone.Transport.state` reads `'stopped'` during the
+pre-roll, which would kill the RAF cursor loop. The `countingIn` flag keeps `animateCursorLoop`
+requesting frames (cursor parked at the start) until the transport actually starts; on the first
+`'started'` frame it clears `countingIn` and drops `countInNodes` (so a later mid-piece pause is
+not mistaken for a count-in abort).
+
+**Eligibility — only a *fresh* start counts in**, never a resumed pause: piece/routine when
+`posTicks <= firstStepTicks`; loop when `startPlayback` seeks to the A handle (`didLoopSeek`). A
+pause during the pre-roll aborts it (`cancelCountIn` stops any un-played oscillators) and resets to
+the start rather than freezing mid-count. `countInMeasures` is set via `__rn_set_count_in` and, as
+a user setting, is preserved across score reloads (`disposePlayback` keeps it).

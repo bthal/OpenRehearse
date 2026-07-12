@@ -1,4 +1,4 @@
-import { mdiDelete, mdiInformation, mdiPencil, mdiPlus } from '@mdi/js';
+import { mdiCogOutline, mdiDelete, mdiInformation, mdiPencil, mdiPlus } from '@mdi/js';
 import { router, Stack, useFocusEffect } from 'expo-router';
 import { useCallback, useState } from 'react';
 import {
@@ -18,12 +18,14 @@ import { WARMUP_FEATURES } from '../src/config/warmupFeatures';
 import { PieceEditModal } from '@components/PieceEditModal';
 import { PieceRow, PieceRowSkeleton } from '@components/PieceRow';
 import { RoutineRow } from '@components/RoutineRow';
+import { SettingsModal } from '@components/SettingsModal';
 import { WarmUpRow } from '@components/WarmUpRow';
 import { pickXmlFile } from '@data/index';
 import { seedDemoDataIfNeeded } from '@data/seedDemoData';
 import { Colors } from '@theme/colors';
 import { usePiecesStore } from '@state/piecesStore';
 import { useRoutinesStore } from '@state/routinesStore';
+import { useSettingsStore } from '@state/settingsStore';
 
 export default function Dashboard() {
   const { t } = useTranslation();
@@ -43,6 +45,10 @@ export default function Dashboard() {
   const loadRoutines = useRoutinesStore((s) => s.loadRoutines);
   const deleteRoutines = useRoutinesStore((s) => s.deleteRoutines);
 
+  // Settings
+  const loadSettings = useSettingsStore((s) => s.loadSettings);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+
   // Piece selection
   const [editingId, setEditingId] = useState<string | null>(null);
   const [selectedPieceIds, setSelectedPieceIds] = useState<string[]>([]);
@@ -60,7 +66,8 @@ export default function Dashboard() {
     useCallback(() => {
       void seedDemoDataIfNeeded().then(() => loadPieces());
       void loadRoutines();
-    }, [loadPieces, loadRoutines]),
+      void loadSettings();
+    }, [loadPieces, loadRoutines, loadSettings]),
   );
 
   if (importError) {
@@ -210,6 +217,17 @@ export default function Dashboard() {
                   <AppIcon path={mdiInformation} size={22} color="#9c9aab" />
                 </Pressable>
               </View>
+            </View>
+
+            {/* Settings entry — sits just below the brand title on the right */}
+            <View className="-mt-6 mb-2 flex-row justify-end">
+              <Pressable
+                className="p-2 active:opacity-60"
+                onPress={() => setSettingsOpen(true)}
+                accessibilityLabel={t('settings.heading')}
+              >
+                <AppIcon path={mdiCogOutline} size={22} color="#9c9aab" />
+              </Pressable>
             </View>
 
             {/* Warm-ups section (includes routines) */}
@@ -392,6 +410,7 @@ export default function Dashboard() {
         </ScrollView>
 
         <PieceEditModal pieceId={editingId} onClose={() => setEditingId(null)} />
+        <SettingsModal visible={settingsOpen} onClose={() => setSettingsOpen(false)} />
       </SafeAreaView>
     </>
   );

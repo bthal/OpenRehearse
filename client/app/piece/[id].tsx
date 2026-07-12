@@ -24,6 +24,7 @@ import { AppIcon } from '@components/AppIcon';
 import { pieceRepository } from '@data/index';
 import { SCORE_WEB_HTML } from '@score-web/html';
 import type { WebToNativeMessage } from '@score-web/messageProtocol';
+import { useCountInSync } from '@score-web/useCountInSync';
 import { usePiecesStore } from '@state/piecesStore';
 import {
   TEMPO_MULTIPLIERS,
@@ -214,6 +215,8 @@ export default function PlayView() {
   useEffect(() => {
     if (webViewReady) void sendXml();
   }, [webViewReady, sendXml]);
+
+  useCountInSync(webViewRef, webViewReady);
 
   const handleMessage = useCallback(
     (event: WebViewMessageEvent) => {

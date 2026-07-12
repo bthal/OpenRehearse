@@ -9,6 +9,7 @@ import {
   toggleLoop,
   toggleMetronome,
   setActiveHand,
+  setCountIn,
   setFingeringData,
   buildFingeringXml,
   debugFingeringAreas,
@@ -104,6 +105,10 @@ w.__rn_toggle_metronome = () => {
 
 w.__rn_set_active_hand = (hand: 'both' | 'right' | 'left') => {
   setActiveHand(hand);
+};
+
+w.__rn_set_count_in = (measures: number) => {
+  setCountIn(measures);
 };
 
 w.__rn_debug_fingering_areas = (show: boolean) => {

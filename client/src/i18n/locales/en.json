@@ -41,6 +41,14 @@
     "octave_other": "Octaves",
     "failedToGenerate": "Failed to generate score."
   },
+  "settings": {
+    "heading": "Settings",
+    "countInLabel": "Count-in",
+    "countInDescription": "Measures of metronome beats before a piece, routine, or loop starts.",
+    "countInNone": "None",
+    "countInMeasures_one": "{{count}} measure",
+    "countInMeasures_other": "{{count}} measures"
+  },
   "pieceEdit": {
     "heading": "Edit piece",
     "titleLabel": "Title *",

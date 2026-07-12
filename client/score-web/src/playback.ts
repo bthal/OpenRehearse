@@ -2,6 +2,8 @@ import * as Tone from 'tone';
 import type { OpenSheetMusicDisplay } from 'opensheetmusicdisplay';
 import { ArpeggioType, ArticulationEnum } from 'opensheetmusicdisplay';
 import type { OutboundMessage } from './types';
+// Pure count-in math lives in the domain layer (screens/score-web → domain).
+import { computeCountIn, loopLeadInBeats } from '../../src/domain/countIn';
 
 // Matches Tone.js default PPQ; must stay in sync with Tone.Transport.PPQ.
 const TONE_PPQ = 192;
@@ -88,6 +90,22 @@ let part: Tone.Part<NoteEvent> | null = null;
 let metronomeEventId: number | null = null;
 let metronomeEnabled = false;
 let downbeatTicks: Set<number> = new Set();
+// Per-measure time signature + start tick, in score order. Lets the count-in
+// read the meter at the piece start or at a loop's start measure.
+interface MeasureMeta {
+  startTicks: number;
+  num: number; // time-signature numerator (beats per measure)
+  den: number; // time-signature denominator (beat unit)
+  implicit: boolean; // true for a pickup/anacrusis measure
+}
+let measureMeta: MeasureMeta[] = [];
+// Count-in setting: measures of metronome pre-roll before a fresh start (0 = off).
+let countInMeasures = 0;
+// True while the count-in pre-roll is sounding, before the transport starts.
+let countingIn = false;
+// Oscillator nodes scheduled for the current count-in, so a pause/stop can
+// silence any that have not yet played.
+let countInNodes: OscillatorNode[] = [];
 let cursorSteps: CursorStep[] = [];
 let currentCursorStep = -1;
 let totalQuarters = 0;
@@ -213,6 +231,7 @@ function buildTimelines(osmd: OpenSheetMusicDisplay): {
   let osmdIdx = 0; // cursor.next() call count — shared by hold steps at the same position
   let lastBpm = scoreBpm;
   downbeatTicks = new Set();
+  measureMeta = [];
 
   while (!osmd.cursor.Iterator.EndReached) {
     const quarters = osmd.cursor.Iterator.CurrentEnrolledTimestamp.RealValue * WHOLE_TO_QUARTER;
@@ -222,7 +241,22 @@ function buildTimelines(osmd: OpenSheetMusicDisplay): {
     const measure = osmd.cursor.Iterator.CurrentMeasure as unknown;
     if (measure !== lastMeasure) {
       lastMeasure = measure;
-      downbeatTicks.add(Math.round(expandedQuarters * TONE_PPQ));
+      const startTicks = Math.round(expandedQuarters * TONE_PPQ);
+      downbeatTicks.add(startTicks);
+      // Capture the time signature (and pickup flag) so the count-in can count
+      // the right number of beats for this measure's meter.
+      const sm = measure as {
+        ActiveTimeSignature?: { Numerator?: number; Denominator?: number };
+        ImplicitMeasure?: boolean;
+      };
+      const num = sm.ActiveTimeSignature?.Numerator;
+      const den = sm.ActiveTimeSignature?.Denominator;
+      measureMeta.push({
+        startTicks,
+        num: num && num > 0 ? num : 4,
+        den: den && den > 0 ? den : 4,
+        implicit: sm.ImplicitMeasure === true,
+      });
     }
     // Use style.left (exact value OSMD sets) rather than offsetLeft (integer, may round).
     const pxLeft = parseFloat(el?.style.left ?? '0');
@@ -464,8 +498,22 @@ function pxToLoopEndTicks(px: number): number {
 
 function animateCursorLoop(): void {
   if (Tone.Transport.state !== 'started') {
+    // During the count-in the transport is scheduled to start at a future audio
+    // time, so its state reads 'stopped' until then. Keep the frame loop alive
+    // (cursor parked at the start position) and pick up once playback begins.
+    if (countingIn) {
+      animFrameId = requestAnimationFrame(animateCursorLoop);
+      return;
+    }
     animFrameId = null;
     return;
+  }
+
+  // Transport has started: the count-in (if any) is over. Drop the scheduled
+  // click nodes so a later mid-piece pause isn't mistaken for a count-in abort.
+  if (countingIn) {
+    countingIn = false;
+    countInNodes = [];
   }
 
   const quartersElapsed = Tone.Transport.ticks / TONE_PPQ;
@@ -521,6 +569,9 @@ function animateCursorLoop(): void {
 // ─── Internal stop ────────────────────────────────────────────────────────────
 
 function _stopInternal(): void {
+  // Abort any pending count-in so its clicks and scheduled start don't outlive
+  // the stop.
+  cancelCountIn();
   Tone.Transport.stop();
   if (animFrameId !== null) {
     cancelAnimationFrame(animFrameId);
@@ -1288,6 +1339,22 @@ export function toggleLoop(): void {
 
 // ─── Metronome ────────────────────────────────────────────────────────────────
 
+// One metronome click. Accented beats (measure downbeats) are higher and louder.
+// Returns the oscillator so the count-in can silence not-yet-played clicks.
+function playClick(ctx: AudioContext, time: number, accented: boolean): OscillatorNode {
+  const osc = ctx.createOscillator();
+  const gainNode = ctx.createGain();
+  osc.type = 'sine';
+  osc.frequency.value = accented ? 1500 : 1000;
+  gainNode.gain.setValueAtTime(accented ? 0.45 : 0.2, time);
+  gainNode.gain.exponentialRampToValueAtTime(0.0001, time + 0.06);
+  osc.connect(gainNode);
+  gainNode.connect(ctx.destination);
+  osc.start(time);
+  osc.stop(time + 0.06);
+  return osc;
+}
+
 function startMetronome(): void {
   if (metronomeEventId !== null) {
     Tone.Transport.clear(metronomeEventId);
@@ -1309,18 +1376,7 @@ function startMetronome(): void {
     // Round to nearest integer tick rather than nearest quarter so sub-quarter
     // downbeats (e.g. after an eighth-note pickup) are matched correctly.
     const ticks = Math.round(Tone.Transport.getTicksAtTime(time));
-    const isDownbeat = downbeatTicks.has(ticks);
-
-    const osc = ctx.createOscillator();
-    const gainNode = ctx.createGain();
-    osc.type = 'sine';
-    osc.frequency.value = isDownbeat ? 1500 : 1000;
-    gainNode.gain.setValueAtTime(isDownbeat ? 0.45 : 0.2, time);
-    gainNode.gain.exponentialRampToValueAtTime(0.0001, time + 0.06);
-    osc.connect(gainNode);
-    gainNode.connect(ctx.destination);
-    osc.start(time);
-    osc.stop(time + 0.06);
+    playClick(ctx, time, downbeatTicks.has(ticks));
   }, '4n', pickupOffsetTicks > 0 ? `${pickupOffsetTicks}i` : 0);
 }
 
@@ -1334,6 +1390,41 @@ export function toggleMetronome(): void {
       metronomeEventId = null;
     }
   }
+}
+
+// ─── Count-in ─────────────────────────────────────────────────────────────────
+
+export function setCountIn(measures: number): void {
+  countInMeasures = Number.isFinite(measures) ? Math.max(0, Math.min(2, Math.round(measures))) : 0;
+}
+
+// Measure in effect at a given tick (the last measure that started at or before
+// it). Falls back to a synthetic 4/4 measure when no metadata is available.
+function measureAtTicks(ticks: number): MeasureMeta {
+  let best: MeasureMeta | undefined = measureMeta[0];
+  for (const m of measureMeta) {
+    if (m.startTicks <= ticks) best = m;
+    else break;
+  }
+  return best ?? { startTicks: 0, num: 4, den: 4, implicit: false };
+}
+
+// Silence any not-yet-played count-in clicks and clear the flag. Returns true if
+// a count-in was in progress, so callers can treat the tap as an abort rather
+// than a normal pause/stop.
+function cancelCountIn(): boolean {
+  const wasCountingIn = countingIn || countInNodes.length > 0;
+  countingIn = false;
+  for (const osc of countInNodes) {
+    try {
+      osc.stop();
+      osc.disconnect();
+    } catch {
+      // already stopped/disconnected
+    }
+  }
+  countInNodes = [];
+  return wasCountingIn;
 }
 
 // ─── Public API ───────────────────────────────────────────────────────────────
@@ -1478,9 +1569,11 @@ export async function startPlayback(): Promise<void> {
 
   // If a loop is active and was just created/edited (loopModified), or transport is
   // outside [aTicks, bTicks], seek to A before starting.
+  let didLoopSeek = false;
   if (loopRegion) {
     if (loopModified || posTicks < loopRegion.aTicks || posTicks >= loopRegion.bTicks) {
       loopModified = false;
+      didLoopSeek = true;
       Tone.Transport.ticks = loopRegion.aTicks;
       const targetStep = ticksToStep(loopRegion.aTicks);
       advanceCursorTo(targetStep);
@@ -1491,18 +1584,94 @@ export async function startPlayback(): Promise<void> {
     }
   }
 
+  // ─── Count-in eligibility ─────────────────────────────────────────────────
+  // Count in only at a fresh start: the top of a piece/routine, or when a loop
+  // (re)starts from its A handle. Resuming a mid-piece/mid-loop pause does not.
+  const countIn = resolveCountIn(posTicks, didLoopSeek, Tone.Transport.bpm.value);
+
   try {
     await Tone.start();
     await Promise.race([Tone.loaded(), new Promise<void>((r) => setTimeout(r, 8000))]);
   } catch {
     // non-fatal
   }
-  Tone.Transport.start();
+
+  if (countIn && countIn.clicks.length > 0 && countIn.delaySec > 0) {
+    // Sound the pre-roll on the raw audio clock, then defer the transport start
+    // to sample-accurate audio time so the first note lands exactly on the beat.
+    const ctx = Tone.getContext().rawContext as AudioContext;
+    const startAt = ctx.currentTime + 0.12; // small lead so the first click isn't clipped
+    countInNodes = countIn.clicks.map((c) => playClick(ctx, startAt + c.offsetSec, c.accented));
+    countingIn = true;
+    Tone.Transport.start(startAt + countIn.delaySec);
+  } else {
+    Tone.Transport.start();
+  }
   animFrameId = requestAnimationFrame(animateCursorLoop);
   postToNative({ type: 'PLAYBACK_STATE', payload: 'playing' });
 }
 
+// Build the count-in schedule for this start, or null when it should not fire.
+// `bpm` is the effective transport tempo (score BPM × any user override).
+function resolveCountIn(
+  posTicks: number,
+  didLoopSeek: boolean,
+  bpm: number,
+): ReturnType<typeof computeCountIn> | null {
+  if (countInMeasures <= 0 || bpm <= 0) return null;
+
+  if (loopRegion) {
+    if (!didLoopSeek) return null;
+    const measure = measureAtTicks(loopRegion.aTicks);
+    const { num, den } = measure;
+    const beatUnitTicks = (TONE_PPQ * 4) / den;
+    // A loop can start partway through a measure. Fold the beats from the
+    // measure's downbeat up to the loop start into the last counted measure (like
+    // an anacrusis) so the loop enters on its natural beat instead of after a full
+    // measure that ends out of phase with the loop's bar grid.
+    const beatOffset =
+      beatUnitTicks > 0 ? (loopRegion.aTicks - measure.startTicks) / beatUnitTicks : 0;
+    return computeCountIn({
+      measures: countInMeasures,
+      beatsPerMeasure: num,
+      secPerBeat: (60 / bpm) * (4 / den),
+      pickupBeats: loopLeadInBeats(beatOffset, num),
+    });
+  }
+
+  // Piece/routine: only from the very top (not a resumed mid-piece pause).
+  const firstStepTicks = Math.round((cursorSteps[0]?.quarters ?? 0) * TONE_PPQ);
+  if (posTicks > firstStepTicks) return null;
+
+  const first = measureMeta[0];
+  const num = first?.num ?? 4;
+  const den = first?.den ?? 4;
+  const beatUnitTicks = (TONE_PPQ * 4) / den;
+
+  // A pickup (implicit first measure) is part of the last counted measure, so the
+  // audio starts early by the pickup's beat count.
+  let pickupBeats = 0;
+  if (first?.implicit && measureMeta.length > 1) {
+    const pickupTicks = (measureMeta[1]?.startTicks ?? 0) - first.startTicks;
+    if (pickupTicks > 0) pickupBeats = pickupTicks / beatUnitTicks;
+  }
+
+  return computeCountIn({
+    measures: countInMeasures,
+    beatsPerMeasure: num,
+    secPerBeat: (60 / bpm) * (4 / den),
+    pickupBeats,
+  });
+}
+
 export function pausePlayback(): void {
+  // A pause during the count-in aborts it before the piece begins; reset to the
+  // start rather than freezing partway through the pre-roll.
+  if (cancelCountIn()) {
+    _stopInternal();
+    postToNative({ type: 'PLAYBACK_STATE', payload: 'paused' });
+    return;
+  }
   Tone.Transport.pause();
   if (animFrameId !== null) {
     cancelAnimationFrame(animFrameId);
@@ -1546,7 +1715,11 @@ export function disposePlayback(): void {
     Tone.Transport.clear(metronomeEventId);
     metronomeEventId = null;
   }
+  // Count-in is a user setting, so countInMeasures is preserved across loads;
+  // only the in-flight pre-roll and per-score meter data are cleared here.
+  cancelCountIn();
   downbeatTicks = new Set();
+  measureMeta = [];
   cursorSteps = [];
   currentCursorStep = -1;
   osmdActualIdx = -1;
