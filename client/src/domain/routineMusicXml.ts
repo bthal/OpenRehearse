@@ -1,7 +1,10 @@
 import type { ExerciseBlock, Routine, RoutineBlock } from './routine';
 import { WARMUP_KEYS } from './warmup';
 import {
+  getArpeggioMeasureNotes,
+  getChromaticMeasureNotes,
   getDrill45MeasureNotes,
+  getFiveScaleMeasureNotes,
   getHanonMeasureNotes,
   getScaleMeasureNotes,
 } from './warmupMusicXml';
@@ -63,7 +66,39 @@ function exerciseRehearsalLabel(block: ExerciseBlock): string {
   const keyLabel =
     WARMUP_KEYS.find((k) => k.pitchClass === block.pitchClass && k.mode === block.mode)?.label ??
     'C';
-  return block.type === 'hanon' ? `Hanon I in ${keyLabel}` : `${keyLabel} Scale`;
+  switch (block.type) {
+    case 'hanon':
+      return `Hanon I in ${keyLabel}`;
+    case 'arpeggio':
+      return `${keyLabel} Arpeggio`;
+    case 'chromatic':
+      return `${keyLabel} Chromatic`;
+    case 'fiveScale':
+      return `${keyLabel} 5-Finger`;
+    case 'scales':
+      return `${keyLabel} Scale`;
+  }
+}
+
+// Right-/left-hand measures for any exercise block. Routines never render fingering.
+function measureNotesForBlock(block: ExerciseBlock): {
+  rh: string[][] | null;
+  lh: string[][] | null;
+} {
+  switch (block.type) {
+    case 'hanon':
+      return getHanonMeasureNotes(block.pitchClass, block.mode, block.hand, block.octaves, false);
+    case 'scales':
+      return getScaleMeasureNotes(block.pitchClass, block.mode, block.hand, block.octaves);
+    case 'arpeggio':
+      return getArpeggioMeasureNotes(block.pitchClass, block.mode, block.hand, block.octaves);
+    case 'chromatic':
+      return getChromaticMeasureNotes(block.pitchClass, block.mode, block.hand, block.octaves);
+    case 'fiveScale':
+      return getFiveScaleMeasureNotes(block.pitchClass, block.mode, block.hand, block.octaves);
+    case 'drill45':
+      return getDrill45MeasureNotes(block.hand, false);
+  }
 }
 
 // Estimate total duration in seconds for a routine (used for UI display only).
@@ -76,12 +111,7 @@ export function estimateRoutineSeconds(routine: Routine): number {
       totalSeconds += (block.measures * 4 * 60) / lastBpm;
     } else {
       lastBpm = block.bpm;
-      const { rh, lh } =
-        block.type === 'hanon'
-          ? getHanonMeasureNotes(block.pitchClass, block.mode, block.hand, block.octaves, false)
-          : block.type === 'scales'
-            ? getScaleMeasureNotes(block.pitchClass, block.mode, block.hand, block.octaves)
-            : getDrill45MeasureNotes(block.hand, false);
+      const { rh, lh } = measureNotesForBlock(block);
       const measureCount = (rh ?? lh)!.length;
       totalSeconds += (measureCount * 4 * 60) / block.bpm;
     }
@@ -147,17 +177,12 @@ export function computeRoutineTempoSchedule(routine: Routine): RoutineTempoChang
       }
       cumulativeQuarters += block.measures * 4;
     } else {
-      const { pitchClass, mode, hand, octaves, bpm } = block;
+      const { bpm } = block;
       if (lastEmittedBpm === null || bpm !== lastEmittedBpm) {
         schedule.push({ quarterBeat: cumulativeQuarters, bpm });
         lastEmittedBpm = bpm;
       }
-      const { rh, lh } =
-        block.type === 'hanon'
-          ? getHanonMeasureNotes(pitchClass, mode, hand, octaves, false)
-          : block.type === 'scales'
-            ? getScaleMeasureNotes(pitchClass, mode, hand, octaves)
-            : getDrill45MeasureNotes(hand, false);
+      const { rh, lh } = measureNotesForBlock(block);
       const measureCount = (rh ?? lh)!.length;
       cumulativeQuarters += measureCount * 4;
     }
@@ -207,17 +232,12 @@ export function generateRoutineXml(routine: Routine): string {
     }
 
     // Exercise block
-    const { pitchClass, mode, hand, octaves, bpm } = block;
+    const { pitchClass, mode, bpm } = block;
     const fifths = getFifths(pitchClass, mode);
     const label = exerciseRehearsalLabel(block);
     const includeTempo = lastEmittedBpm === null || bpm !== lastEmittedBpm;
 
-    const { rh, lh } =
-      block.type === 'hanon'
-        ? getHanonMeasureNotes(pitchClass, mode, hand, octaves, false)
-        : block.type === 'scales'
-          ? getScaleMeasureNotes(pitchClass, mode, hand, octaves)
-          : getDrill45MeasureNotes(hand, false);
+    const { rh, lh } = measureNotesForBlock(block);
 
     const measureCount = (rh ?? lh)!.length;
 

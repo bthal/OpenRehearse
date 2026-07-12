@@ -236,22 +236,16 @@ function scaleOffset(intervals: ScaleIntervals, i: number): number {
   return Math.floor(i / 7) * 12 + (intervals[i % 7] ?? 0);
 }
 
-function buildScaleMeasuresInternal(
+// Generic renderer shared by every scale-family exercise (scales, arpeggio, chromatic,
+// five-finger). `offsets` are semitone offsets from `rootMidi`, in playing order. All but
+// the last are eighth notes beamed in groups of 4; the final note is held to fill the rest
+// of its bar (quarter / half / dotted half / whole, depending on how the run lands).
+function buildMeasuresFromOffsets(
   rootMidi: number,
   names: KeyInfo['names'],
-  intervals: ScaleIntervals,
-  octaves: number,
+  offsets: readonly number[],
 ): string[][] {
-  const top = 7 * octaves;
-  const seq: number[] = [];
-  for (let i = 0; i <= top; i++) seq.push(i);
-  for (let i = top - 1; i >= 0; i--) seq.push(i);
-
-  const N = seq.length;
-  const eighthMidis = seq.slice(0, N - 1).map((i) => rootMidi + scaleOffset(intervals, i));
-  const lastMidi = rootMidi + scaleOffset(intervals, seq[N - 1]!);
-
-  const eighthsBefore = N - 1;
+  const eighthsBefore = offsets.length - 1;
   const slotsInLastBar = eighthsBefore % 8;
   const finalDuration = slotsInLastBar === 0 ? 8 : 8 - slotsInLastBar;
 
@@ -260,46 +254,132 @@ function buildScaleMeasuresInternal(
 
   for (let b = 0; b + 8 <= eighthsBefore; b += 8) {
     bars.push(
-      eighthMidis.slice(b, b + 8).map((m, i) => eighth(m, names, beamFor(i, 8, BEAM_GROUP))),
+      offsets
+        .slice(b, b + 8)
+        .map((off, i) => eighth(rootMidi + off, names, beamFor(i, 8, BEAM_GROUP))),
     );
   }
 
-  const lastBarEighthMidis =
-    slotsInLastBar > 0 ? eighthMidis.slice(eighthsBefore - slotsInLastBar) : [];
-  const lastBarNotes = lastBarEighthMidis.map((m, i) =>
-    eighth(m, names, beamFor(i, slotsInLastBar, BEAM_GROUP)),
+  const lastBarOffsets =
+    slotsInLastBar > 0 ? offsets.slice(eighthsBefore - slotsInLastBar, eighthsBefore) : [];
+  const lastBarNotes = lastBarOffsets.map((off, i) =>
+    eighth(rootMidi + off, names, beamFor(i, slotsInLastBar, BEAM_GROUP)),
   );
-  lastBarNotes.push(noteWithDuration(lastMidi, names, finalDuration));
+  lastBarNotes.push(
+    noteWithDuration(rootMidi + offsets[offsets.length - 1]!, names, finalDuration),
+  );
   bars.push(lastBarNotes);
 
   return bars;
 }
 
-export function getScaleMeasureNotes(
-  pitchClass: number,
-  mode: WarmUpScaleMode,
-  hand: WarmUpHand,
-  octaves: number,
-): { rh: string[][] | null; lh: string[][] | null } {
-  const { names } = getKeyInfo(pitchClass, mode);
-  const intervals = mode === 'major' ? MAJOR_INTERVALS : MINOR_INTERVALS;
-  const rh =
-    hand === 'left' ? null : buildScaleMeasuresInternal(60 + pitchClass, names, intervals, octaves);
-  const lh =
-    hand === 'right'
-      ? null
-      : buildScaleMeasuresInternal(48 + pitchClass, names, intervals, octaves);
-  return { rh, lh };
+// Mirror an ascending run into a full up-then-down sequence — the top note is played once,
+// the descent retraces the ascent in reverse — then render it as measures. Every
+// scale-family exercise differs only in which ascending offsets it feeds here.
+function buildMirroredMeasures(
+  rootMidi: number,
+  names: KeyInfo['names'],
+  ascending: readonly number[],
+): string[][] {
+  const descending = ascending.slice(0, -1).reverse();
+  return buildMeasuresFromOffsets(rootMidi, names, [...ascending, ...descending]);
 }
 
-export function generateScaleXml(
+function buildScaleMeasuresInternal(
+  rootMidi: number,
+  names: KeyInfo['names'],
+  intervals: ScaleIntervals,
+  octaves: number,
+): string[][] {
+  const top = 7 * octaves;
+  const ascending: number[] = [];
+  for (let i = 0; i <= top; i++) ascending.push(scaleOffset(intervals, i));
+  return buildMirroredMeasures(rootMidi, names, ascending);
+}
+
+// ─── Arpeggio ───────────────────────────────────────────────────────────────
+// Rolling-window arpeggio étude. The chord tones (root/3rd/5th) form a ladder that
+// repeats every octave; the exercise plays a sliding window of four consecutive ladder
+// tones, each group starting one tone higher than the last. The window's starting note
+// climbs `octaves` octaves (3 tones each), so the four-wide window peaks one octave above
+// that. Example (C major, 1 octave): C-E-G-C · E-G-C-E · G-C-E-G · C-E-G-C, then mirrored.
+const MAJOR_TRIAD = [0, 4, 7] as const;
+const MINOR_TRIAD = [0, 3, 7] as const;
+type TriadOffsets = typeof MAJOR_TRIAD | typeof MINOR_TRIAD;
+
+function arpeggioLadder(triad: TriadOffsets, ladderIndex: number): number {
+  return Math.floor(ladderIndex / 3) * 12 + (triad[ladderIndex % 3] ?? 0);
+}
+
+function buildArpeggioMeasuresInternal(
+  rootMidi: number,
+  names: KeyInfo['names'],
+  triad: TriadOffsets,
+  octaves: number,
+): string[][] {
+  const lastStart = 3 * octaves;
+  const ascending: number[] = [];
+  for (let start = 0; start <= lastStart; start++) {
+    for (let w = 0; w < 4; w++) ascending.push(arpeggioLadder(triad, start + w));
+  }
+  return buildMirroredMeasures(rootMidi, names, ascending);
+}
+
+// ─── Chromatic scale ──────────────────────────────────────────────────────────
+// Every semitone from the tonic up `octaves` octaves and back. The selected key only
+// governs note spelling and the rendered key signature; the pitches are always chromatic.
+function buildChromaticMeasuresInternal(
+  rootMidi: number,
+  names: KeyInfo['names'],
+  octaves: number,
+): string[][] {
+  const top = 12 * octaves;
+  const ascending: number[] = [];
+  for (let s = 0; s <= top; s++) ascending.push(s);
+  return buildMirroredMeasures(rootMidi, names, ascending);
+}
+
+// ─── Five-finger scale ────────────────────────────────────────────────────────
+// Scale degrees 1-5 ascending then back to the tonic (C-D-E-F-G-F-E-D-C in C major).
+// For multiple octaves the five-note run climbs into each successive octave before the
+// mirror brings it back down.
+function buildFiveScaleMeasuresInternal(
+  rootMidi: number,
+  names: KeyInfo['names'],
+  intervals: ScaleIntervals,
+  octaves: number,
+): string[][] {
+  const ascending: number[] = [];
+  for (let o = 0; o < octaves; o++) {
+    for (let d = 0; d < 5; d++) ascending.push(o * 12 + (intervals[d] ?? 0));
+  }
+  return buildMirroredMeasures(rootMidi, names, ascending);
+}
+
+// Builds right-/left-hand measures for a scale-family exercise. RH plays from C4 (MIDI 60),
+// LH an octave lower (C3, MIDI 48); the requested hand determines which are produced.
+type MeasureBuilder = (rootMidi: number) => string[][];
+
+function twoHandMeasures(
   pitchClass: number,
+  hand: WarmUpHand,
+  build: MeasureBuilder,
+): { rh: string[][] | null; lh: string[][] | null } {
+  return {
+    rh: hand === 'left' ? null : build(60 + pitchClass),
+    lh: hand === 'right' ? null : build(48 + pitchClass),
+  };
+}
+
+// Assembles a one- or two-hand score from pre-built measures. Single-hand exercises use
+// P1 for whichever hand is present; "both" puts the right hand on P1 and the left on P2.
+function buildTwoHandXml(
+  fifths: number,
   mode: WarmUpScaleMode,
   hand: WarmUpHand,
-  octaves = 1,
+  rh: string[][] | null,
+  lh: string[][] | null,
 ): string {
-  const { fifths } = getKeyInfo(pitchClass, mode);
-  const { rh, lh } = getScaleMeasureNotes(pitchClass, mode, hand, octaves);
   const parts: PartDef[] = [];
   if (rh) parts.push({ id: 'P1', name: 'Right Hand', clef: { sign: 'G', line: 2 }, measures: rh });
   if (lh)
@@ -310,6 +390,101 @@ export function generateScaleXml(
       measures: lh,
     });
   return buildXml(fifths, mode, parts);
+}
+
+export function getScaleMeasureNotes(
+  pitchClass: number,
+  mode: WarmUpScaleMode,
+  hand: WarmUpHand,
+  octaves: number,
+): { rh: string[][] | null; lh: string[][] | null } {
+  const { names } = getKeyInfo(pitchClass, mode);
+  const intervals = mode === 'major' ? MAJOR_INTERVALS : MINOR_INTERVALS;
+  return twoHandMeasures(pitchClass, hand, (root) =>
+    buildScaleMeasuresInternal(root, names, intervals, octaves),
+  );
+}
+
+export function generateScaleXml(
+  pitchClass: number,
+  mode: WarmUpScaleMode,
+  hand: WarmUpHand,
+  octaves = 1,
+): string {
+  const { fifths } = getKeyInfo(pitchClass, mode);
+  const { rh, lh } = getScaleMeasureNotes(pitchClass, mode, hand, octaves);
+  return buildTwoHandXml(fifths, mode, hand, rh, lh);
+}
+
+export function getArpeggioMeasureNotes(
+  pitchClass: number,
+  mode: WarmUpScaleMode,
+  hand: WarmUpHand,
+  octaves: number,
+): { rh: string[][] | null; lh: string[][] | null } {
+  const { names } = getKeyInfo(pitchClass, mode);
+  const triad = mode === 'major' ? MAJOR_TRIAD : MINOR_TRIAD;
+  return twoHandMeasures(pitchClass, hand, (root) =>
+    buildArpeggioMeasuresInternal(root, names, triad, octaves),
+  );
+}
+
+export function generateArpeggioXml(
+  pitchClass: number,
+  mode: WarmUpScaleMode,
+  hand: WarmUpHand,
+  octaves = 1,
+): string {
+  const { fifths } = getKeyInfo(pitchClass, mode);
+  const { rh, lh } = getArpeggioMeasureNotes(pitchClass, mode, hand, octaves);
+  return buildTwoHandXml(fifths, mode, hand, rh, lh);
+}
+
+export function getChromaticMeasureNotes(
+  pitchClass: number,
+  mode: WarmUpScaleMode,
+  hand: WarmUpHand,
+  octaves: number,
+): { rh: string[][] | null; lh: string[][] | null } {
+  const { names } = getKeyInfo(pitchClass, mode);
+  return twoHandMeasures(pitchClass, hand, (root) =>
+    buildChromaticMeasuresInternal(root, names, octaves),
+  );
+}
+
+export function generateChromaticXml(
+  pitchClass: number,
+  mode: WarmUpScaleMode,
+  hand: WarmUpHand,
+  octaves = 1,
+): string {
+  const { fifths } = getKeyInfo(pitchClass, mode);
+  const { rh, lh } = getChromaticMeasureNotes(pitchClass, mode, hand, octaves);
+  return buildTwoHandXml(fifths, mode, hand, rh, lh);
+}
+
+export function getFiveScaleMeasureNotes(
+  pitchClass: number,
+  mode: WarmUpScaleMode,
+  hand: WarmUpHand,
+  octaves: number,
+): { rh: string[][] | null; lh: string[][] | null } {
+  const { names } = getKeyInfo(pitchClass, mode);
+  const intervals = mode === 'major' ? MAJOR_INTERVALS : MINOR_INTERVALS;
+  return twoHandMeasures(pitchClass, hand, (root) =>
+    buildFiveScaleMeasuresInternal(root, names, intervals, octaves),
+  );
+}
+
+export function generateFiveScaleXml(
+  pitchClass: number,
+  mode: WarmUpScaleMode,
+  hand: WarmUpHand,
+  octaves = 1,
+): string {
+  const { fifths } = getKeyInfo(pitchClass, mode);
+  const { rh, lh } = getFiveScaleMeasureNotes(pitchClass, mode, hand, octaves);
+  return buildTwoHandXml(fifths, mode, hand, rh, lh);
 }
 
 // Correct Hanon No.1 cell: skip a third up, then step up to a 6th, then step back to 2nd.
@@ -500,16 +675,7 @@ export function getDrill45MeasureNotes(
 
 export function generateDrill45Xml(hand: WarmUpHand): string {
   const { rh, lh } = getDrill45MeasureNotes(hand);
-  const parts: PartDef[] = [];
-  if (rh) parts.push({ id: 'P1', name: 'Right Hand', clef: { sign: 'G', line: 2 }, measures: rh });
-  if (lh)
-    parts.push({
-      id: hand === 'both' ? 'P2' : 'P1',
-      name: 'Left Hand',
-      clef: { sign: 'F', line: 4 },
-      measures: lh,
-    });
-  return buildXml(0, 'major', parts);
+  return buildTwoHandXml(0, 'major', hand, rh, lh);
 }
 
 export function generateHanonXml(
@@ -520,14 +686,5 @@ export function generateHanonXml(
 ): string {
   const { fifths } = getKeyInfo(pitchClass, mode);
   const { rh, lh } = getHanonMeasureNotes(pitchClass, mode, hand, octaves);
-  const parts: PartDef[] = [];
-  if (rh) parts.push({ id: 'P1', name: 'Right Hand', clef: { sign: 'G', line: 2 }, measures: rh });
-  if (lh)
-    parts.push({
-      id: hand === 'both' ? 'P2' : 'P1',
-      name: 'Left Hand',
-      clef: { sign: 'F', line: 4 },
-      measures: lh,
-    });
-  return buildXml(fifths, mode, parts);
+  return buildTwoHandXml(fifths, mode, hand, rh, lh);
 }

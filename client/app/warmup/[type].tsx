@@ -28,7 +28,14 @@ import WebView, { type WebViewMessageEvent } from 'react-native-webview';
 import { AppIcon } from '@components/AppIcon';
 import { SCORE_WEB_HTML } from '@score-web/html';
 import type { WebToNativeMessage } from '@score-web/messageProtocol';
-import { generateDrill45Xml, generateHanonXml, generateScaleXml } from '@domain/warmupMusicXml';
+import {
+  generateArpeggioXml,
+  generateChromaticXml,
+  generateDrill45Xml,
+  generateFiveScaleXml,
+  generateHanonXml,
+  generateScaleXml,
+} from '@domain/warmupMusicXml';
 import {
   WARMUP_BPMS,
   WARMUP_KEYS,
@@ -46,6 +53,15 @@ const PANEL_WIDTH = 176; // key panel (4 keys visible, scroll for more)
 const HAND_PANEL_WIDTH = 132; // 3 × 44
 const OCTAVE_PANEL_WIDTH = 132; // 3 × 44
 
+const WARM_UP_TYPES: WarmUpType[] = [
+  'hanon',
+  'scales',
+  'arpeggio',
+  'chromatic',
+  'fiveScale',
+  'drill45',
+];
+
 const HAND_OPTIONS: WarmUpHand[] = ['both', 'left', 'right'];
 
 const HAND_ICON: Record<WarmUpHand, string> = {
@@ -57,22 +73,21 @@ const HAND_ICON: Record<WarmUpHand, string> = {
 export default function WarmUpView() {
   const { t } = useTranslation();
   const { type } = useLocalSearchParams<{ type: string }>();
-  const warmUpType = (
-    type === 'hanon' || type === 'scales' || type === 'drill45' ? type : 'scales'
-  ) as WarmUpType;
-  const title =
-    warmUpType === 'hanon'
-      ? t('dashboard.hanon')
-      : warmUpType === 'drill45'
-        ? t('dashboard.drill45')
-        : t('dashboard.scales');
+  const warmUpType = (WARM_UP_TYPES.includes(type as WarmUpType) ? type : 'scales') as WarmUpType;
+  const title = t(`dashboard.${warmUpType}`);
 
   const initSettings = useWarmUpStore((s) => s.initSettings);
   const updateHanon = useWarmUpStore((s) => s.updateHanon);
   const updateScales = useWarmUpStore((s) => s.updateScales);
+  const updateArpeggio = useWarmUpStore((s) => s.updateArpeggio);
+  const updateChromatic = useWarmUpStore((s) => s.updateChromatic);
+  const updateFiveScale = useWarmUpStore((s) => s.updateFiveScale);
   const updateDrill45 = useWarmUpStore((s) => s.updateDrill45);
   const hanonSettings = useWarmUpStore((s) => s.hanon);
   const scalesSettings = useWarmUpStore((s) => s.scales);
+  const arpeggioSettings = useWarmUpStore((s) => s.arpeggio);
+  const chromaticSettings = useWarmUpStore((s) => s.chromatic);
+  const fiveScaleSettings = useWarmUpStore((s) => s.fiveScale);
   const drill45RawSettings = useWarmUpStore((s) => s.drill45);
   // Pad drill45 with fixed key/octave so the shared settings shape is satisfied
   const drill45Settings = {
@@ -85,11 +100,27 @@ export default function WarmUpView() {
   const settings =
     warmUpType === 'hanon'
       ? hanonSettings
-      : warmUpType === 'drill45'
-        ? drill45Settings
-        : scalesSettings;
+      : warmUpType === 'arpeggio'
+        ? arpeggioSettings
+        : warmUpType === 'chromatic'
+          ? chromaticSettings
+          : warmUpType === 'fiveScale'
+            ? fiveScaleSettings
+            : warmUpType === 'drill45'
+              ? drill45Settings
+              : scalesSettings;
   const updateSettings =
-    warmUpType === 'hanon' ? updateHanon : warmUpType === 'drill45' ? updateDrill45 : updateScales;
+    warmUpType === 'hanon'
+      ? updateHanon
+      : warmUpType === 'arpeggio'
+        ? updateArpeggio
+        : warmUpType === 'chromatic'
+          ? updateChromatic
+          : warmUpType === 'fiveScale'
+            ? updateFiveScale
+            : warmUpType === 'drill45'
+              ? updateDrill45
+              : updateScales;
 
   const webViewReady = useWarmUpStore((s) => s.webViewReady);
   const isLoadingScore = useWarmUpStore((s) => s.isLoadingScore);
@@ -149,7 +180,33 @@ export default function WarmUpView() {
           ? generateHanonXml(settings.pitchClass, settings.mode, settings.hand, settings.octaves)
           : warmUpType === 'drill45'
             ? generateDrill45Xml(settings.hand)
-            : generateScaleXml(settings.pitchClass, settings.mode, settings.hand, settings.octaves);
+            : warmUpType === 'arpeggio'
+              ? generateArpeggioXml(
+                  settings.pitchClass,
+                  settings.mode,
+                  settings.hand,
+                  settings.octaves,
+                )
+              : warmUpType === 'chromatic'
+                ? generateChromaticXml(
+                    settings.pitchClass,
+                    settings.mode,
+                    settings.hand,
+                    settings.octaves,
+                  )
+                : warmUpType === 'fiveScale'
+                  ? generateFiveScaleXml(
+                      settings.pitchClass,
+                      settings.mode,
+                      settings.hand,
+                      settings.octaves,
+                    )
+                  : generateScaleXml(
+                      settings.pitchClass,
+                      settings.mode,
+                      settings.hand,
+                      settings.octaves,
+                    );
       webViewRef.current?.injectJavaScript(`window.__rn_load_xml(${JSON.stringify(xml)});void 0;`);
     } catch (err) {
       setLoadingScore(false);

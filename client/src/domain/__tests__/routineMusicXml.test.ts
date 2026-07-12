@@ -50,6 +50,21 @@ describe('generateRoutineXml', () => {
     expect(xml).toContain('<sign>F</sign>');
   });
 
+  it('labels arpeggio, chromatic, and five-finger blocks by key', () => {
+    const xml = generateRoutineXml(
+      makeRoutine({
+        blocks: [
+          { type: 'arpeggio', pitchClass: 0, mode: 'major', hand: 'both', bpm: 60, octaves: 1 },
+          { type: 'chromatic', pitchClass: 7, mode: 'major', hand: 'both', bpm: 80, octaves: 1 },
+          { type: 'fiveScale', pitchClass: 2, mode: 'minor', hand: 'both', bpm: 100, octaves: 1 },
+        ],
+      }),
+    );
+    expect(xml).toContain('<rehearsal>C Arpeggio</rehearsal>');
+    expect(xml).toContain('<rehearsal>G Chromatic</rehearsal>');
+    expect(xml).toContain('<rehearsal>Dm 5-Finger</rehearsal>');
+  });
+
   it('includes rehearsal mark for each exercise block', () => {
     const xml = generateRoutineXml(
       makeRoutine({

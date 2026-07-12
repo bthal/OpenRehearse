@@ -2,12 +2,13 @@
 
 ## Goal
 
-Built-in exercises (Hanon No. 1, major/minor scales, and a 4-5 finger drill) rendered as
-live score and played back with synthesis — no file import needed.
+Built-in exercises (Hanon No. 1, major/minor scales, arpeggios, chromatic scales, 5-finger
+scales, and a 4-5 finger drill) rendered as live score and played back with synthesis — no
+file import needed.
 
 ## Parameters
 
-Hanon I and Scales share the same controls:
+Hanon I, Scales, Arpeggios, Chromatic, and 5-Finger scales share the same controls:
 
 | Parameter | Options |
 |-----------|---------|
@@ -28,6 +29,18 @@ Hanon I and Scales share the same controls:
 - MusicXML is generated on-device from parameters; nothing is imported or stored.
 - **Scales**: ascending then descending; top note appears once; final root held to fill
   the bar (quarter / half / dotted half depending on octave count).
+- **Arpeggios**: rolling-window figuration over the tonic triad (major/minor selects the
+  chord quality). The chord tones form a ladder (root/3rd/5th, repeating every octave); the
+  exercise plays a sliding window of four consecutive ladder tones, each group starting one
+  tone higher. The window's starting note climbs the selected octave count, so the four-wide
+  window peaks one octave above that. Example (C major, 1 octave): C-E-G-C · E-G-C-E · G-C-E-G
+  · C-E-G-C, then mirrored back down with the final root held.
+- **Chromatic**: every semitone from the tonic up the selected octaves and back. The chosen
+  key governs only note spelling and the rendered key signature; the pitches are always
+  chromatic. Final tonic is a whole note.
+- **5-Finger**: scale degrees 1-5 ascending then back to the tonic (C-D-E-F-G-F-E-D-C in C
+  major). Multi-octave runs climb the five-note pattern into each successive octave before
+  the mirror brings it back down.
 - **Hanon No. 1**: 7 ascending cells per octave (peak at degree 7n+4); symmetric
   descent; whole-note landing. First 16 ascending notes fingered 1-2-3-4-5-4-3-2 ×2;
   first 16 descending 5-4-3-2-1-2-3-4 ×2.
@@ -58,7 +71,7 @@ Hanon I and Scales share the same controls:
 
 ## Routines
 
-A **Routine** is an ordered list of exercise blocks (Hanon I, Scales) and optional Pause blocks, rendered and played back as a single continuous score.
+A **Routine** is an ordered list of exercise blocks (Hanon I, Scales, Arpeggios, Chromatic, 5-Finger) and optional Pause blocks, rendered and played back as a single continuous score.
 
 ### Dashboard
 
