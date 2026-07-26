@@ -235,4 +235,5 @@ and breaks the manual single-line `PageWidth`).
 
 **Note:** `score-web/**` is excluded from `client/tsconfig.json`, so `npm run typecheck` does
 **not** cover `playback.ts`. Type-check it separately with `cd score-web && npx tsc --noEmit`, and
-rebuild the bundle (`npm run build:score-web`) after any `score-web/src` change.
+rebuild the bundle after any `score-web/` change (see “`score-web/` edits are invisible until the
+bundle is rebuilt” in [`tone-playback.md`](tone-playback.md)).
