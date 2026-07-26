@@ -2,8 +2,9 @@ import * as Tone from 'tone';
 import type { OpenSheetMusicDisplay } from 'opensheetmusicdisplay';
 import { ArpeggioType, ArticulationEnum } from 'opensheetmusicdisplay';
 import type { OutboundMessage } from './types';
-// Pure count-in math lives in the domain layer (screens/score-web → domain).
+// Pure count-in and loop-geometry math live in the domain layer (screens/score-web → domain).
 import { computeCountIn, loopLeadInBeats } from '../../src/domain/countIn';
+import { LOOP_DEFAULT_PX, LOOP_MIN_GAP_PX, placeLoopAtCursor } from '../../src/domain/loop';
 
 // Matches Tone.js default PPQ; must stay in sync with Tone.Transport.PPQ.
 const TONE_PPQ = 192;
@@ -43,10 +44,12 @@ const PIANO_URLS: Record<string, string> = {
 
 const SALAMANDER_BASE_URL = 'https://tonejs.github.io/audio/salamander/';
 
-const LOOP_MIN_GAP_PX = 40;
-const LOOP_DEFAULT_PX = 200;
 const HANDLE_WIDTH = 28;
 const EDGE_ZONE = 60;
+// Loop-creation unfurl: how long the overlay takes to grow out of the cursor.
+// Short ease-out, in the same register as the native toolbar panels' spring.
+const LOOP_UNFURL_MS = 200;
+const LOOP_UNFURL_EASING = 'cubic-bezier(0.22, 0.61, 0.36, 1)';
 // Momentum scroll: fraction of velocity retained per 16 ms frame (increase toward 1 for longer glide).
 const MOMENTUM_DECELERATION = 0.95;
 // Fermata notes are held 1.75× their written duration.
@@ -129,6 +132,9 @@ let resizeListenerAttached = false;
 let momentumFrameId: number | null = null;
 let touchHandlersAttached = false;
 let loopRegion: LoopRegion | null = null;
+// Pending removal of the create-time CSS transition on the loop overlay (see
+// unfurlLoopFromCursor). Held so a drag or a clear can cut the animation short.
+let loopUnfurlTimeoutId: number | null = null;
 // Tempo change schedule — kept for BPM lookup at arbitrary seek positions.
 let tempoScheduleEventIds: number[] = [];
 let tempoChangeSchedule: TempoChange[] = [];
@@ -754,6 +760,78 @@ function updateLoopOverlay(): void {
   }
 }
 
+// Drops the create-time CSS transition. Dragging rewrites `left` every frame, so
+// a lingering transition would make the handle lag behind the finger.
+function endLoopUnfurl(): void {
+  if (loopUnfurlTimeoutId !== null) {
+    window.clearTimeout(loopUnfurlTimeoutId);
+    loopUnfurlTimeoutId = null;
+  }
+  for (const el of [handleAEl, handleBEl, shadeEl]) {
+    if (el) el.style.transition = 'none';
+  }
+}
+
+// One overlay element's slide from its collapsed-at-cursor geometry to its final
+// geometry. `fromW`/`toW` are only used by the shade, which grows in width too.
+interface UnfurlStep {
+  el: HTMLElement;
+  fromLeft: number;
+  toLeft: number;
+  fromW?: number;
+  toW?: number;
+}
+
+// Animates the freshly created loop out of the cursor: each overlay element
+// starts collapsed at the cursor line and slides to its final geometry, so the
+// region visually unfurls from the cursor instead of popping into existence.
+// An element already at its final position — handle A whenever the loop starts
+// at the cursor — is placed directly and does not animate.
+function unfurlLoopFromCursor(cursorPx: number): void {
+  if (!loopRegion) return;
+  endLoopUnfurl();
+
+  const steps: UnfurlStep[] = [];
+  const add = (
+    el: HTMLElement | null,
+    fromLeft: number,
+    toLeft: number,
+    fromW?: number,
+    toW?: number,
+  ): void => {
+    if (!el) return;
+    const moves =
+      Math.abs(toLeft - fromLeft) > 0.5 ||
+      (fromW !== undefined && toW !== undefined && Math.abs(toW - fromW) > 0.5);
+    if (!moves) {
+      el.style.left = `${toLeft}px`;
+      if (toW !== undefined) el.style.width = `${toW}px`;
+      return;
+    }
+    el.style.left = `${fromLeft}px`;
+    if (fromW !== undefined) el.style.width = `${fromW}px`;
+    steps.push({ el, fromLeft, toLeft, fromW, toW });
+  };
+
+  add(handleAEl, cursorPx - HANDLE_WIDTH, loopRegion.aPx - HANDLE_WIDTH);
+  add(handleBEl, cursorPx, loopRegion.bPx);
+  add(shadeEl, cursorPx, loopRegion.aPx, 0, loopRegion.bPx - loopRegion.aPx);
+
+  if (steps.length === 0) return;
+
+  // Force a style flush so the collapsed geometry becomes the transition's start
+  // value; without it the browser coalesces both writes and nothing animates.
+  void steps[0]!.el.offsetWidth;
+
+  const transition = `left ${LOOP_UNFURL_MS}ms ${LOOP_UNFURL_EASING}, width ${LOOP_UNFURL_MS}ms ${LOOP_UNFURL_EASING}`;
+  for (const s of steps) {
+    s.el.style.transition = transition;
+    s.el.style.left = `${s.toLeft}px`;
+    if (s.toW !== undefined) s.el.style.width = `${s.toW}px`;
+  }
+  loopUnfurlTimeoutId = window.setTimeout(endLoopUnfurl, LOOP_UNFURL_MS + 50);
+}
+
 function initLoopHandles(): void {
   function makeDrag(which: 'a' | 'b'): void {
     const el = which === 'a' ? handleAEl : handleBEl;
@@ -804,6 +882,9 @@ function initLoopHandles(): void {
     el.addEventListener('touchstart', (e) => {
       e.stopPropagation();
       if (Tone.Transport.state === 'started') pausePlayback();
+      // Grabbing a handle mid-unfurl snaps the overlay out of its transition so
+      // the drag tracks the finger exactly.
+      endLoopUnfurl();
       currentClientX = e.touches[0]?.clientX ?? 0;
       startTouchX = currentClientX;
       startPx = which === 'a' ? (loopRegion?.aPx ?? 0) : (loopRegion?.bPx ?? 0);
@@ -854,10 +935,14 @@ function createLoop(): void {
   if (!step) return;
   const scorePxMin = cursorSteps[0]?.pxLeft ?? 0;
   const scorePxMax = cursorSteps[cursorSteps.length - 1]?.pxLeft ?? scoreWidth;
-  // Anchor B at cursor + default width, clamped to the last note. Then derive A
-  // so the loop is always LOOP_DEFAULT_PX wide (unless the score itself is shorter).
-  const bPx = Math.min(step.pxLeft + LOOP_DEFAULT_PX, scorePxMax);
-  const aPx = Math.max(scorePxMin, bPx - LOOP_DEFAULT_PX);
+  // The cursor's own note position, not the raw viewport centre: the loop must
+  // include the note the cursor sits on, and pxToLoopStartTicks snaps A forward
+  // to the first note at or after it.
+  const cursorPx = step.pxLeft;
+  // Start at the cursor and extend LOOP_DEFAULT_PX forward; near the end of the
+  // piece the loop is shifted back so it still fits (A then lands before the
+  // cursor). See domain/loop.ts.
+  const { aPx, bPx } = placeLoopAtCursor({ cursorPx, scorePxMin, scorePxMax });
   const aTicks = pxToLoopStartTicks(aPx);
   const bTicks = pxToLoopEndTicks(bPx);
   loopRegion = { aPx, bPx, aTicks, bTicks };
@@ -867,7 +952,7 @@ function createLoop(): void {
   if (handleAEl) handleAEl.style.display = 'flex';
   if (handleBEl) handleBEl.style.display = 'flex';
   if (shadeEl) shadeEl.style.display = 'block';
-  updateLoopOverlay();
+  unfurlLoopFromCursor(cursorPx);
   loopModified = true;
   postToNative({ type: 'LOOP_STATE', payload: true });
   if (Tone.Transport.state === 'started') pausePlayback();
@@ -875,6 +960,7 @@ function createLoop(): void {
 
 function clearLoop(): void {
   loopRegion = null;
+  endLoopUnfurl();
   Tone.Transport.loop = false;
   if (handleAEl) handleAEl.style.display = 'none';
   if (handleBEl) handleBEl.style.display = 'none';
@@ -1276,6 +1362,7 @@ export function disposePlayback(): void {
   osmdActualIdx = -1;
   totalQuarters = 0;
   loopRegion = null;
+  endLoopUnfurl();
   loopModified = false;
   Tone.Transport.loop = false;
   scrollMinPx = 0;
