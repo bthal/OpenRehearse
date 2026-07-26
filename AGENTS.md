@@ -29,7 +29,7 @@ This repository uses **`specs/`** as the source of truth for product intent and 
 | `compound-docs/` | Implementation memory (landmines, failed approaches) — **authority for how not to break things** |
 | `client/src/domain/` | Pure TypeScript: loop math, MusicXML validation, tempo, ties, complexity caps — **no** Tone/OSMD/React |
 | `client/src/data/` | `LocalPieceRepository`, XML cache, file pickers — storage adapters |
-| `client/src/state/` | Zustand stores (`piecesStore`, `playViewStore`, `routinesStore`, `settingsStore`) |
+| `client/src/state/` | Zustand stores — one `*Store.ts` per concern (see the directory for the current set) |
 | `client/src/i18n/` | String catalogue (`locales/en.json`) and i18next init — import as side-effect only |
 | `client/score-web/` | OSMD surface, playback controller, cursor/loop web UI, Tone.js integration — **web-only** |
 | `client/app/` | Expo Router screens (Dashboard, PlayView route) |

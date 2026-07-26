@@ -40,6 +40,7 @@ Phases are **sequential**; within a phase, items can be parallelized when they d
 ## Later (post-MVP backlog)
 
 - [x] **Metronome** aligned with transport; oscillator click track in WebView with downbeat detection; toolbar toggle.
+- [x] **Practice-time tracking** with a day-based heatmap at the bottom of the dashboard; see `specs/features/dashboard.md` § "Practice-time tracking".
 - **Saved bits** / multiple loops / hierarchical practice (per original vision).
 - **iOS** build and TestFlight when ready.
 - **Auth & cross-device sync** — only after scope is explicitly re-opened; not in MVP.
