@@ -4,7 +4,7 @@ import { ArpeggioType, ArticulationEnum } from 'opensheetmusicdisplay';
 import type { OutboundMessage } from './types';
 // Pure count-in and loop-geometry math live in the domain layer (screens/score-web → domain).
 import { computeCountIn, loopLeadInBeats } from '../../src/domain/countIn';
-import { LOOP_DEFAULT_PX, LOOP_MIN_GAP_PX, placeLoopAtCursor } from '../../src/domain/loop';
+import { LOOP_MIN_GAP_PX, placeLoopAtCursor } from '../../src/domain/loop';
 
 // Matches Tone.js default PPQ; must stay in sync with Tone.Transport.PPQ.
 const TONE_PPQ = 192;
@@ -749,15 +749,38 @@ function initTouchHandlers(): void {
 // ─── Loop handle dragging ─────────────────────────────────────────────────────
 
 
+// The single mapping from a loop's score-pixel bounds to the three overlay
+// elements' CSS geometry. Both the drag path (updateLoopOverlay) and the create
+// path (unfurlLoopFromCursor) go through here so they cannot drift apart.
+function loopOverlayGeometry(
+  aPx: number,
+  bPx: number,
+): { handleA: number; handleB: number; shade: { left: number; width: number } } {
+  return {
+    // Handle A sits to the left of aPx (inner/right edge at aPx).
+    handleA: aPx - HANDLE_WIDTH,
+    handleB: bPx,
+    shade: { left: aPx, width: bPx - aPx },
+  };
+}
+
 function updateLoopOverlay(): void {
   if (!loopRegion) return;
-  // Handle A sits to the left of aPx (inner/right edge at aPx).
-  if (handleAEl) handleAEl.style.left = `${loopRegion.aPx - HANDLE_WIDTH}px`;
-  if (handleBEl) handleBEl.style.left = `${loopRegion.bPx}px`;
+  const geom = loopOverlayGeometry(loopRegion.aPx, loopRegion.bPx);
+  if (handleAEl) handleAEl.style.left = `${geom.handleA}px`;
+  if (handleBEl) handleBEl.style.left = `${geom.handleB}px`;
   if (shadeEl) {
-    shadeEl.style.left = `${loopRegion.aPx}px`;
-    shadeEl.style.width = `${loopRegion.bPx - loopRegion.aPx}px`;
+    shadeEl.style.left = `${geom.shade.left}px`;
+    shadeEl.style.width = `${geom.shade.width}px`;
   }
+}
+
+// Hides the loop overlay and tells the native toolbar no loop is active.
+function hideLoopOverlay(): void {
+  if (handleAEl) handleAEl.style.display = 'none';
+  if (handleBEl) handleBEl.style.display = 'none';
+  if (shadeEl) shadeEl.style.display = 'none';
+  postToNative({ type: 'LOOP_STATE', payload: false });
 }
 
 // Drops the create-time CSS transition. Dragging rewrites `left` every frame, so
@@ -813,9 +836,13 @@ function unfurlLoopFromCursor(cursorPx: number): void {
     steps.push({ el, fromLeft, toLeft, fromW, toW });
   };
 
-  add(handleAEl, cursorPx - HANDLE_WIDTH, loopRegion.aPx - HANDLE_WIDTH);
-  add(handleBEl, cursorPx, loopRegion.bPx);
-  add(shadeEl, cursorPx, loopRegion.aPx, 0, loopRegion.bPx - loopRegion.aPx);
+  // Collapsed start state is the same mapping evaluated at a zero-width loop
+  // sitting on the cursor.
+  const from = loopOverlayGeometry(cursorPx, cursorPx);
+  const to = loopOverlayGeometry(loopRegion.aPx, loopRegion.bPx);
+  add(handleAEl, from.handleA, to.handleA);
+  add(handleBEl, from.handleB, to.handleB);
+  add(shadeEl, from.shade.left, to.shade.left, from.shade.width, to.shade.width);
 
   if (steps.length === 0) return;
 
@@ -962,10 +989,7 @@ function clearLoop(): void {
   loopRegion = null;
   endLoopUnfurl();
   Tone.Transport.loop = false;
-  if (handleAEl) handleAEl.style.display = 'none';
-  if (handleBEl) handleBEl.style.display = 'none';
-  if (shadeEl) shadeEl.style.display = 'none';
-  postToNative({ type: 'LOOP_STATE', payload: false });
+  hideLoopOverlay();
   if (Tone.Transport.state === 'started') pausePlayback();
 }
 
@@ -1363,6 +1387,9 @@ export function disposePlayback(): void {
   totalQuarters = 0;
   loopRegion = null;
   endLoopUnfurl();
+  // Without this a second __rn_load_xml would leave the handles painted at stale
+  // score-pixel positions over the new score, with the toolbar still showing ×.
+  hideLoopOverlay();
   loopModified = false;
   Tone.Transport.loop = false;
   scrollMinPx = 0;
