@@ -17,8 +17,4 @@ export interface PieceRepository {
   delete(id: string): Promise<void>;
   /** Returns the XML content for a piece previously saved via save(). */
   readXml(piece: Piece): Promise<string>;
-  /** Returns the user-assigned fingering map for a piece (noteKey → finger). */
-  readFingering(pieceId: string): Promise<Record<string, number>>;
-  /** Persists the fingering map for a piece, replacing any previous value. */
-  saveFingering(pieceId: string, map: Record<string, number>): Promise<void>;
 }

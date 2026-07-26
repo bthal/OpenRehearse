@@ -204,15 +204,9 @@ export default function PlayView() {
     setLoadingScore(true);
     setScoreError(null);
     try {
-      const [xml, fingeringMap] = await Promise.all([
-        pieceRepository.readXml(piece),
-        pieceRepository.readFingering(piece.id),
-      ]);
-      const fingeringJson = JSON.stringify(fingeringMap);
+      const xml = await pieceRepository.readXml(piece);
       // injectJavaScript is the correct native→web channel; see compound-docs/osmd-webview.md
-      webViewRef.current?.injectJavaScript(
-        `window.__rn_load_xml(${JSON.stringify(xml)}, '', ${JSON.stringify(fingeringJson)});void 0;`,
-      );
+      webViewRef.current?.injectJavaScript(`window.__rn_load_xml(${JSON.stringify(xml)});void 0;`);
     } catch (err) {
       setLoadingScore(false);
       setScoreError(err instanceof Error ? err.message : t('playView.failedToReadScore'));
@@ -266,12 +260,9 @@ export default function PlayView() {
         case 'LOOP_STATE':
           setLoopActive(msg.payload);
           break;
-        case 'FINGERING_CHANGED':
-          if (id) void pieceRepository.saveFingering(id, msg.payload);
-          break;
       }
     },
-    [setScoreBpm, setLoadingScore, setScoreError, setPlaying, setLoopActive, id],
+    [setScoreBpm, setLoadingScore, setScoreError, setPlaying, setLoopActive],
   );
 
   const handlePlayPause = useCallback(() => {

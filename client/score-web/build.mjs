@@ -31,20 +31,6 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
       align-items: center; justify-content: center;
     }
     .loop-handle svg { pointer-events: none; flex-shrink: 0; }
-    #fingering-overlay {
-      display: none; position: fixed; z-index: 30;
-      flex-direction: row; gap: 6px;
-      background: white; border-radius: 28px;
-      box-shadow: 0 2px 16px rgba(0,0,0,0.22);
-      padding: 8px 12px; align-items: center;
-      touch-action: none;
-    }
-    .fing-btn {
-      width: 44px; height: 44px; border-radius: 22px;
-      background: #f0f0f0; display: flex; align-items: center; justify-content: center;
-      font-size: 20px; font-weight: bold; color: #222;
-      touch-action: none; user-select: none;
-    }
   </style>
 </head><body>
   <div id="cursor-line"></div>
@@ -54,14 +40,6 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
       <div id="loop-handle-a" class="loop-handle"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="32" height="32"><path fill="#4B7A6E" d="M9,3H11V5H9V3M13,3H15V5H13V3M9,7H11V9H9V7M13,7H15V9H13V7M9,11H11V13H9V11M13,11H15V13H13V11M9,15H11V17H9V15M13,15H15V17H13V15M9,19H11V21H9V19M13,19H15V21H13V19Z"/></svg></div>
       <div id="loop-handle-b" class="loop-handle"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="32" height="32"><path fill="#4B7A6E" d="M9,3H11V5H9V3M13,3H15V5H13V3M9,7H11V9H9V7M13,7H15V9H13V7M9,11H11V13H9V11M13,11H15V13H13V11M9,15H11V17H9V15M13,15H15V17H13V15M9,19H11V21H9V19M13,19H15V21H13V19Z"/></svg></div>
     </div>
-  </div>
-  <div id="fingering-overlay">
-    <div class="fing-btn" data-finger="0">&#x2715;</div>
-    <div class="fing-btn" data-finger="1">1</div>
-    <div class="fing-btn" data-finger="2">2</div>
-    <div class="fing-btn" data-finger="3">3</div>
-    <div class="fing-btn" data-finger="4">4</div>
-    <div class="fing-btn" data-finger="5">5</div>
   </div>
   <script>
     window.onerror = function(msg, _src, line, col) {

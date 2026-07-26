@@ -145,18 +145,6 @@ let loopModified = false;
 // (called from startPlayback/stop, never from the RAF hot path).
 let osmdActualIdx = -1;
 
-// ─── Fingering state ──────────────────────────────────────────────────────────
-
-let fingeringMap: Record<string, number> = {};
-let rawXml = '';
-let pendingNoteKey: string | null = null;
-let longPressTimer: ReturnType<typeof setTimeout> | null = null;
-let longPressDidFire = false;
-let overlayJustOpened = false;
-let fingeringOverlayEl: HTMLElement | null = null;
-let osmdTopOffset = 0;
-let debugDots: HTMLElement[] = [];
-
 // ─── Hand coloring ────────────────────────────────────────────────────────────
 
 function applyHandColors(osmd: OpenSheetMusicDisplay): void {
@@ -417,7 +405,6 @@ function recomputeViewportMetrics(): void {
   const viewportHeight = window.innerHeight;
   const centeredTop = Math.round((viewportHeight - systemHeightPx) / 2);
   osmdEl.style.top = `${centeredTop - systemTopPx}px`;
-  osmdTopOffset = centeredTop - systemTopPx;
 
   const px0 = cursorSteps[0]?.pxLeft ?? 0;
   const pxLast = cursorSteps[cursorSteps.length - 1]?.pxLeft ?? scoreWidth;
@@ -677,444 +664,7 @@ function startMomentum(initialVelocity: number): void {
   momentumFrameId = requestAnimationFrame(step);
 }
 
-// ─── Fingering editing ────────────────────────────────────────────────────────
-
-function gcd(a: number, b: number): number {
-  return b === 0 ? a : gcd(b, a % b);
-}
-
-function reduceFraction(ticks: number, wholeTicks: number): { num: number; den: number } {
-  if (ticks === 0) return { num: 0, den: 1 };
-  const g = gcd(ticks, wholeTicks);
-  return { num: ticks / g, den: wholeTicks / g };
-}
-
-function pitchToHalfTone(step: string, octave: number, alter: number): number {
-  const BASE: Record<string, number> = { C: 0, D: 2, E: 4, F: 5, G: 7, A: 9, B: 11 };
-  return octave * 12 + (BASE[step] ?? 0) + Math.round(alter);
-}
-
-// Extract all <fingering> elements from MusicXML into the same key format used by noteAtPoint.
-// Used on first load (before any SQLite entry exists) so imported fingerings are tracked.
-function extractFingeringsFromXml(xml: string): Record<string, number> {
-  const map: Record<string, number> = {};
-  const doc = new DOMParser().parseFromString(xml, 'text/xml');
-  const parts = Array.from(doc.querySelectorAll('part'));
-  const partRanges: { el: Element; startIdx: number; numStaves: number }[] = [];
-  let staffCursor = 0;
-  for (const partEl of parts) {
-    const stavesEl = partEl.querySelector('attributes staves');
-    const numStaves = stavesEl ? parseInt(stavesEl.textContent ?? '1', 10) : 1;
-    partRanges.push({ el: partEl, startIdx: staffCursor, numStaves });
-    staffCursor += numStaves;
-  }
-  for (const { el: partEl, startIdx, numStaves } of partRanges) {
-    for (const measureEl of Array.from(partEl.querySelectorAll('measure'))) {
-      const measureNumber = parseInt(measureEl.getAttribute('number') ?? '0', 10);
-      if (!measureNumber) continue;
-      let divisions = 1;
-      for (const divEl of Array.from(partEl.querySelectorAll('measure attributes divisions'))) {
-        const mEl = divEl.closest('measure');
-        const mNum = mEl ? parseInt(mEl.getAttribute('number') ?? '0', 10) : 0;
-        if (mNum <= measureNumber) divisions = parseInt(divEl.textContent ?? '1', 10);
-      }
-      const wholeTicks = 4 * divisions;
-      let cumPos = 0;
-      let currentBeatPos = 0;
-      for (const child of Array.from(measureEl.children)) {
-        const tag = child.tagName.toLowerCase();
-        // <backup> rewinds the time cursor (used between treble and bass voices)
-        if (tag === 'backup') {
-          const durEl = child.querySelector('duration');
-          if (durEl) cumPos -= parseInt(durEl.textContent ?? '0', 10);
-          continue;
-        }
-        if (tag === 'forward') {
-          const durEl = child.querySelector('duration');
-          if (durEl) cumPos += parseInt(durEl.textContent ?? '0', 10);
-          continue;
-        }
-        if (tag !== 'note') continue;
-        const noteEl = child;
-        const isChord = !!noteEl.querySelector('chord');
-        if (!isChord) currentBeatPos = cumPos;
-        const fingerEl = noteEl.querySelector('notations > technical > fingering');
-        if (fingerEl) {
-          const finger = parseInt(fingerEl.textContent?.trim() ?? '0', 10);
-          if (finger >= 1 && finger <= 5) {
-            const stepEl = noteEl.querySelector('pitch > step');
-            const octaveEl = noteEl.querySelector('pitch > octave');
-            const alterEl = noteEl.querySelector('pitch > alter');
-            if (stepEl && octaveEl) {
-              const halfTone = pitchToHalfTone(
-                stepEl.textContent?.trim() ?? 'C',
-                parseInt(octaveEl.textContent ?? '0', 10),
-                alterEl ? parseFloat(alterEl.textContent ?? '0') : 0,
-              );
-              let localStaff = 1;
-              if (numStaves > 1) {
-                const staffEl = noteEl.querySelector('staff');
-                localStaff = staffEl ? parseInt(staffEl.textContent ?? '1', 10) : 1;
-              }
-              const globalStaffIdx = startIdx + localStaff - 1;
-              const { num, den } = reduceFraction(currentBeatPos, wholeTicks);
-              map[`${measureNumber}:${globalStaffIdx}:${halfTone}:${num}/${den}`] = finger;
-            }
-          }
-        }
-        if (!isChord) {
-          const durEl = noteEl.querySelector('duration');
-          if (durEl) cumPos += parseInt(durEl.textContent ?? '0', 10);
-        }
-      }
-    }
-  }
-  return map;
-}
-
-// If a SQLite-stored map exists, use it (it's canonical — covers imported + user edits).
-// Otherwise extract fingerings from the raw XML so imported fingerings appear in the overlay
-// and are subject to the same strip-then-apply logic as user-added ones.
-export function setFingeringData(xml: string, storedMap: Record<string, number>): Record<string, number> {
-  rawXml = xml;
-  fingeringMap = Object.keys(storedMap).length > 0
-    ? { ...storedMap }
-    : extractFingeringsFromXml(xml);
-  return fingeringMap;
-}
-
-function isNoteGreyed(staffIdx: number): boolean {
-  return (activeHand === 'right' && staffIdx === 1) || (activeHand === 'left' && staffIdx === 0);
-}
-
-function noteAtPoint(
-  touchX: number,
-  touchY: number,
-): { key: string; staffIdx: number } | null {
-  if (!osmdRef) return null;
-  // unitInPixels=10 is the module-level constant in OSMD's SVG backend.
-  // EngravingRules.SamplingUnit is 3*unit=3, used only for sky-bottom line
-  // rasterisation — NOT for screen coordinate conversion.
-  const UIP = 10;
-
-  let bestKey: string | null = null;
-  let bestStaffIdx = 0;
-  let bestDist = Infinity;
-
-  for (const [mIdx, measureRow] of osmdRef.GraphicSheet.MeasureList.entries()) {
-    for (const [sIdx, measure] of measureRow.entries()) {
-      if (!measure) continue;
-      const measureNumber: number =
-        (measure as unknown as { MeasureNumber?: number }).MeasureNumber ?? mIdx + 1;
-      for (const staffEntry of measure.staffEntries) {
-        for (const voiceEntry of staffEntry.graphicalVoiceEntries) {
-          for (const note of voiceEntry.notes) {
-            const src = note.sourceNote;
-            if (!src || src.isRest() || src.IsGraceNote) continue;
-            const pos = note.PositionAndShape.AbsolutePosition;
-            const screenX = pos.x * UIP + scrollOffsetPx;
-            const screenY = pos.y * UIP + osmdTopOffset;
-            const dist = Math.hypot(touchX - screenX, touchY - screenY);
-            if (dist < bestDist) {
-              bestDist = dist;
-              bestStaffIdx = sIdx;
-              const halfTone = src.halfTone;
-              // Include beat position so repeated pitches in the same measure get distinct keys.
-              // VoiceEntry.Timestamp is a Fraction (Numerator/Denominator) of a whole note
-              // from the start of the measure.
-              const ve = src.ParentVoiceEntry as unknown as {
-                Timestamp: { Numerator: number; Denominator: number };
-              };
-              const ts = ve.Timestamp;
-              bestKey = `${measureNumber}:${sIdx}:${halfTone}:${ts.Numerator}/${ts.Denominator}`;
-            }
-          }
-        }
-      }
-    }
-  }
-
-  return bestDist < 80 && bestKey !== null ? { key: bestKey, staffIdx: bestStaffIdx } : null;
-}
-
-function showFingeringSelector(noteKey: string, screenX: number, screenY: number): void {
-  if (!fingeringOverlayEl) return;
-  pendingNoteKey = noteKey;
-
-  // Highlight the currently-assigned finger (or ✕ if none).
-  const currentFinger = fingeringMap[noteKey];
-  for (const btn of Array.from(fingeringOverlayEl.querySelectorAll('.fing-btn'))) {
-    const btnFinger = parseInt((btn as HTMLElement).dataset['finger'] ?? '-1', 10);
-    const selected = currentFinger !== undefined ? btnFinger === currentFinger : btnFinger === 0;
-    (btn as HTMLElement).style.background = selected ? '#b0b0b0' : '#f0f0f0';
-  }
-
-  overlayJustOpened = true;
-  fingeringOverlayEl.style.display = 'flex';
-  // Position: center the overlay horizontally on the tap, above it
-  const overlayW = fingeringOverlayEl.offsetWidth || 320;
-  const overlayH = fingeringOverlayEl.offsetHeight || 60;
-  const vw = window.innerWidth;
-  const vh = window.innerHeight;
-  let left = screenX - overlayW / 2;
-  let top = screenY - overlayH - 12;
-  left = Math.max(8, Math.min(left, vw - overlayW - 8));
-  top = Math.max(8, Math.min(top, vh - overlayH - 8));
-  fingeringOverlayEl.style.left = `${left}px`;
-  fingeringOverlayEl.style.top = `${top}px`;
-}
-
-function hideFingeringSelector(): void {
-  if (!fingeringOverlayEl) return;
-  fingeringOverlayEl.style.display = 'none';
-  pendingNoteKey = null;
-}
-
-export function buildFingeringXml(baseXml: string, map: Record<string, number>): string {
-  const doc = new DOMParser().parseFromString(baseXml, 'text/xml');
-
-  // OSMD halfTone 0 = C0, 12 = C1 … 48 = C4.  MusicXML <octave> equals floor(ht/12).
-  function halfToneToPitch(ht: number): { step: string; octave: number; alter: number } {
-    const STEPS =  ['C', 'C', 'D', 'D', 'E', 'F', 'F', 'G', 'G', 'A', 'A', 'B'];
-    const ALTERS = [  0,   1,   0,   1,   0,   0,   1,   0,   1,   0,   1,   0];
-    const mod = ((ht % 12) + 12) % 12;
-    return { step: STEPS[mod]!, octave: Math.floor(ht / 12), alter: ALTERS[mod]! };
-  }
-
-  // Build a part→staff-range map so we can convert OSMD's global 0-based staffIdx
-  // to the per-part 1-based <staff> value used in MusicXML.
-  // Some scores use one <part> per instrument staff (2-part piano); others put both
-  // piano staves in one <part> (1-part piano with staves=2). We handle both.
-  const parts = Array.from(doc.querySelectorAll('part'));
-  const partRanges: { el: Element; startIdx: number; numStaves: number }[] = [];
-  let staffCursor = 0;
-  for (const partEl of parts) {
-    const stavesEl = partEl.querySelector('attributes staves');
-    const numStaves = stavesEl ? parseInt(stavesEl.textContent ?? '1', 10) : 1;
-    partRanges.push({ el: partEl, startIdx: staffCursor, numStaves });
-    staffCursor += numStaves;
-  }
-
-  function applyFingeringToNote(noteEl: Element, finger: number): void {
-    let notationsEl = noteEl.querySelector('notations');
-    if (!notationsEl) {
-      notationsEl = doc.createElement('notations');
-      noteEl.appendChild(notationsEl);
-    }
-    let technicalEl = notationsEl.querySelector('technical');
-    if (!technicalEl) {
-      technicalEl = doc.createElement('technical');
-      notationsEl.appendChild(technicalEl);
-    }
-    const fingerEl = doc.createElement('fingering');
-    fingerEl.textContent = String(finger);
-    technicalEl.appendChild(fingerEl);
-  }
-
-  // Strip all existing fingerings — fingeringMap is the sole source of truth.
-  // This ensures "remove" (✕) actually removes imported fingerings, not just user-added ones.
-  for (const el of Array.from(doc.querySelectorAll('fingering'))) {
-    el.parentElement?.removeChild(el);
-  }
-
-  for (const [key, finger] of Object.entries(map)) {
-    const [measureStr, staffStr, halfToneStr, timestampStr] = key.split(':');
-    const measureNumber = parseInt(measureStr!, 10);
-    const globalStaffIdx = parseInt(staffStr!, 10); // OSMD 0-based global index
-    const halfTone = parseInt(halfToneStr!, 10);
-    const { step, octave, alter } = halfToneToPitch(halfTone);
-
-    // Find which part owns this global staff index and what the local staff number is.
-    const partInfo = partRanges.find(
-      (p) => globalStaffIdx >= p.startIdx && globalStaffIdx < p.startIdx + p.numStaves,
-    );
-    if (!partInfo) continue;
-    const localStaff = globalStaffIdx - partInfo.startIdx + 1; // 1-based within the part
-
-    const measureEl = partInfo.el.querySelector(`measure[number="${measureNumber}"]`);
-    if (!measureEl) continue;
-
-    // Resolve <divisions> (ticks per quarter note) at the time of this measure.
-    // It can change mid-piece; take the last value at or before measureNumber.
-    let divisions = 1;
-    for (const divEl of Array.from(partInfo.el.querySelectorAll('measure attributes divisions'))) {
-      const mEl = divEl.closest('measure');
-      const mNum = mEl ? parseInt(mEl.getAttribute('number') ?? '0', 10) : 0;
-      if (mNum <= measureNumber) divisions = parseInt(divEl.textContent ?? '1', 10);
-    }
-
-    // Convert OSMD VoiceEntry.Timestamp (fraction of a whole note) to MusicXML ticks.
-    // Timestamp N/D means N/D whole notes into the measure; 1 whole note = 4*divisions ticks.
-    let targetTicks: number | null = null;
-    if (timestampStr) {
-      const slashIdx = timestampStr.indexOf('/');
-      const tsNum = parseInt(timestampStr.slice(0, slashIdx), 10);
-      const tsDen = parseInt(timestampStr.slice(slashIdx + 1), 10);
-      targetTicks = Math.round((tsNum / tsDen) * 4 * divisions);
-    }
-
-    // Iterate measure children in order, tracking cumulative tick position.
-    // <backup> rewinds cumPos (between treble and bass voices); <forward> advances it.
-    // Chord notes share the position of the preceding non-chord note.
-    let cumPos = 0;
-    let currentBeatPos = 0;
-    let applied = false;
-    for (const child of Array.from(measureEl.children)) {
-      if (applied) break;
-      const tag = child.tagName.toLowerCase();
-      if (tag === 'backup') {
-        const durEl = child.querySelector('duration');
-        if (durEl) cumPos -= parseInt(durEl.textContent ?? '0', 10);
-        continue;
-      }
-      if (tag === 'forward') {
-        const durEl = child.querySelector('duration');
-        if (durEl) cumPos += parseInt(durEl.textContent ?? '0', 10);
-        continue;
-      }
-      if (tag !== 'note') continue;
-      const noteEl = child;
-      const isChord = !!noteEl.querySelector('chord');
-      if (!isChord) currentBeatPos = cumPos;
-      const notePos = currentBeatPos;
-
-      const isTiedContinuation =
-        !!noteEl.querySelector('tie[type="stop"]') && !noteEl.querySelector('tie[type="start"]');
-
-      if (!isTiedContinuation && (targetTicks === null || notePos === targetTicks)) {
-        const stepEl = noteEl.querySelector('pitch > step');
-        const octaveEl = noteEl.querySelector('pitch > octave');
-        const alterEl = noteEl.querySelector('pitch > alter');
-        if (stepEl && octaveEl && stepEl.textContent?.trim() === step &&
-            parseInt(octaveEl.textContent ?? '0', 10) === octave) {
-          const noteAlter = alterEl ? parseFloat(alterEl.textContent ?? '0') : 0;
-          if (noteAlter === alter) {
-            // In multi-staff parts, verify the local staff number matches.
-            let staffOk = true;
-            if (partInfo.numStaves > 1) {
-              const staffEl = noteEl.querySelector('staff');
-              staffOk = (staffEl ? parseInt(staffEl.textContent ?? '1', 10) : 1) === localStaff;
-            }
-            if (staffOk) {
-              applyFingeringToNote(noteEl, finger);
-              applied = true;
-            }
-          }
-        }
-      }
-
-      if (!isChord) {
-        const durEl = noteEl.querySelector('duration');
-        if (durEl) cumPos += parseInt(durEl.textContent ?? '0', 10);
-      }
-    }
-  }
-
-  return new XMLSerializer().serializeToString(doc);
-}
-
-async function applyFingering(noteKey: string, finger: number | null): Promise<void> {
-  if (!osmdRef || !sampler) return;
-
-  const savedTicks = Tone.Transport.ticks;
-  const savedStep = currentCursorStep;
-  const savedScroll = scrollOffsetPx;
-
-  if (finger !== null) {
-    fingeringMap[noteKey] = finger;
-  } else {
-    delete fingeringMap[noteKey];
-  }
-
-  const newXml = buildFingeringXml(rawXml, fingeringMap);
-
-  await osmdRef.load(newXml);
-  osmdRef.render();
-
-  const svgEl = osmdEl?.querySelector('svg');
-  if (osmdEl) osmdEl.style.width = `${svgEl?.scrollWidth ?? osmdEl.scrollWidth}px`;
-
-  // Rebuild timelines + replace Part (mirrors setActiveHand pattern)
-  const { noteEvents } = buildTimelines(osmdRef);
-  part?.dispose();
-  const samplerRef = sampler;
-  part = new Tone.Part<NoteEvent>(
-    (time, event) => {
-      try {
-        const noteName = Tone.Frequency(event.midi, 'midi').toNote();
-        const durSec = Math.max(0.05, (event.durQ * 60) / Tone.Transport.bpm.value);
-        samplerRef.triggerAttackRelease(noteName, durSec, time);
-      } catch {
-        // ignore individual-note scheduling failures
-      }
-    },
-    noteEvents,
-  );
-  part.start(0);
-
-  applyHandColors(osmdRef);
-
-  const step = Math.max(0, Math.min(savedStep < 0 ? 0 : savedStep, cursorSteps.length - 1));
-  Tone.Transport.ticks = savedTicks;
-  advanceCursorTo(step);
-  currentCursorStep = step;
-  applyTranslate(savedScroll !== 0 ? savedScroll : scrollMaxPx);
-
-  postToNative({ type: 'FINGERING_CHANGED', payload: { ...fingeringMap } });
-}
-
-export function debugFingeringAreas(show: boolean): void {
-  for (const dot of debugDots) dot.remove();
-  debugDots = [];
-  if (!show || !osmdRef) return;
-  const UIP = 10;
-  let count = 0;
-  for (const [, measureRow] of osmdRef.GraphicSheet.MeasureList.entries()) {
-    for (const [sIdx, measure] of measureRow.entries()) {
-      if (!measure) continue;
-      for (const staffEntry of measure.staffEntries) {
-        for (const voiceEntry of staffEntry.graphicalVoiceEntries) {
-          for (const note of voiceEntry.notes) {
-            const src = note.sourceNote;
-            if (!src || src.isRest() || src.IsGraceNote) continue;
-            const pos = note.PositionAndShape.AbsolutePosition;
-            const sx = pos.x * UIP + scrollOffsetPx;
-            const sy = pos.y * UIP + osmdTopOffset;
-            const greyed = isNoteGreyed(sIdx);
-            const dot = document.createElement('div');
-            dot.style.cssText =
-              `position:fixed;z-index:200;width:18px;height:18px;border-radius:9px;` +
-              `pointer-events:none;transform:translate(-50%,-50%);` +
-              `background:${greyed ? 'rgba(0,0,255,0.55)' : 'rgba(255,0,0,0.55)'};` +
-              `left:${sx}px;top:${sy}px;`;
-            document.body.appendChild(dot);
-            debugDots.push(dot);
-            count++;
-          }
-        }
-      }
-    }
-  }
-  postToNative({ type: 'DEBUG', payload: `debug: ${count} hit areas drawn (red=active, blue=greyed)` });
-}
-
-function initFingeringOverlay(): void {
-  fingeringOverlayEl = document.getElementById('fingering-overlay');
-  if (!fingeringOverlayEl) return;
-  fingeringOverlayEl.addEventListener(
-    'touchstart',
-    (e) => {
-      e.stopPropagation();
-      const btn = (e.target as Element).closest('[data-finger]') as HTMLElement | null;
-      if (!btn || !pendingNoteKey) return;
-      const finger = parseInt(btn.dataset['finger'] ?? '0', 10);
-      const noteKey = pendingNoteKey;
-      hideFingeringSelector();
-      void applyFingering(noteKey, finger === 0 ? null : finger);
-    },
-    { passive: true },
-  );
-}
+// ─── Touch handling ───────────────────────────────────────────────────────────
 
 function initTouchHandlers(): void {
   if (touchHandlersAttached) return;
@@ -1143,41 +693,21 @@ function initTouchHandlers(): void {
     wasPlayingOnTouch = Tone.Transport.state === 'started';
     hasMoved = false;
     const clientX = e.touches[0]?.clientX ?? 0;
-    const clientY = e.touches[0]?.clientY ?? 0;
     startX = clientX;
     startOffset = scrollOffsetPx;
     velocityPx = 0;
     lastMoveTime = 0;
     lastMoveX = clientX;
-    // Long-press for fingering — only when paused and overlay is not already showing
-    longPressDidFire = false;
-    overlayJustOpened = false;
-    if (Tone.Transport.state !== 'started' && fingeringOverlayEl?.style.display === 'none') {
-      const lpX = clientX;
-      const lpY = clientY;
-      longPressTimer = setTimeout(() => {
-        longPressTimer = null;
-        longPressDidFire = true; // fired regardless of whether a note was found
-        if (hasMoved) return;
-        const hit = noteAtPoint(lpX, lpY);
-        if (hit && !isNoteGreyed(hit.staffIdx)) showFingeringSelector(hit.key, lpX, lpY);
-      }, 500);
-    }
     // Don't pause immediately — wait to see if this is a tap or a drag.
   }, { passive: true });
 
   wrapper.addEventListener('touchmove', (e) => {
     if (!dragging) return;
-    if (fingeringOverlayEl?.style.display !== 'none') return;
     const now = performance.now();
     const clientX = e.touches[0]?.clientX ?? 0;
-    // First significant movement: mark as drag and cancel long-press timer.
+    // First significant movement: mark as a drag rather than a tap.
     if (!hasMoved && Math.abs(clientX - startX) > 8) {
       hasMoved = true;
-      if (longPressTimer !== null) {
-        clearTimeout(longPressTimer);
-        longPressTimer = null;
-      }
       if (wasPlayingOnTouch) pausePlayback();
     }
     if (lastMoveTime > 0 && now > lastMoveTime) {
@@ -1193,24 +723,7 @@ function initTouchHandlers(): void {
   wrapper.addEventListener('touchend', () => {
     if (!dragging) return;
     dragging = false;
-    if (longPressTimer !== null) {
-      clearTimeout(longPressTimer);
-      longPressTimer = null;
-    }
     if (!hasMoved) {
-      // The finger-up that opened the overlay: keep it open, don't dismiss.
-      if (overlayJustOpened) {
-        overlayJustOpened = false;
-        return;
-      }
-      // Dismiss fingering overlay on outside tap before toggling play/pause.
-      if (fingeringOverlayEl && fingeringOverlayEl.style.display !== 'none') {
-        hideFingeringSelector();
-        return;
-      }
-      // If the long-press timer fired (even if no note was found), treat this
-      // as an intentional hold rather than a tap — don't toggle play/pause.
-      if (longPressDidFire) return;
       // Tap: toggle play/pause.
       if (Tone.Transport.state === 'started') {
         pausePlayback();
@@ -1579,7 +1092,6 @@ export function initPlayback(
   initLoopHandles();
   if (metronomeEnabled) startMetronome();
   applyHandColors(osmd);
-  initFingeringOverlay();
 }
 
 export async function startPlayback(): Promise<void> {

@@ -33,10 +33,9 @@ export class ExpoLocalPieceRepository implements PieceRepository {
         xml_filename TEXT NOT NULL,
         imported_at TEXT NOT NULL
       );
-      CREATE TABLE IF NOT EXISTS piece_fingerings (
-        piece_id TEXT PRIMARY KEY,
-        map_json TEXT NOT NULL
-      );
+      -- Forward migration: the user-authored fingering feature was removed; drop its
+      -- table so existing installs don't carry the orphaned data.
+      DROP TABLE IF EXISTS piece_fingerings;
     `);
     // Migrations: additive columns for existing installs. Each ALTER throws if
     // the column already exists — safe to ignore per column.
@@ -149,23 +148,5 @@ export class ExpoLocalPieceRepository implements PieceRepository {
     return FileSystem.readAsStringAsync(this.xmlPath(piece.xmlFilename), {
       encoding: FileSystem.EncodingType.UTF8,
     });
-  }
-
-  async readFingering(pieceId: string): Promise<Record<string, number>> {
-    const db = await this.getDb();
-    const row = await db.getFirstAsync<{ map_json: string }>(
-      'SELECT map_json FROM piece_fingerings WHERE piece_id = ?',
-      pieceId,
-    );
-    return row ? (JSON.parse(row.map_json) as Record<string, number>) : {};
-  }
-
-  async saveFingering(pieceId: string, map: Record<string, number>): Promise<void> {
-    const db = await this.getDb();
-    await db.runAsync(
-      'INSERT OR REPLACE INTO piece_fingerings (piece_id, map_json) VALUES (?, ?)',
-      pieceId,
-      JSON.stringify(map),
-    );
   }
 }

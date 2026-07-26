@@ -16,5 +16,4 @@ export type OutboundMessage =
   | { type: 'SCORE_BPM'; payload: number }
   | { type: 'PLAYBACK_STATE'; payload: 'playing' | 'paused' | 'stopped' }
   | { type: 'PLAYBACK_END' }
-  | { type: 'LOOP_STATE'; payload: boolean }
-  | { type: 'FINGERING_CHANGED'; payload: Record<string, number> };
+  | { type: 'LOOP_STATE'; payload: boolean };

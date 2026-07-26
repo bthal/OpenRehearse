@@ -173,9 +173,9 @@ This places all fingerings above their respective staff line. Bass fingerings ap
 
 **LANDMINE:** In single-`<part>` piano MusicXML, treble notes appear first, then a `<backup>` element rewinds the time cursor, then bass notes follow. `querySelectorAll('note')` skips `<backup>`, so cumulative beat positions for bass notes stack on top of treble positions instead of being measured from the correct beat.
 
-Consequences:
-- Beat keys computed from the XML don't match OSMD's `VoiceEntry.Timestamp` — overlay hit-testing fails for all bass notes.
-- `buildFingeringXml` can't find bass notes at their OSMD-correct positions — fingerings are silently dropped from the output XML.
+Consequence: beat positions computed from the XML don't match OSMD's `VoiceEntry.Timestamp`, so
+any code that maps between XML notes and rendered notes (or that rewrites the XML at a given beat)
+silently misses every bass note.
 
 **Fix:** Iterate `measureEl.children` directly and handle `backup`/`forward` tags:
 ```typescript
