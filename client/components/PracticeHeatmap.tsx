@@ -1,6 +1,6 @@
 import { WeeklyHeatMap } from '@symbiot.dev/react-native-heatmap';
-import { startOfWeek, subDays } from 'date-fns';
-import { useMemo } from 'react';
+import { addDays, startOfDay, startOfWeek, subDays } from 'date-fns';
+import { useEffect, useMemo, useState } from 'react';
 import { Text, useWindowDimensions, View } from 'react-native';
 import { useTranslation } from 'react-i18next';
 
@@ -46,21 +46,44 @@ const cellColor: Record<number, string> = Object.fromEntries(
   LEVEL_MINUTES.map((minutes, i) => [minutes, HeatmapColors.ramp[i] ?? HeatmapColors.empty]),
 );
 
+/**
+ * Today's local day key, re-read at each local midnight.
+ *
+ * The dashboard is the root route and stays mounted, so a window pinned to the
+ * day of first render would leave practice recorded after midnight with no cell
+ * to land in — silently undoing the tracker's midnight split.
+ */
+function useTodayKey(): string {
+  const [todayKey, setTodayKey] = useState(() => practiceDayKey(Date.now()));
+
+  useEffect(() => {
+    const now = Date.now();
+    // A second past midnight, so a slightly early timer still reads the new day.
+    const untilTomorrow = addDays(startOfDay(now), 1).getTime() - now + 1000;
+    const timer = setTimeout(() => setTodayKey(practiceDayKey(Date.now())), untilTomorrow);
+    return () => clearTimeout(timer);
+  }, [todayKey]);
+
+  return todayKey;
+}
+
 export function PracticeHeatmap() {
   const { t } = useTranslation();
   const { width } = useWindowDimensions();
   const dailySeconds = usePracticeStore((s) => s.dailySeconds);
 
   const weeks = weeksThatFit(Math.min(width, MAX_CONTENT_WIDTH) - CONTENT_PADDING);
+  const todayKey = useTodayKey();
 
   const { startDate, endDate } = useMemo(() => {
-    const today = new Date();
+    // Explicit local midnight — a bare `YYYY-MM-DD` would parse as UTC.
+    const today = new Date(`${todayKey}T00:00:00`);
     const firstDay = subDays(today, (weeks - 1) * 7);
     return {
       startDate: startOfWeek(firstDay, { weekStartsOn: WEEK_STARTS_ON }),
       endDate: today,
     };
-  }, [weeks]);
+  }, [weeks, todayKey]);
 
   // Cell counts are whole minutes: minutes read naturally in the legend and keep
   // the level thresholds meaningful. Keys carry an explicit local midnight —
@@ -97,7 +120,7 @@ export function PracticeHeatmap() {
           scheme: 'light',
           cellDefaultColor: HeatmapColors.empty,
           cellColor,
-          headerTextColor: '#9c9aab',
+          headerTextColor: HeatmapColors.headerText,
         }}
         headerTextFontSize={10}
       />

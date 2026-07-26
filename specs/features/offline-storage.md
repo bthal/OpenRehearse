@@ -21,8 +21,10 @@
 
 - Abstract behind `LocalPieceRepository` (save, list, get, delete) so future cloud sync can add a `RemotePieceRepository` without rewriting screens.
 - Consider **SQLite** or **file-system JSON index** for metadata; binary XML as files on disk.
-- One SQLite file for everything relational (`src/data/db.ts` owns the name); each repository
-  creates its own tables with `CREATE TABLE IF NOT EXISTS` on first use.
+- One SQLite file for everything relational, opened through **one shared connection**
+  (`src/data/db.ts` owns both the name and the handle) so overlapping writes queue instead of
+  competing for the write lock; each repository creates its own tables with
+  `CREATE TABLE IF NOT EXISTS` on first use.
 
 ## Acceptance criteria
 

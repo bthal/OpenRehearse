@@ -22,8 +22,61 @@ per-source timers.
 normal stop and banks the partial time. No screen needs tracking code of its own — keep it that
 way.
 
-Time is also banked on a 60s tick and when the app leaves the foreground, so a session that
-crosses local midnight is split across both days and an app kill mid-play loses at most a minute.
+Time is also banked on a 60s tick, so a session that crosses local midnight is split across both
+days and an app kill mid-play loses at most a minute.
+
+## Leaving the foreground is a **stop**, not a flush
+
+**LANDMINE:** the play surfaces do not stop playback when the app is backgrounded, and neither
+store sets `isPlaying: false`. Merely flushing on the AppState change would leave the segment open,
+so locking the phone for three hours and then tapping stop banks three hours of phantom practice —
+and the 60s tick banks it minute by minute in the meantime.
+
+**Fix:** `PracticeClock.suspend(nowMs)` / `resume(nowMs)`, driven from the AppState listener in
+`startPracticeTracking()`:
+
+- any non-`active` status → `suspend()`: banks the open segment and closes it, so nothing accrues
+  while backgrounded and being killed there loses nothing;
+- back to `active` → `resume()`: opens a **fresh** segment from that moment, and only if a source is
+  still playing.
+
+`suspend()` keeps the set of playing sources, so the union semantics survive a background span: a
+store that stops while suspended is dropped from the set (and cannot restart the clock), while the
+other one still resumes. `flush()` is a no-op while suspended — a suspended clock must have no open
+segment.
+
+## The focus-effect reload must **merge**, not replace
+
+**LANDMINE:** the dashboard re-reads history on focus, which races the write from the session the
+user just finished — `recordPractice()` updates memory first and its `INSERT` may still be in
+flight when the `SELECT` runs, so the query returns pre-session rows.
+
+**Fix:** `loadPracticeHistory()` folds the snapshot in with `mergePracticeTotals()`, keeping the
+larger value per day. Day totals only ever grow, so the larger value is always the fresher one.
+Do not go back to `set({ dailySeconds: queried })` — it makes the session that just ended vanish
+from the heatmap.
+
+## One shared SQLite connection — do not `BEGIN` on it
+
+`src/data/db.ts` hands out a single connection (`getAppDatabase()`) for every repository, with WAL
+and a busy timeout; separate connections on the same file fail with `SQLITE_BUSY` when a practice
+flush overlaps a piece write.
+
+**LANDMINE:** that makes an explicit transaction dangerous. `withTransactionAsync()` issues a bare
+`BEGIN` on the shared handle, so it also captures — and on failure rolls back — whatever unrelated
+write happens to be in flight, and `withExclusiveTransactionAsync()` opens a *second* connection,
+which is the problem it is meant to avoid. `addPracticeSeconds()` therefore uses one multi-row
+upsert per call and lets SQLite provide the implicit transaction.
+
+## Heatmap window: recompute "today" or a mounted dashboard freezes it
+
+**LANDMINE:** the dashboard is the root route and stays mounted. Memoising `startDate`/`endDate` on
+the grid width alone freezes the window at the day it was first rendered, so practice after
+midnight has no cell to land in and silently disappears — undoing the midnight split above.
+
+**Fix:** the `useTodayKey()` hook holds today's key in state and re-arms a timer at each local
+midnight; the window memo takes it as a dep. Reading `Date.now()` straight from the render body is
+not an option — `react-hooks/purity` rejects it.
 
 ## Heatmap date keys: a bare `YYYY-MM-DD` string is parsed as **UTC**
 

@@ -2,7 +2,7 @@ import * as FileSystem from 'expo-file-system/legacy';
 import * as SQLite from 'expo-sqlite';
 
 import type { Piece } from '@domain/piece';
-import { DB_NAME } from './db';
+import { getAppDatabase } from './db';
 import type { PieceRepository } from './PieceRepository';
 
 const XML_DIR = (FileSystem.documentDirectory ?? '') + 'pieces/';
@@ -24,7 +24,7 @@ export class ExpoLocalPieceRepository implements PieceRepository {
   /** Opens DB and runs migrations on first call; cached thereafter. */
   private async getDb(): Promise<SQLite.SQLiteDatabase> {
     if (this.db) return this.db;
-    const db = await SQLite.openDatabaseAsync(DB_NAME);
+    const db = await getAppDatabase();
     await db.execAsync(`
       CREATE TABLE IF NOT EXISTS pieces (
         id TEXT PRIMARY KEY,

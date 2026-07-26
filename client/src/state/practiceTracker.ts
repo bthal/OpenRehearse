@@ -60,8 +60,15 @@ export function startPracticeTracking(): () => void {
   const appStateSub: NativeEventSubscription = AppState.addEventListener(
     'change',
     (status: AppStateStatus) => {
-      // Leaving the foreground is the last reliable moment to persist.
-      if (status !== 'active') bank(clock.flush(Date.now()));
+      // Out of the foreground is not practice, however the stores are left: the
+      // clock stops there and only restarts when the app comes back with a
+      // source still playing. Suspending also banks what the session earned, so
+      // being killed while backgrounded loses nothing.
+      if (status === 'active') {
+        clock.resume(Date.now());
+      } else {
+        bank(clock.suspend(Date.now()));
+      }
     },
   );
   subscriptions.push(() => appStateSub.remove());

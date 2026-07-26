@@ -14,10 +14,12 @@ export const Colors = {
  * cell for days with no practice, tinted to sit on the ash-grey-50 background.
  *
  * Kept on the seagrass hue so the grid reads as part of the app's palette
- * rather than a library default.
+ * rather than a library default. `headerText` matches the muted captions used
+ * elsewhere on the dashboard so the month labels sit in the same palette.
  */
 export const HeatmapColors = {
   empty: 'hsl(144 9.8% 90%)', // ash-grey-100
+  headerText: 'hsl(141 9.8% 60%)', // ash-grey-400
   ramp: [
     'hsl(169 22% 78%)', // seagrass tint between 50 and 500
     'hsl(168.4 22.4% 50%)', // seagrass-500

@@ -1,5 +1,6 @@
 import {
   applyPracticeDeltas,
+  mergePracticeTotals,
   PracticeClock,
   practiceDayKey,
   splitIntervalByDay,
@@ -158,6 +159,90 @@ describe('PracticeClock', () => {
       { day: '2026-05-04', seconds: 60 },
     ]);
   });
+
+  describe('suspend/resume', () => {
+    it('banks the open segment and counts nothing until it resumes', () => {
+      const clock = new PracticeClock();
+      const t0 = at(2026, 5, 4, 10);
+
+      clock.setPlaying('score', true, t0);
+      expect(clock.suspend(t0 + 60 * SECOND)).toEqual([{ day: '2026-05-04', seconds: 60 }]);
+      expect(clock.isRunning).toBe(false);
+
+      // Three hours out of the foreground, flush ticks included: not practice.
+      expect(clock.flush(t0 + 60 * MINUTE)).toEqual([]);
+      expect(clock.flush(t0 + 180 * MINUTE)).toEqual([]);
+      expect(clock.isRunning).toBe(false);
+    });
+
+    it('resumes a still-playing source from the moment of return', () => {
+      const clock = new PracticeClock();
+      const t0 = at(2026, 5, 4, 10);
+      const back = t0 + 180 * MINUTE;
+
+      clock.setPlaying('score', true, t0);
+      clock.suspend(t0 + 60 * SECOND);
+      clock.resume(back);
+
+      expect(clock.isRunning).toBe(true);
+      expect(clock.setPlaying('score', false, back + 30 * SECOND)).toEqual([
+        { day: '2026-05-04', seconds: 30 },
+      ]);
+    });
+
+    it('does not restart for a source that stopped while suspended', () => {
+      const clock = new PracticeClock();
+      const t0 = at(2026, 5, 4, 10);
+
+      clock.setPlaying('score', true, t0);
+      clock.suspend(t0 + 60 * SECOND);
+      // The screen unmounted in the background: a stop with no time to bank.
+      expect(clock.setPlaying('score', false, t0 + 90 * SECOND)).toEqual([]);
+
+      clock.resume(t0 + 30 * MINUTE);
+      expect(clock.isRunning).toBe(false);
+      expect(clock.flush(t0 + 60 * MINUTE)).toEqual([]);
+    });
+
+    it('keeps the union intact when only one of two sources stops while suspended', () => {
+      const clock = new PracticeClock();
+      const t0 = at(2026, 5, 4, 10);
+      const back = t0 + 30 * MINUTE;
+
+      clock.setPlaying('score', true, t0);
+      clock.setPlaying('warmup', true, t0);
+      clock.suspend(t0 + 60 * SECOND);
+      expect(clock.setPlaying('warmup', false, t0 + 90 * SECOND)).toEqual([]);
+
+      clock.resume(back);
+      expect(clock.isRunning).toBe(true);
+      expect(clock.setPlaying('score', false, back + 15 * SECOND)).toEqual([
+        { day: '2026-05-04', seconds: 15 },
+      ]);
+    });
+
+    it('stays stopped when it resumes with nothing playing', () => {
+      const clock = new PracticeClock();
+      expect(clock.suspend(at(2026, 5, 4, 10))).toEqual([]);
+      clock.resume(at(2026, 5, 4, 10, 5));
+      expect(clock.isRunning).toBe(false);
+    });
+
+    it('ignores a repeated suspend and a resume that was never suspended', () => {
+      const clock = new PracticeClock();
+      const t0 = at(2026, 5, 4, 10);
+
+      clock.setPlaying('score', true, t0);
+      expect(clock.suspend(t0 + 60 * SECOND)).toEqual([{ day: '2026-05-04', seconds: 60 }]);
+      expect(clock.suspend(t0 + 120 * SECOND)).toEqual([]);
+
+      clock.resume(t0 + 120 * SECOND);
+      clock.resume(t0 + 180 * SECOND); // no-op: already running
+      expect(clock.setPlaying('score', false, t0 + 240 * SECOND)).toEqual([
+        { day: '2026-05-04', seconds: 120 },
+      ]);
+    });
+  });
 });
 
 describe('applyPracticeDeltas', () => {
@@ -174,5 +259,32 @@ describe('applyPracticeDeltas', () => {
   it('returns a copy when there is nothing to add', () => {
     const totals = { '2026-05-04': 120 };
     expect(applyPracticeDeltas(totals, [])).toEqual(totals);
+  });
+});
+
+describe('mergePracticeTotals', () => {
+  it('keeps the larger total per day and the union of days', () => {
+    const queried = { '2026-05-03': 600, '2026-05-04': 120 };
+    const inMemory = { '2026-05-04': 420, '2026-05-05': 60 };
+
+    expect(mergePracticeTotals(queried, inMemory)).toEqual({
+      '2026-05-03': 600, // only the query knows about it
+      '2026-05-04': 420, // memory is ahead of the rows the query read
+      '2026-05-05': 60, // banked after the query ran
+    });
+  });
+
+  it('does not mutate either input', () => {
+    const queried = { '2026-05-04': 120 };
+    const inMemory = { '2026-05-04': 420 };
+
+    mergePracticeTotals(queried, inMemory);
+
+    expect(queried).toEqual({ '2026-05-04': 120 });
+    expect(inMemory).toEqual({ '2026-05-04': 420 });
+  });
+
+  it('returns the queried snapshot when memory is empty', () => {
+    expect(mergePracticeTotals({ '2026-05-04': 120 }, {})).toEqual({ '2026-05-04': 120 });
   });
 });

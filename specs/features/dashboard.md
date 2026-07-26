@@ -44,6 +44,9 @@ Home surface listing the user's **pieces** and entry points to **import** and **
   elapsed playing time, not the sum of two timers.
 - Totals are aggregated per **local calendar day** and persisted on-device (SQLite), so a session
   that runs past midnight is split across both days.
+- Time spent **out of the foreground** is never practice: backgrounding the app banks what the
+  session has earned and stops the clock, which restarts only on return and only if playback is
+  still running.
 - The heatmap grades a day by **minutes played**, and the dashboard re-reads history on focus so
   time practised in the play view shows up on return.
 
@@ -69,3 +72,4 @@ Home surface listing the user's **pieces** and entry points to **import** and **
 - [x] Play view, routines, and warm-ups all accumulate into the same daily total; pausing stops the
       clock; navigating away mid-play keeps the partial time; concurrent stores do not double-count.
 - [x] Daily practice totals survive an app restart.
+- [x] Backgrounding the app mid-play banks the time so far and counts nothing until it returns.

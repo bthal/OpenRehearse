@@ -75,6 +75,8 @@ export class PracticeClock {
   private readonly playing = new Set<PracticeSource>();
   /** Start of the currently open segment, or null when nothing is playing. */
   private segmentStartMs: number | null = null;
+  /** True between `suspend()` and `resume()`: no segment may be open. */
+  private isSuspended = false;
 
   /** True while at least one source is playing. */
   get isRunning(): boolean {
@@ -84,11 +86,14 @@ export class PracticeClock {
   /**
    * Record a source's play state. Returns the day deltas that became durable
    * because of this transition (non-empty only when the last source stopped).
+   *
+   * While suspended the source is remembered but no segment opens, so a store
+   * that starts or stops out of the foreground still resolves correctly.
    */
   setPlaying(source: PracticeSource, playing: boolean, nowMs: number): PracticeDelta[] {
     if (playing) {
       this.playing.add(source);
-      if (this.segmentStartMs === null) this.segmentStartMs = nowMs;
+      if (this.segmentStartMs === null && !this.isSuspended) this.segmentStartMs = nowMs;
       return [];
     }
     this.playing.delete(source);
@@ -98,17 +103,41 @@ export class PracticeClock {
 
   /**
    * Bank the time accumulated so far without changing play state. Used on a
-   * periodic tick and when the app is backgrounded, so a session that is never
-   * cleanly stopped (app killed mid-play) still persists what it earned.
+   * periodic tick so a session that is never cleanly stopped (app killed
+   * mid-play) still persists what it earned. A no-op while suspended.
    */
   flush(nowMs: number): PracticeDelta[] {
+    if (this.isSuspended) return [];
     return this.closeSegment(nowMs, this.playing.size > 0);
+  }
+
+  /**
+   * Banks the open segment and stops accumulating, while remembering which
+   * sources are playing. Used when the app leaves the foreground: time spent
+   * out of the foreground is not practice, so it must never be counted.
+   */
+  suspend(nowMs: number): PracticeDelta[] {
+    if (this.isSuspended) return [];
+    const deltas = this.closeSegment(nowMs, false);
+    this.isSuspended = true;
+    return deltas;
+  }
+
+  /**
+   * Resumes accumulating from `nowMs`, opening a fresh segment only if a source
+   * is still playing. Nothing between `suspend()` and here is counted.
+   */
+  resume(nowMs: number): void {
+    if (!this.isSuspended) return;
+    this.isSuspended = false;
+    if (this.playing.size > 0) this.segmentStartMs = nowMs;
   }
 
   /** Drops any open segment without banking it. For tests and teardown. */
   reset(): void {
     this.playing.clear();
     this.segmentStartMs = null;
+    this.isSuspended = false;
   }
 
   private closeSegment(nowMs: number, keepRunning: boolean): PracticeDelta[] {
@@ -135,6 +164,26 @@ export class PracticeClock {
     this.segmentStartMs = keepRunning ? nowMs - remainderMs : null;
     return deltas;
   }
+}
+
+/**
+ * Merges a freshly queried snapshot of day totals with the totals already held
+ * in memory, keeping the larger value per day.
+ *
+ * A day's total only ever grows, so the larger value is always the more recent
+ * one. That makes the merge safe against a session banked in memory while the
+ * query that produced `queried` was still in flight: reading pre-session rows
+ * can no longer drop practice time that is already accounted for.
+ */
+export function mergePracticeTotals(
+  queried: Readonly<Record<string, number>>,
+  inMemory: Readonly<Record<string, number>>,
+): Record<string, number> {
+  const merged: Record<string, number> = { ...queried };
+  for (const [day, seconds] of Object.entries(inMemory)) {
+    merged[day] = Math.max(merged[day] ?? 0, seconds);
+  }
+  return merged;
 }
 
 /** Folds deltas into an existing day→seconds map, returning a new map. */

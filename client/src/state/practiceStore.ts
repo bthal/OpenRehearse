@@ -1,6 +1,11 @@
 import { create } from 'zustand';
 
-import { applyPracticeDeltas, practiceDayKey, type PracticeDelta } from '@domain/practiceTime';
+import {
+  applyPracticeDeltas,
+  mergePracticeTotals,
+  practiceDayKey,
+  type PracticeDelta,
+} from '@domain/practiceTime';
 import { addPracticeSeconds, loadPracticeDailySeconds } from '@data/practiceRepository';
 
 /**
@@ -12,7 +17,6 @@ const HISTORY_WINDOW_DAYS = 400;
 interface PracticeState {
   /** Local day (`YYYY-MM-DD`) → seconds of active playback on that day. */
   dailySeconds: Record<string, number>;
-  isLoading: boolean;
 
   loadPracticeHistory: (sinceDay?: string) => Promise<void>;
   /** Banks elapsed practice time: in memory first, then to SQLite. */
@@ -21,20 +25,19 @@ interface PracticeState {
 
 export const usePracticeStore = create<PracticeState>((set, get) => ({
   dailySeconds: {},
-  isLoading: false,
 
   async loadPracticeHistory(sinceDay?: string) {
-    set({ isLoading: true });
     try {
       const since =
         sinceDay ?? practiceDayKey(Date.now() - HISTORY_WINDOW_DAYS * 24 * 60 * 60 * 1000);
-      const dailySeconds = await loadPracticeDailySeconds(since);
-      set({ dailySeconds });
+      const queried = await loadPracticeDailySeconds(since);
+      // Merged, not replaced: a session banked while this query was in flight is
+      // already in memory but not yet in the rows it read, and overwriting would
+      // make it vanish from the heatmap until the next load.
+      set({ dailySeconds: mergePracticeTotals(queried, get().dailySeconds) });
     } catch (err) {
       // A missing/locked history must never block the dashboard.
       console.warn('[practiceStore] failed to load practice history:', err);
-    } finally {
-      set({ isLoading: false });
     }
   },
 
