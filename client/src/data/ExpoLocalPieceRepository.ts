@@ -2,9 +2,9 @@ import * as FileSystem from 'expo-file-system/legacy';
 import * as SQLite from 'expo-sqlite';
 
 import type { Piece } from '@domain/piece';
+import { DB_NAME } from './db';
 import type { PieceRepository } from './PieceRepository';
 
-const DB_NAME = 'openrehearse.db';
 const XML_DIR = (FileSystem.documentDirectory ?? '') + 'pieces/';
 
 interface PieceRow {

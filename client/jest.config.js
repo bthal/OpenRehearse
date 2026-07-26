@@ -1,7 +1,9 @@
 module.exports = {
   preset: 'jest-expo',
   transformIgnorePatterns: [
-    'node_modules/(?!((jest-)?react-native|@react-native(-community)?)|expo(nent)?|@expo(nent)?/.*|@expo-google-fonts/.*|react-navigation|@react-navigation/.*|nativewind|tailwindcss|fflate|i18next|react-i18next)',
+    // @symbiot.dev/react-native-heatmap ships ESM only (Metro handles it natively,
+    // Jest needs it transformed).
+    'node_modules/(?!((jest-)?react-native|@react-native(-community)?)|expo(nent)?|@expo(nent)?/.*|@expo-google-fonts/.*|react-navigation|@react-navigation/.*|nativewind|tailwindcss|fflate|i18next|react-i18next|@symbiot.dev/.*)',
   ],
   moduleNameMapper: {
     '^@domain/(.*)$': '<rootDir>/src/domain/$1',

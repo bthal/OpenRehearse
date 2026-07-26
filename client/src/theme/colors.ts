@@ -7,3 +7,21 @@ export const Colors = {
   destructive: 'hsl(320.8 12.7% 40%)', // mauve-shadow-600
   error: 'hsl(321.4 13.7% 20%)', // mauve-shadow-800
 } as const;
+
+/**
+ * Intensity ramp for the practice heatmap: a light seagrass tint for a little
+ * practice up to the darkest accent shade for the most. `empty` is the neutral
+ * cell for days with no practice, tinted to sit on the ash-grey-50 background.
+ *
+ * Kept on the seagrass hue so the grid reads as part of the app's palette
+ * rather than a library default.
+ */
+export const HeatmapColors = {
+  empty: 'hsl(144 9.8% 90%)', // ash-grey-100
+  ramp: [
+    'hsl(169 22% 78%)', // seagrass tint between 50 and 500
+    'hsl(168.4 22.4% 50%)', // seagrass-500
+    'hsl(169.1 21.6% 40%)', // seagrass-600 (app accent)
+    'hsl(169.1 21.6% 30%)', // seagrass-700
+  ],
+} as const;

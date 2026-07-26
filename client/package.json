@@ -4,7 +4,9 @@
   "main": "expo-router/entry",
   "dependencies": {
     "@mdi/js": "^7.4.47",
+    "@symbiot.dev/react-native-heatmap": "^1.0.0",
     "babel-preset-expo": "^56.0.14",
+    "date-fns": "^4.4.0",
     "expo": "~56.0.11",
     "expo-constants": "~56.0.18",
     "expo-crypto": "~56.0.4",

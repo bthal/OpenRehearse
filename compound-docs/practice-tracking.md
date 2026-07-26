@@ -1,0 +1,63 @@
+# Practice-time tracking + heatmap landmines
+
+Traps found while wiring practice-time tracking (`src/domain/practiceTime.ts`,
+`src/state/practiceTracker.ts`) and the dashboard heatmap (`components/PracticeHeatmap.tsx`).
+Check here before touching either.
+
+## Two stores drive playback — track both, count wall clock once
+
+**CONSTRAINT:** `isPlaying` lives in **two** stores: `playViewStore` drives *both* the piece play
+view and routines, `warmupStore` drives the warm-up exercises. All three surfaces are practice.
+
+`PracticeClock` therefore measures the **union** of both stores' playing intervals: one open
+segment from "first source started" to "last source stopped". Summing two independent timers
+would double-count wall-clock time if the stores ever play at once. Do not "simplify" this into
+per-source timers.
+
+## No per-screen tracking code — the stores are the seam
+
+**PATTERN:** Every play surface already resets its store on unmount (`reset()` /
+`resetPlayback()`), which sets `isPlaying: false`. A single subscriber on the two stores
+(`startPracticeTracking()`, mounted once in `app/_layout.tsx`) therefore sees navigate-away as a
+normal stop and banks the partial time. No screen needs tracking code of its own — keep it that
+way.
+
+Time is also banked on a 60s tick and when the app leaves the foreground, so a session that
+crosses local midnight is split across both days and an app kill mid-play loses at most a minute.
+
+## Heatmap date keys: a bare `YYYY-MM-DD` string is parsed as **UTC**
+
+**LANDMINE:** `@symbiot.dev/react-native-heatmap` matches its `data` record keys to cells with
+date-fns `isSameDay(key, cellDate)`, and a date-only string parses as UTC midnight per the ES
+spec. Anywhere west of UTC that lands on the **previous** local day, shifting the whole grid:
+
+```ts
+// TZ=America/New_York
+isSameDay('2026-05-04', new Date(2026, 4, 4, 12)); // false  ← silently off by a day
+isSameDay('2026-05-04T00:00:00', new Date(2026, 4, 4, 12)); // true
+```
+
+**Fix:** feed keys with an explicit local midnight (`` `${day}T00:00:00` ``). The stored day keys
+themselves (SQLite `practice_daily.day`, `practiceDayKey()`) are local-time and stay bare.
+
+## `cellColor` keys are count thresholds, not level indices
+
+The library resolves a cell's colour to the **highest `cellColor` key ≤ the cell's count**, so the
+keys are thresholds in whatever unit `data` counts (practice **minutes** here). A count of `0`
+matches no key and falls back to `cellDefaultColor`. Pin `theme.scheme: 'light'` — the library
+otherwise follows `Appearance.getColorScheme()` and would pick its dark palette on a dark-mode
+device, which the app does not support.
+
+## The package is ESM-only — Jest needs it in `transformIgnorePatterns`
+
+**LANDMINE:** `@symbiot.dev/react-native-heatmap` ships only `index.esm.js` (`"type": "module"`).
+Metro handles it natively, but Jest fails with `Cannot use import statement outside a module`
+until the package is added to the `transformIgnorePatterns` allowlist in `jest.config.js`.
+
+No native setup beyond `react-native-svg` (already a dependency) and `date-fns`.
+
+## Asserting cell colours in tests
+
+`react-native-svg` converts a `fill` string into `{ type, payload }` with an **ARGB int** payload,
+so rendered cells cannot be compared against CSS colour strings. Compare against
+`processColor(color)` from `react-native` (see `components/__tests__/PracticeHeatmap.test.tsx`).

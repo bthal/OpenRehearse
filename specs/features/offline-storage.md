@@ -8,6 +8,8 @@
 
 - **MusicXML** content or a **copy** of the user's file in app-private storage.
 - **Piece metadata**: stable id, display title, composer, import timestamp, and other fields scraped from XML on import.
+- **Practice history**: total seconds of active playback per local calendar day
+  (`practice_daily` table), feeding the dashboard heatmap.
 
 ## What is not stored on server (MVP)
 
@@ -19,6 +21,8 @@
 
 - Abstract behind `LocalPieceRepository` (save, list, get, delete) so future cloud sync can add a `RemotePieceRepository` without rewriting screens.
 - Consider **SQLite** or **file-system JSON index** for metadata; binary XML as files on disk.
+- One SQLite file for everything relational (`src/data/db.ts` owns the name); each repository
+  creates its own tables with `CREATE TABLE IF NOT EXISTS` on first use.
 
 ## Acceptance criteria
 

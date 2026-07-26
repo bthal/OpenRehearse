@@ -12,6 +12,7 @@ This repository uses **`specs/`** as the source of truth for product intent and 
 | Stack & boundaries | `specs/architecture.md` |
 | Order of work | `specs/roadmap.md` |
 | Screens & flows | `specs/features/dashboard.md`, `specs/features/playview.md` |
+| Practice-time tracking & heatmap | `specs/features/dashboard.md`, `compound-docs/practice-tracking.md` |
 | Settings & count-in | `specs/features/settings.md`, `compound-docs/tone-playback.md` (count-in) |
 | Files & MusicXML | `specs/features/import.md` |
 | Local data & offline | `specs/features/offline-storage.md`, `client/docs/offline-qa.md` |
@@ -102,3 +103,10 @@ Use the **commit** Cursor command (`.cursor/commands/commit.md`) for a guided pa
 - **Auth** of any kind (Supabase or otherwise) — non-goal for MVP.
 - **Dark mode**.
 - Anything listed only in **`SUDELBUCH.md`**.
+
+## Maintaining this file
+
+Keep this file for knowledge useful to almost every future agent session in this project.
+Do not repeat what the codebase already shows; point to the authoritative file or command instead.
+Prefer rewriting or pruning existing entries over appending new ones.
+When updating this file, preserve this bar for all agents and keep entries concise.
