@@ -32,7 +32,11 @@
     "importMxl": "Import .mxl-File",
     "warmUpsNote": "Use the exercises as building blocks for your personal warm-up routines.",
     "privacyNote": "Your files stay on this device — \nnothing is uploaded.",
-    "importFailed": "Import failed"
+    "importFailed": "Import failed",
+    "practice": "Practice",
+    "practiceNote": "Minutes played per day.",
+    "practiceLess": "Less",
+    "practiceMore": "More"
   },
   "playView": {
     "pieceNotFound": "Piece not found.",

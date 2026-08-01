@@ -18,6 +18,7 @@ import { WARMUP_FEATURES } from '../src/config/warmupFeatures';
 import { PieceEditModal, type PieceEditMode } from '@components/PieceEditModal';
 import { isPieceComplete } from '@domain/piece';
 import { PieceRow, PieceRowSkeleton } from '@components/PieceRow';
+import { PracticeHeatmap } from '@components/PracticeHeatmap';
 import { RoutineRow } from '@components/RoutineRow';
 import { SettingsModal } from '@components/SettingsModal';
 import { WarmUpRow } from '@components/WarmUpRow';
@@ -25,6 +26,7 @@ import { pickXmlFile } from '@data/index';
 import { seedDemoDataIfNeeded } from '@data/seedDemoData';
 import { Colors } from '@theme/colors';
 import { usePiecesStore } from '@state/piecesStore';
+import { usePracticeStore } from '@state/practiceStore';
 import { useRoutinesStore } from '@state/routinesStore';
 import { useSettingsStore } from '@state/settingsStore';
 
@@ -45,6 +47,9 @@ export default function Dashboard() {
   const routines = useRoutinesStore((s) => s.routines);
   const loadRoutines = useRoutinesStore((s) => s.loadRoutines);
   const deleteRoutines = useRoutinesStore((s) => s.deleteRoutines);
+
+  // Practice history (heatmap)
+  const loadPracticeHistory = usePracticeStore((s) => s.loadPracticeHistory);
 
   // Settings
   const loadSettings = useSettingsStore((s) => s.loadSettings);
@@ -68,7 +73,9 @@ export default function Dashboard() {
       void seedDemoDataIfNeeded().then(() => loadPieces());
       void loadRoutines();
       void loadSettings();
-    }, [loadPieces, loadRoutines, loadSettings]),
+      // Re-read on focus so time practised in the play view shows up on return.
+      void loadPracticeHistory();
+    }, [loadPieces, loadRoutines, loadSettings, loadPracticeHistory]),
   );
 
   if (importError) {
@@ -433,6 +440,9 @@ export default function Dashboard() {
                 })}
               </>
             )}
+
+            {/* Practice history — bottom of the dashboard */}
+            <PracticeHeatmap />
           </View>
         </ScrollView>
 
