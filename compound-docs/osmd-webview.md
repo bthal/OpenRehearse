@@ -149,6 +149,20 @@ display on each `show()` call, so a single hide at init is not enough.
 The element must remain in the DOM — `style.left` is read every frame for scroll math.
 Use `visibility: hidden` (not `display: none`) so layout and position reads are unaffected.
 
+## Loop overlay: CSS transitions need a style flush and must be torn down
+
+**LANDMINE:** The loop overlay animates out of the cursor on creation (`unfurlLoopFromCursor`
+in `playback.ts`) by setting the collapsed geometry, then the final geometry, with a CSS
+`transition` in between. Two traps:
+
+1. The handles go from `display: none` to `display: flex` in the same task. Without a forced
+   style flush the browser coalesces the collapsed and final writes into one recalculation, so
+   no transition runs and the loop pops into place. Read a layout property between the two
+   writes: `void el.offsetWidth;` (it survives esbuild minification — verified in the bundle).
+2. Handle dragging rewrites `style.left` every RAF frame. A transition left on the element
+   makes the handle lag behind the finger, so it must be cleared (`endLoopUnfurl`) when the
+   animation ends, when a drag starts, and on clear/dispose.
+
 ## WebView bridge message protocol
 
 Web→Native: web page calls `window.ReactNativeWebView.postMessage(data)`; native receives via `onMessage` prop.
@@ -221,4 +235,5 @@ and breaks the manual single-line `PageWidth`).
 
 **Note:** `score-web/**` is excluded from `client/tsconfig.json`, so `npm run typecheck` does
 **not** cover `playback.ts`. Type-check it separately with `cd score-web && npx tsc --noEmit`, and
-rebuild the bundle (`npm run build:score-web`) after any `score-web/src` change.
+rebuild the bundle after any `score-web/` change (see “`score-web/` edits are invisible until the
+bundle is rebuilt” in [`tone-playback.md`](tone-playback.md)).
