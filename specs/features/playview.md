@@ -49,11 +49,13 @@ The entire piece is rendered in a **single horizontal line** — all measures la
 ## Loop ("bit") — MVP rules
 
 - **Exactly one** active loop at a time.
-- **Creating a loop**: tap the loop button in the toolbar. A loop is immediately placed starting at the **current cursor position**, extending a fixed pixel span forward (constant `LOOP_DEFAULT_PX`). The loop button icon changes to **×** while a loop is active.
+- **Creating a loop**: tap the loop button in the toolbar. A loop is immediately placed starting at the **current cursor position**, extending a fixed pixel span forward (constant `LOOP_DEFAULT_PX`). Near the end of the piece a full-width loop no longer fits ahead of the cursor: B is then anchored at the last note and A derived backwards, so the loop **keeps its standard width and its start lands before the cursor** rather than being shortened. Placement math is pure (`domain/loop.ts`). The loop button icon changes to **×** while a loop is active.
 - **Deleting a loop**: tap the loop button again (showing ×). The loop is removed entirely.
 - **Visual representation**:
   - Both handles (A = start, B = end) render as draggable markers on the score.
+  - Each handle's **outer** corners (facing away from the loop) are rounded so the pair frames the region; the grip glyph is a darker seagrass than the handle body so it reads clearly.
   - The region between A and B is shaded.
+- **Creation animation**: the loop **unfurls out of the cursor**. Every overlay element that is not already at the cursor slides from the cursor line to its final position (`LOOP_UNFURL_MS`, ease-out) — the end handle to the right, and in the near-end case the start handle to the left. A handle that genuinely starts at the cursor is placed directly and does not animate.
 - **Handle dragging**:
   - Handles can be placed at **any continuous position** within the piece — no snap to beats or measures.
   - A may not be dragged past B; B may not be dragged past A. A **minimum pixel gap** (`LOOP_MIN_GAP_PX`, constant) is enforced between the two handles.
@@ -113,7 +115,11 @@ Slices: `activePieceId`, `webViewReady`, `isLoadingScore`, `scoreError`, `isPlay
 - [x] Tapping the score (outside a handle) toggles play/pause.
 - [x] Creating or editing a loop pauses playback; play after any create/edit always seeks to A first.
 - [x] Handles clamp to first/last note pixel positions (not raw SVG width). Loop placed near
-  the end of the piece anchors B at the last note and derives A backward by `LOOP_DEFAULT_PX`.
+  the end of the piece anchors B at the last note and derives A backward by `LOOP_DEFAULT_PX`,
+  so the start lands before the cursor instead of the loop being shortened (`domain/loop.ts`).
+- [x] On creation the loop unfurls out of the cursor: handles not already at the cursor animate
+  outward to their final positions; one at the cursor does not animate.
+- [x] Loop handles have rounded outer corners and a darker grip glyph than the handle body.
 - [x] No separate title/composer header; back button lives at the top of the toolbar. *(Phase 5)*
 - [x] Speed picker collapses to active label; tapping pauses playback and expands a horizontal
   animated overlay; closes after selection. *(Phase 5)*

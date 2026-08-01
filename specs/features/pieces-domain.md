@@ -17,7 +17,13 @@
 ### Bit (active loop)
 
 - Attached to **one** piece at a time in UI; only **one** active `bit` globally in MVP.
-- Represent boundaries in **musical coordinates** understood by OSMD / playback (e.g. `Timestamp` from OSMD, or measure + beat + voice), **not** raw pixels.
+- Represent **persisted** boundaries — what is stored and reloaded — in **musical coordinates**
+  understood by OSMD / playback (e.g. `Timestamp` from OSMD, or measure + beat + voice), **not**
+  raw pixels.
+  - Transient on-screen loop placement is pixel-based: the live region in `playback.ts`
+    (`loopRegion`) deliberately holds both `aPx`/`bPx` and `aTicks`/`bTicks`, and the placement
+    math in `domain/loop.ts` works in score pixels. Only the musical coordinates survive a
+    reload.
 - `start`, `end` with invariant `start < end`; validation rejects invalid ranges.
 
 ## Zustand

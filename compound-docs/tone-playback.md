@@ -428,19 +428,21 @@ Set these in `initPlayback` immediately after `cursor.show()` (which triggers
 `updateWidthAndStyle` internally and populates the cursor element's position data).
 Do **not** set `height` in CSS — leave it unset so the JS values are unambiguous.
 
-## LANDMINE: `score-web/src/` edits are invisible until the bundle is rebuilt
+## LANDMINE: `score-web/` edits are invisible until the bundle is rebuilt
 
 `score-web/build.mjs` compiles `src/index.ts` (and its imports: `playback.ts`, `types.ts`) into
 `client/src/score-web/html.ts` — an auto-generated TypeScript module that the React Native app
-embeds in the WebView. **Edits to source files produce no effect in the running app until the
-bundle is rebuilt.**
+embeds in the WebView. The WebView's HTML shell — markup and CSS for the cursor line and the loop
+overlay (`#loop-shade`, `.loop-handle`) — lives in the `HTML_TEMPLATE` literal inside `build.mjs`
+itself, so template-only edits need the same rebuild. **No edit under `score-web/` takes effect in
+the running app until the bundle is rebuilt.**
 
 ```bash
 cd client && npm run build:score-web
 ```
 
 This is easy to miss because the source files look like live TypeScript. Always add a rebuild
-step to any task that touches `client/score-web/src/**`.
+step to any task that touches `client/score-web/**`.
 
 ## PATTERN: Metronome via `scheduleRepeat` + raw Web Audio oscillator per tick
 
