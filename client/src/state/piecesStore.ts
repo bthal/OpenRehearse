@@ -3,6 +3,7 @@ import { create } from 'zustand';
 
 import type { Piece } from '@domain/piece';
 import { scrapeMusicXmlMetadata, scrapeTempoBpm, validateMusicXml } from '@domain/musicxml';
+import { detectSectionsSafely } from '@domain/sections';
 import type { PickedFile } from '@data/index';
 import { pieceRepository } from '@data/index';
 
@@ -78,6 +79,9 @@ export const usePiecesStore = create<PiecesState>()((set, get) => ({
       // Only set when the file actually declares a tempo — a tempo-less score
       // keeps importedBpm undefined and plays at OSMD's own default.
       ...(importedBpm != null ? { importedBpm } : {}),
+      // Always set, even when empty: `[]` records "analysed, no readable form",
+      // which is a different thing from the `undefined` of a pre-detection import.
+      sections: detectSectionsSafely(file.content),
     };
 
     try {

@@ -14,14 +14,17 @@ import {
   mdiSpeedometer,
 } from '@mdi/js';
 import { router, Stack, useLocalSearchParams } from 'expo-router';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Animated, ActivityIndicator, Text, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import WebView, { type WebViewMessageEvent } from 'react-native-webview';
 import { useTranslation } from 'react-i18next';
 
 import { AppIcon } from '@components/AppIcon';
+import { SectionLabel } from '@components/SectionLabel';
 import { pieceRepository } from '@data/index';
+import { assignSectionColorIndices, type Section } from '@domain/sections';
+import { SectionColors } from '@theme/colors';
 import { SCORE_WEB_HTML } from '@score-web/html';
 import type { WebToNativeMessage } from '@score-web/messageProtocol';
 import { useCountInSync } from '@score-web/useCountInSync';
@@ -65,6 +68,7 @@ export default function PlayView() {
   const loopActive = usePlayViewStore((s) => s.loopActive);
   const metronomeOn = usePlayViewStore((s) => s.metronomeOn);
   const activeHand = usePlayViewStore((s) => s.activeHand);
+  const currentSectionIndex = usePlayViewStore((s) => s.currentSectionIndex);
 
   const setWebViewReady = usePlayViewStore((s) => s.setWebViewReady);
   const setLoadingScore = usePlayViewStore((s) => s.setLoadingScore);
@@ -75,6 +79,7 @@ export default function PlayView() {
   const setLoopActive = usePlayViewStore((s) => s.setLoopActive);
   const setMetronomeOn = usePlayViewStore((s) => s.setMetronomeOn);
   const setActiveHand = usePlayViewStore((s) => s.setActiveHand);
+  const setCurrentSectionIndex = usePlayViewStore((s) => s.setCurrentSectionIndex);
   const reset = usePlayViewStore((s) => s.reset);
 
   const [speedOpen, setSpeedOpen] = useState(false);
@@ -98,9 +103,13 @@ export default function PlayView() {
   // as the 100% reference the multiplier applies to. Undefined → fall back to the
   // score BPM reported by the WebView.
   const overrideBpmRef = useRef<number | undefined>(undefined);
+  const sectionsRef = useRef<Section[] | undefined>(undefined);
   useEffect(() => {
     scoreBpmRef.current = scoreBpm;
   }, [scoreBpm]);
+  useEffect(() => {
+    sectionsRef.current = piece?.sections;
+  }, [piece?.sections]);
   useEffect(() => {
     tempoMultiplierRef.current = tempoMultiplier;
   }, [tempoMultiplier]);
@@ -241,9 +250,16 @@ export default function PlayView() {
           }
           break;
         }
-        case 'LOADED':
+        case 'LOADED': {
           setLoadingScore(false);
+          // Only now: the web side resolves section starts against measure metadata
+          // that initPlayback builds during the load.
+          const starts = (sectionsRef.current ?? []).map((s) => s.startMeasureIndex);
+          webViewRef.current?.injectJavaScript(
+            `window.__rn_set_sections(${JSON.stringify(JSON.stringify(starts))});void 0;`,
+          );
           break;
+        }
         case 'ERROR':
           setLoadingScore(false);
           setScoreError(msg.payload);
@@ -260,9 +276,19 @@ export default function PlayView() {
         case 'LOOP_STATE':
           setLoopActive(msg.payload);
           break;
+        case 'SECTION_INDEX':
+          setCurrentSectionIndex(msg.payload);
+          break;
       }
     },
-    [setScoreBpm, setLoadingScore, setScoreError, setPlaying, setLoopActive],
+    [
+      setScoreBpm,
+      setLoadingScore,
+      setScoreError,
+      setPlaying,
+      setLoopActive,
+      setCurrentSectionIndex,
+    ],
   );
 
   const handlePlayPause = useCallback(() => {
@@ -290,6 +316,12 @@ export default function PlayView() {
     webViewRef.current?.injectJavaScript('window.__rn_toggle_loop();void 0;');
   }, []);
 
+  // Index arithmetic stays in the WebView, which owns the anacrusis offset — native
+  // only says which way to go.
+  const handleSeekSection = useCallback((direction: -1 | 1) => {
+    webViewRef.current?.injectJavaScript(`window.__rn_seek_section(${direction});void 0;`);
+  }, []);
+
   const handleMetronomeToggle = useCallback(() => {
     webViewRef.current?.injectJavaScript('window.__rn_toggle_metronome();void 0;');
     setMetronomeOn(!metronomeOn);
@@ -298,6 +330,17 @@ export default function PlayView() {
   const referenceBpm = piece?.targetBpm ?? piece?.importedBpm ?? scoreBpm;
   const effectiveBpm = Math.round(referenceBpm * tempoMultiplier);
   const scoreReady = webViewReady && !isLoadingScore && !scoreError;
+
+  const sections = piece?.sections;
+  const sectionColorIndices = useMemo(
+    () => (sections ? assignSectionColorIndices(sections, SectionColors.length) : []),
+    [sections],
+  );
+  const activeSection =
+    sections && currentSectionIndex !== null ? sections[currentSectionIndex] : undefined;
+  // An armed loop is a deliberate "stay here" gesture, so section navigation stands
+  // down rather than yanking the playhead out of the bit the user just set.
+  const canNavigateSections = !isPlaying && !loopActive;
 
   if (!piece) {
     return (
@@ -417,6 +460,38 @@ export default function PlayView() {
                   </TouchableOpacity>
                 </View>
               </View>
+            </View>
+          )}
+
+          {/* Section label — upper-right overlay. Absent entirely when the score has
+            no detected form; a piece we cannot read has no sections rather than one. */}
+          {scoreReady && activeSection && currentSectionIndex !== null && (
+            // Pinned in absolute screen space and lifted above the WebView, like the
+            // cursor line: it must not ride on anything the score layout can move.
+            // Android needs `elevation` — zIndex alone does not lift a sibling above
+            // a native WebView.
+            <View
+              pointerEvents="box-none"
+              style={{ position: 'absolute', top: 8, right: 8, zIndex: 30, elevation: 6 }}
+            >
+              <SectionLabel
+                name={
+                  activeSection.name ?? t('playView.sectionOrdinal', { n: currentSectionIndex + 1 })
+                }
+                color={
+                  SectionColors[sectionColorIndices[currentSectionIndex] ?? 0] ?? SectionColors[0]!
+                }
+                onPrevious={
+                  canNavigateSections && currentSectionIndex > 0
+                    ? () => handleSeekSection(-1)
+                    : undefined
+                }
+                onNext={
+                  canNavigateSections && sections && currentSectionIndex < sections.length - 1
+                    ? () => handleSeekSection(1)
+                    : undefined
+                }
+              />
             </View>
           )}
 

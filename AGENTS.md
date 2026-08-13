@@ -15,6 +15,7 @@ This repository uses **`specs/`** as the source of truth for product intent and 
 | Practice-time tracking & heatmap | `specs/features/dashboard.md`, `compound-docs/practice-tracking.md` |
 | Settings & count-in | `specs/features/settings.md`, `compound-docs/tone-playback.md` (count-in) |
 | Files & MusicXML | `specs/features/import.md` |
+| Section detection & the PlayView section label | `specs/features/section-detection.md` |
 | Local data & offline | `specs/features/offline-storage.md`, `client/docs/offline-qa.md` |
 | Audio + cursor sync | `specs/features/playback-synthesis.md`, `specs/features/playview.md` |
 | State & domain | `specs/features/pieces-domain.md` |

@@ -18,8 +18,11 @@ Let users add **pieces** from **MusicXML 2.x–4.x** files, both uncompressed (`
 3. **Validate**: well-formed XML; root / DOCTYPE checks for MusicXML; version check.
 4. **Scrape metadata**: extract `work-title`, `movement-title`, `composer`, and tempo
    (`scrapeTempoBpm` → `importedBpm`) for display and playback.
-5. Persist **full XML** (or path to copied file) under app storage; save **metadata** record (id, title, composer, createdAt, localUri or internal path).
-6. **Complete required metadata**: a piece needs a title, a composer, and a target speed
+5. **Detect sections** from the notation (`detectSectionsSafely`; see
+   `specs/features/section-detection.md`). This is best-effort and **never fails an import** — an
+   unreadable form stores an empty list and the piece simply shows no section label.
+6. Persist **full XML** (or path to copied file) under app storage; save **metadata** record (id, title, composer, createdAt, localUri or internal path).
+7. **Complete required metadata**: a piece needs a title, a composer, and a target speed
    (`isPieceComplete`). If the file omits any of these (e.g. no tempo marking, no composer),
    open the edit modal in **"Input needed"** mode — non-dismissable, missing fields marked, the
    **Import** button disabled until all are provided. A fully-described file imports with no prompt.
@@ -42,6 +45,7 @@ Let users add **pieces** from **MusicXML 2.x–4.x** files, both uncompressed (`
 - [ ] Invalid inputs never corrupt the local piece index.
 - [ ] Imported piece is available offline immediately after import.
 - [ ] Title, composer, and tempo are scraped and stored on import.
+- [x] Sections are detected and stored on import; detection failure never blocks the import.
 - [ ] A file missing title, composer, or tempo opens a non-dismissable "Input needed" modal; import completes only once all required fields are provided.
 
 ## Post-MVP: PDF import via OMR

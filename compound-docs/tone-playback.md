@@ -910,3 +910,49 @@ not mistaken for a count-in abort).
 pause during the pre-roll aborts it (`cancelCountIn` stops any un-played oscillators) and resets to
 the start rather than freezing mid-count. `countInMeasures` is set via `__rn_set_count_in` and, as
 a user setting, is preserved across score reloads (`disposePlayback` keeps it).
+
+## Sections: junction ticks, and why they must not come from `noteEvents`
+
+`setSections(indices)` turns 0-based measure indices into transport ticks once per load, then
+`emitSectionIfChanged` posts `SECTION_INDEX` only when the index actually changes — about once per
+section, never per frame, even though it is called from several per-frame paths.
+
+There are **two** position sources, because the playhead moves in two different ways:
+
+- **Playing** — `animateCursorLoop` passes the transport position (loop-aware `effectiveQE`).
+- **Panning** — the transport has not moved, only the score has, so `emitSectionAtScrollOffset`
+  derives the position from `scrollOffsetPx` via `nearestStepToPx(viewportWidth / 2 - offset)`.
+  It is called on every `touchmove` and every momentum frame. Relying on `syncCursorToCenter`
+  alone (which runs on lift and when momentum settles) makes the label lag the score visibly —
+  the name only flips once the scroll stops, long after the centre line crossed the junction.
+
+`_stopInternal` also emits at tick 0: `Transport.stop()` rewinds, and without it a piece that plays
+to the end leaves the label showing the final section while the cursor sits at the start.
+
+**LANDMINE:** `noteEvents` is **filtered by `activeHand`**, and `setActiveHand` re-runs
+`buildTimelines` to rebuild it. Deriving anything score-structural from it means that structure
+silently changes when the user practises one hand. Section junctions did exactly this in an early
+draft: switching to left-hand-only moved every junction, because the rest-separation test stopped
+seeing the right-hand notes.
+
+`buildTimelines` therefore also fills `noteSpans` — `{start, end}` per note in ticks, pushed
+**before** the `activeHand` check, so it is identical for every hand setting:
+
+```typescript
+if (note.halfTone < 9 || note.halfTone > 115) continue;
+const spanQ = note.Length.RealValue * WHOLE_TO_QUARTER;
+if (spanQ > 0) spans.push({ start: baseTicks, end: baseTicks + Math.round(spanQ * TONE_PPQ) });
+if (activeHand !== 'both') { /* … filter … */ }
+```
+
+**Anacrusis offset.** With a pickup (`measureMeta[0].implicit`), phrase starts sit
+`measureMeta[1].startTicks` *before* each barline. `sectionStartTickFor` applies that offset only
+when the upbeat is real: note onsets inside `[bar - anacrusis, bar)` **and** nothing sounding across
+the window's start. Testing only for "notes in the window" fires almost always — a section normally
+ends with a full measure — so it would be indistinguishable from an unconditional offset. Ticks
+compare with a 1-tick epsilon because note ends are rounded.
+
+**`seekToTicks` is the single seek primitive.** Transport ticks, the OSMD iterator
+(`advanceCursorTo`), the cursor element's `style.left`, and `applyTranslate` all have to move
+together; the loop-start seek in `startPlayback` and `seekSection` both go through it so they cannot
+drift apart.

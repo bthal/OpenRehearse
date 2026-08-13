@@ -82,11 +82,24 @@ The entire piece is rendered in a **single horizontal line** — all measures la
     speedometer icon and **pauses playback**; expands a horizontal spring-animated panel over
     the score with ×0.5 / ×0.75 / ×1.0 text buttons. Selecting a speed closes the panel.
 
+## Section label
+
+- A label in the **upper-right** corner names the section the cursor is currently in: bold white
+  text on a plain block of the section's color. Always visible; inert (tapping does nothing).
+- Pinned in absolute screen space above the WebView, with fixed height and fixed arrow slots, so
+  it never shifts or resizes as playback state changes.
+- Arrows sit inside the block while **paused** and while **no loop is active**, jumping to the
+  previous/next section start. Absent at the first/last section in the corresponding direction.
+- The name follows the score **continuously while panning**, not only once the scroll settles.
+- **Nothing is rendered** when the piece has no detected sections.
+- Full rules, colors and the anacrusis junction offset: `specs/features/section-detection.md`.
+
 ## State (Zustand)
 
 Slices: `activePieceId`, `webViewReady`, `isLoadingScore`, `scoreError`, `isPlaying`,
 `scoreBpm` (from MusicXML), `tempoMultiplier` (×0.5/×0.75/×1.0), `metronomeOn: boolean`,
 `activeHand: 'both' | 'right' | 'left'` (resets to `'both'` on piece unmount),
+`currentSectionIndex: number | null` (driven by `SECTION_INDEX` from the WebView, which owns position),
 `loop: { start, end } | null`,
 `displayMode: 'one-line' | 'standard'` (global preference; `'one-line'` in MVP, no UI to change it yet).
 
@@ -127,4 +140,8 @@ Slices: `activePieceId`, `webViewReady`, `isLoadingScore`, `scoreError`, `isPlay
   time signature. *(Phase 5)*
 - [x] Hand selector (Both/Right/Left): selected staff plays audio and notes stay black;
   inactive staff notes greyed (`#B0B0B0`); switching hand preserves cursor position.
+- [x] Section label shows the current section in the upper-right corner, and is absent entirely
+      for a piece with no detected sections.
+- [x] Section arrows appear only while paused with no active loop, and only toward a section
+      that exists.
 - [ ] Works **offline** once the piece is loaded from local storage. *(Phase 2)*

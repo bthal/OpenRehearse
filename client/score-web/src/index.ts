@@ -10,6 +10,8 @@ import {
   toggleMetronome,
   setActiveHand,
   setCountIn,
+  setSections,
+  seekSection,
 } from './playback';
 import type { OutboundMessage } from './types';
 
@@ -99,6 +101,21 @@ w.__rn_set_active_hand = (hand: 'both' | 'right' | 'left') => {
 
 w.__rn_set_count_in = (measures: number) => {
   setCountIn(measures);
+};
+
+// Sent after LOADED, not with the XML: section starts are resolved against the
+// measure metadata that initPlayback builds, which does not exist before the load.
+w.__rn_set_sections = (json: string) => {
+  try {
+    const parsed: unknown = JSON.parse(json);
+    setSections(Array.isArray(parsed) ? (parsed as number[]) : []);
+  } catch {
+    setSections([]);
+  }
+};
+
+w.__rn_seek_section = (direction: number) => {
+  seekSection(direction);
 };
 
 const container = document.getElementById('osmd');

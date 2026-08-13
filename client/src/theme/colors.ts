@@ -27,3 +27,30 @@ export const HeatmapColors = {
     'hsl(169.1 21.6% 30%)', // seagrass-700
   ],
 } as const;
+
+/**
+ * Categorical palette for the PlayView section label — one entry per section,
+ * assigned by `domain/sections.ts#assignSectionColorIndices`.
+ *
+ * Deliberately outside the seagrass/ash-grey/mauve brand ramps: these hues carry
+ * information rather than decoration. A student glancing at the label needs to tell
+ * "this is a different section from the last one" at a distance, and tints of one
+ * hue cannot do that. Hues are spread around the wheel and ordered so that
+ * neighbours in the cycle are far apart.
+ *
+ * The label always draws white text, so every entry is held at a lightness that
+ * carries white at roughly 4.5:1 or better. That is the binding constraint on this
+ * palette: the ochre and olive entries in particular are much darker than their
+ * nominal hue would suggest, because a bright yellow-green cannot hold white type.
+ * Any hue added here has to be checked against white before it goes in.
+ */
+export const SectionColors: readonly string[] = [
+  'hsl(214 90% 45%)', // blue
+  'hsl(12 85% 45%)', // vermilion
+  'hsl(150 80% 28%)', // green
+  'hsl(275 70% 48%)', // violet
+  'hsl(35 95% 34%)', // ochre
+  'hsl(330 80% 42%)', // magenta
+  'hsl(188 90% 30%)', // teal
+  'hsl(88 75% 28%)', // olive
+] as const;

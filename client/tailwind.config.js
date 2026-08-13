@@ -30,6 +30,19 @@ module.exports = {
           600: 'hsl(320.8 12.7% 40%)',
           800: 'hsl(321.4 13.7% 20%)',
         },
+        // Categorical hues for the PlayView section label. Mirrors SectionColors in
+        // src/theme/colors.ts, which is the source used at render time (the label
+        // paints through an SVG gradient, which needs imperative values).
+        section: {
+          blue: 'hsl(214 90% 45%)',
+          vermilion: 'hsl(12 85% 45%)',
+          green: 'hsl(150 80% 28%)',
+          violet: 'hsl(275 70% 48%)',
+          ochre: 'hsl(35 95% 34%)',
+          magenta: 'hsl(330 80% 42%)',
+          teal: 'hsl(188 90% 30%)',
+          olive: 'hsl(88 75% 28%)',
+        },
       },
       fontFamily: {
         brand: ['serif'],

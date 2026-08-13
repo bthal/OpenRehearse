@@ -21,6 +21,12 @@ interface PlayViewState {
   metronomeOn: boolean;
   /** Which hand(s) are active for playback and score display. */
   activeHand: ActiveHand;
+  /**
+   * Index into the active piece's `sections`, or null when the cursor is in no
+   * section — which is the normal state for a piece with no detected form.
+   * Driven by SECTION_INDEX from the WebView, which owns the position.
+   */
+  currentSectionIndex: number | null;
 
   setActivePieceId: (id: string | null) => void;
   setWebViewReady: (ready: boolean) => void;
@@ -32,6 +38,7 @@ interface PlayViewState {
   setLoopActive: (v: boolean) => void;
   setMetronomeOn: (v: boolean) => void;
   setActiveHand: (h: ActiveHand) => void;
+  setCurrentSectionIndex: (index: number | null) => void;
   reset: () => void;
 }
 
@@ -46,6 +53,7 @@ const initial = {
   loopActive: false,
   metronomeOn: false,
   activeHand: 'both' as ActiveHand,
+  currentSectionIndex: null,
 };
 
 export const usePlayViewStore = create<PlayViewState>()((set) => ({
@@ -60,5 +68,6 @@ export const usePlayViewStore = create<PlayViewState>()((set) => ({
   setLoopActive: (v) => set({ loopActive: v }),
   setMetronomeOn: (v) => set({ metronomeOn: v }),
   setActiveHand: (h) => set({ activeHand: h }),
+  setCurrentSectionIndex: (index) => set({ currentSectionIndex: index }),
   reset: () => set(initial),
 }));

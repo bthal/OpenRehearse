@@ -102,6 +102,20 @@ interface MeasureMeta {
   implicit: boolean; // true for a pickup/anacrusis measure
 }
 let measureMeta: MeasureMeta[] = [];
+// Sounding span of every note in the score, in transport ticks.
+//
+// Deliberately NOT derived from noteEvents: that array is filtered by activeHand and
+// rebuilt on every setActiveHand, so section junctions computed from it would shift
+// when the user practises one hand. This one ignores the hand filter entirely.
+interface NoteSpan {
+  start: number;
+  end: number;
+}
+let noteSpans: NoteSpan[] = [];
+// Section start positions in ticks, ascending, already offset for anacrusis pickups.
+let sectionStartTicks: number[] = [];
+// Last index reported to native, so SECTION_INDEX is emitted on change only.
+let currentSectionIndex: number | null = null;
 // Count-in setting: measures of metronome pre-roll before a fresh start (0 = off).
 let countInMeasures = 0;
 // True while the count-in pre-roll is sounding, before the transport starts.
@@ -211,6 +225,7 @@ function buildTimelines(osmd: OpenSheetMusicDisplay): {
   const noteEvents: NoteEvent[] = [];
   const steps: CursorStep[] = [];
   const tempoChanges: TempoChange[] = [];
+  const spans: NoteSpan[] = [];
 
   osmd.cursor.reset();
   osmd.cursor.show();
@@ -279,6 +294,11 @@ function buildTimelines(osmd: OpenSheetMusicDisplay): {
         // OSMD halfTone is semitones from C0; standard MIDI is semitones from C-1,
         // so add 12 to align octaves. Valid piano range: A0 (9) to C8 (96).
         if (note.halfTone < 9 || note.halfTone > 115) continue;
+        // Recorded before the hand filter — see the noteSpans declaration.
+        const spanQ = note.Length.RealValue * WHOLE_TO_QUARTER;
+        if (spanQ > 0) {
+          spans.push({ start: baseTicks, end: baseTicks + Math.round(spanQ * TONE_PPQ) });
+        }
         if (activeHand !== 'both') {
           const si = note.ParentStaff?.idInMusicSheet ?? 0;
           if (activeHand === 'right' && si !== 0) continue;
@@ -382,6 +402,7 @@ function buildTimelines(osmd: OpenSheetMusicDisplay): {
 
   totalQuarters = lastExpandedQuarters + 1;
   cursorSteps = steps;
+  noteSpans = spans.sort((a, b) => a.start - b.start);
   osmd.cursor.reset();
 
   return { noteEvents, scoreBpm, tempoChanges };
@@ -497,6 +518,21 @@ function ticksToStep(ticks: number): number {
   return best;
 }
 
+/**
+ * Moves the whole playhead — transport, OSMD iterator, cursor element and score
+ * translation — to a tick position. The four have to move together or the audio and
+ * the visible cursor disagree, so every seek goes through here.
+ */
+function seekToTicks(ticks: number): void {
+  Tone.Transport.ticks = ticks;
+  const targetStep = ticksToStep(ticks);
+  advanceCursorTo(targetStep);
+  const px = cursorSteps[targetStep]?.pxLeft ?? 0;
+  const el = cursorEl();
+  if (el) el.style.left = `${px}px`;
+  applyTranslate(viewportWidth / 2 - px);
+}
+
 // First step whose pxLeft ≥ px (ceiling). Used to find the first note inside the loop start.
 function ceilStepToPx(px: number): number {
   let lo = 0, hi = cursorSteps.length - 1, best = cursorSteps.length - 1;
@@ -570,6 +606,10 @@ function animateCursorLoop(): void {
   // advanced here to avoid main-thread stalls on backward seeks (loop wraps).
   currentCursorStep = targetStep;
 
+  // Cheap: a scan over at most a dozen section starts, and it posts nothing unless
+  // the cursor actually crossed a junction.
+  emitSectionIfChanged(effectiveQE * TONE_PPQ);
+
   // Interpolate position between current step and the next for smooth scrolling.
   // The interpolated px is used for BOTH the score translation AND the cursor element's
   // left position so they always align on the center line.
@@ -626,6 +666,9 @@ function _stopInternal(): void {
   const el = cursorEl();
   if (el) el.style.left = `${px0}px`;
   applyTranslate(viewportWidth / 2 - px0);
+  // Transport.stop() rewinds to 0, so the label has to come back to the first
+  // section — otherwise a piece that plays to the end leaves it on the last one.
+  emitSectionIfChanged(0);
 }
 
 // ─── Touch: manual score pan ──────────────────────────────────────────────────
@@ -637,6 +680,9 @@ function syncCursorToCenter(): void {
   Tone.Transport.ticks = Math.round((cursorSteps[step]?.quarters ?? 0) * TONE_PPQ);
   const el = cursorEl();
   if (el) el.style.left = `${cursorSteps[step]?.pxLeft ?? 0}px`;
+  // The frame loop is not running while paused, so a manual pan is the other way
+  // the playhead can cross a section junction.
+  emitSectionIfChanged(Tone.Transport.ticks);
 }
 
 function startMomentum(initialVelocity: number): void {
@@ -659,6 +705,7 @@ function startMomentum(initialVelocity: number): void {
     const next = scrollOffsetPx + velocity * dt;
     const clamped = clampTranslate(next);
     applyTranslate(clamped);
+    emitSectionAtScrollOffset();
     if (clamped !== next) {
       momentumFrameId = null;
       syncCursorToCenter();
@@ -724,6 +771,7 @@ function initTouchHandlers(): void {
     lastMoveTime = now;
     lastMoveX = clientX;
     applyTranslate(clampTranslate(startOffset + (clientX - startX)));
+    emitSectionAtScrollOffset();
   }, { passive: true });
 
   wrapper.addEventListener('touchend', () => {
@@ -1090,6 +1138,128 @@ function cancelCountIn(): boolean {
 
 // ─── Public API ───────────────────────────────────────────────────────────────
 
+// ─── Sections ─────────────────────────────────────────────────────────────────
+
+// Tick comparisons at a section seam need slack: note ends are rounded to whole
+// ticks, so a strict test would read a note stopping exactly on the seam as
+// sustaining across it.
+const SEAM_EPSILON_TICKS = 1;
+
+/**
+ * Length of the piece's anacrusis in ticks, or 0 when it begins on a downbeat.
+ *
+ * With a pickup every notated barline sits this far after the musical phrase start,
+ * which is what section junctions may have to be shifted back by.
+ */
+function anacrusisTicks(): number {
+  if (measureMeta[0]?.implicit !== true) return 0;
+  return measureMeta[1]?.startTicks ?? 0;
+}
+
+/**
+ * Resolves a section's start measure to the tick it musically begins on.
+ *
+ * A section notated at a barline often begins on the upbeat leading into it. That
+ * offset is applied only when the upbeat is real: there must be note onsets inside
+ * the window before the barline AND nothing sustaining across the window's start.
+ * That is exactly how an internal anacrusis is engraved — the previous phrase
+ * closes, a rest separates it, then the upbeat.
+ *
+ * Testing merely for "notes in the window" would not discriminate: a section
+ * normally ends with a full measure, so there is material on the last beat whether
+ * or not it leads anywhere. Material flowing across the seam means the previous
+ * section is still playing, so the junction stays on the barline.
+ */
+function sectionStartTickFor(measureIndex: number): number | null {
+  const bar = measureMeta[measureIndex]?.startTicks;
+  if (bar === undefined) return null;
+
+  const offset = anacrusisTicks();
+  const windowStart = bar - offset;
+  if (offset <= 0 || windowStart <= 0) return bar;
+
+  let earliestUpbeat: number | null = null;
+  // noteSpans is sorted by start, so spans before the window come first and the
+  // first span inside it is the earliest upbeat.
+  for (const span of noteSpans) {
+    if (span.start >= bar - SEAM_EPSILON_TICKS) break;
+    if (span.start >= windowStart - SEAM_EPSILON_TICKS) {
+      if (earliestUpbeat === null) earliestUpbeat = span.start;
+    } else if (span.end > windowStart + SEAM_EPSILON_TICKS) {
+      return bar;
+    }
+  }
+
+  return earliestUpbeat ?? bar;
+}
+
+/** The section containing `ticks`, or null when the piece has no sections. */
+function sectionIndexAtTicks(ticks: number): number | null {
+  if (sectionStartTicks.length === 0) return null;
+  let index = 0;
+  for (let i = 0; i < sectionStartTicks.length; i++) {
+    if ((sectionStartTicks[i] ?? 0) <= ticks + SEAM_EPSILON_TICKS) index = i;
+    else break;
+  }
+  return index;
+}
+
+/**
+ * Reports the current section to native, but only when it actually changes —
+ * roughly once per section rather than once per animation frame.
+ */
+function emitSectionIfChanged(ticks: number): void {
+  const index = sectionIndexAtTicks(ticks);
+  if (index === currentSectionIndex) return;
+  currentSectionIndex = index;
+  postToNative({ type: 'SECTION_INDEX', payload: index });
+}
+
+/**
+ * Installs the piece's section starts, given as 0-based measure indices.
+ *
+ * Must be called after initPlayback: measure metadata and note spans only exist
+ * once the score has been walked.
+ */
+export function setSections(startMeasureIndices: number[]): void {
+  const ticks: number[] = [];
+  for (const measureIndex of startMeasureIndices) {
+    const tick = sectionStartTickFor(measureIndex);
+    if (tick !== null) ticks.push(tick);
+  }
+  sectionStartTicks = [...new Set(ticks)].sort((a, b) => a - b);
+  // Always report, even when null: a previously loaded piece may have left the
+  // native label showing a section this score does not have.
+  currentSectionIndex = sectionIndexAtTicks(Tone.Transport.ticks);
+  postToNative({ type: 'SECTION_INDEX', payload: currentSectionIndex });
+}
+
+/**
+ * Reports the section under the centre line from the current scroll offset.
+ *
+ * While the user pans, the transport has not moved — only the score has — so the
+ * label has to be driven from the translation instead. Called on every pan and
+ * momentum frame so the name flips the instant the centre line crosses a junction,
+ * rather than snapping once the scroll settles.
+ */
+function emitSectionAtScrollOffset(): void {
+  if (sectionStartTicks.length === 0) return;
+  const step = nearestStepToPx(viewportWidth / 2 - scrollOffsetPx);
+  emitSectionIfChanged(Math.round((cursorSteps[step]?.quarters ?? 0) * TONE_PPQ));
+}
+
+/** Jumps to the start of the previous (-1) or next (+1) section. */
+export function seekSection(direction: number): void {
+  const current = sectionIndexAtTicks(Tone.Transport.ticks);
+  if (current === null) return;
+
+  const targetTicks = sectionStartTicks[current + (direction < 0 ? -1 : 1)];
+  if (targetTicks === undefined) return; // already at the first or last section
+
+  seekToTicks(targetTicks);
+  emitSectionIfChanged(targetTicks);
+}
+
 export function initPlayback(
   osmd: OpenSheetMusicDisplay,
   externalTempoSchedule?: ExternalTempoChange[],
@@ -1235,13 +1405,7 @@ export async function startPlayback(): Promise<void> {
     if (loopModified || posTicks < loopRegion.aTicks || posTicks >= loopRegion.bTicks) {
       loopModified = false;
       didLoopSeek = true;
-      Tone.Transport.ticks = loopRegion.aTicks;
-      const targetStep = ticksToStep(loopRegion.aTicks);
-      advanceCursorTo(targetStep);
-      const px = cursorSteps[targetStep]?.pxLeft ?? 0;
-      const el = cursorEl();
-      if (el) el.style.left = `${px}px`;
-      applyTranslate(viewportWidth / 2 - px);
+      seekToTicks(loopRegion.aTicks);
     }
   }
 
@@ -1381,6 +1545,9 @@ export function disposePlayback(): void {
   cancelCountIn();
   downbeatTicks = new Set();
   measureMeta = [];
+  noteSpans = [];
+  sectionStartTicks = [];
+  currentSectionIndex = null;
   cursorSteps = [];
   currentCursorStep = -1;
   osmdActualIdx = -1;

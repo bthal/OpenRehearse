@@ -8,6 +8,8 @@
 
 - **MusicXML** content or a **copy** of the user's file in app-private storage.
 - **Piece metadata**: stable id, display title, composer, import timestamp, and other fields scraped from XML on import.
+- **Detected sections**: the piece's formal sections as JSON on the `pieces` row (`sections`
+  column), computed once at import so PlayView never re-parses the score.
 - **Practice history**: total seconds of active playback per local calendar day
   (`practice_daily` table), feeding the dashboard heatmap.
 

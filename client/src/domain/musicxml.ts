@@ -11,15 +11,19 @@ export type MusicXmlValidationError =
 
 const VALID_ROOTS = new Set(['score-partwise', 'score-timewise', 'opus']);
 
-function stripBom(s: string): string {
+// The three helpers below are shared with domain/sections.ts — MusicXML parsing
+// quirks (BOMs, fast-xml-parser's string|number|#text union) are the same wherever
+// a score is read, so they live here rather than being duplicated per module.
+
+export function stripBom(s: string): string {
   return s.charCodeAt(0) === 0xfeff ? s.slice(1) : s;
 }
 
-function isRecord(v: unknown): v is Record<string, unknown> {
+export function isRecord(v: unknown): v is Record<string, unknown> {
   return typeof v === 'object' && v !== null && !Array.isArray(v);
 }
 
-function textFrom(node: unknown): string | undefined {
+export function textFrom(node: unknown): string | undefined {
   if (typeof node === 'number' && Number.isFinite(node)) return String(node);
   if (typeof node === 'string') {
     const t = node.trim();

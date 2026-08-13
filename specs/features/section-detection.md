@@ -1,6 +1,8 @@
 # Feature: Section detection (notation-derived)
 
-> **Status: proposal.**
+> **Status: implemented.** Detection lives in `client/src/domain/sections.ts` (pure TS, no
+> RN/OSMD/Tone imports); the PlayView label and navigation are described under
+> "PlayView integration" below.
 
 ## Goal
 
@@ -104,3 +106,115 @@ boundary that another rule already found, but contributes weight 0 by itself.
    pickups, intros and codas survive.
 6. **Cap** at 12 sections; if more survive, keep the highest-scoring boundaries.
 7. **Name** each section: the text of its `<rehearsal>` if present, else its matched section word, else `null`.
+   When a `<words>` label supplies the name, the **engraved text** is kept (`Verse 1`, not `verse`)
+   unless it runs past 32 characters, at which point it is prose and the vocabulary term is used.
+
+### Declining is a result
+
+If fewer than **two** boundaries survive, `detectSections` returns an **empty list**. A score whose
+form we cannot read has *no* sections — never one section spanning the whole piece. Everything
+downstream keys off that empty list to render nothing.
+
+Note that with the current weights (minimum 5) the threshold in step 4 never drops a lone candidate;
+it only matters if a rule weighted below 5 is ever added.
+
+## Verified against the corpus
+
+`detectSections` reproduces every count this document claims, checked against the local
+(gitignored) `testfiles/` scores:
+
+| File | Result |
+|------|--------|
+| `heute-abend` | **8** sections: Intro, Refrain, Strophe 1, Refrain, Interlude, Strophe 2, Refrain, Outro |
+| `chopin` | **0** — the `12/8 → 6/4 → 2/4 → 12/8` cadenza is suppressed by R5/R6 |
+| `waltz-for-nala` | 6 boundaries at idx 18/34/50/66/82/98, all surviving |
+| `maple-leaf-rag` | idx67 `light-light` + idx68 key change and forward repeat merge into **one** boundary; `TRIO` picked up by R7 |
+| `adele`, `bach` | **0** — system breaks correctly ignored |
+
+Unit tests use inline XML fixtures only: `testfiles/` is gitignored and unavailable in CI.
+
+## PlayView integration
+
+### The label
+
+A small label in the **upper-right** corner of the score area names the section the cursor is
+currently in. It is **always visible** — during playback and while paused — and **inert**: tapping
+it does nothing, and it never swallows a tap meant for the score beneath it.
+
+- **Name**: the section's score-given `name`, else the ordinal `Section N` (1-based). Large and
+  bold, always in **white**.
+- **Ground**: a plain block of the section's color — square corners, no gradient or fade.
+- **Fixed geometry**: the height and the two arrow slots are fixed, and the block is pinned in
+  absolute screen space above the WebView (`elevation` as well as `zIndex`, or Android renders the
+  WebView over it). Arrows appear and disappear inside their slots, so nothing reflows and the
+  label never shifts as playback state changes.
+- **Nothing is shown** when the piece has no sections. There is no "whole piece" label.
+- The name updates **continuously while the score is panned**, not once the scroll settles.
+
+### Colors
+
+Sections walk a categorical palette (`SectionColors` in `client/src/theme/colors.ts`, mirrored as
+`section.*` in `tailwind.config.js`) in order, except that **a repeated name reuses the color it was
+already given** — both `Refrain` sections share a hue, which is the point of coloring them at all.
+Unnamed sections are not the same section as each other, so each takes the next slot.
+
+These are saturated hues rather than brand tints: the color carries information, and tints of a
+single hue cannot be told apart at a glance. Because the label always draws **white** text, every
+entry is held at a lightness that carries white at roughly 4.5:1 — which is why the ochre and olive
+entries are much darker than their nominal hue suggests. Any hue added here must be checked against
+white first.
+
+### Navigation
+
+Arrows flank the label, jumping to the **start of the previous / next section** — strictly, with no
+"restart the current section" behaviour. Each arrow is present only when a section exists in that
+direction, so the first section shows only a right arrow and the last only a left.
+
+Arrows are hidden while **playing**, and hidden while a **loop is active**: arming a bit is a
+deliberate "stay here" gesture, and seeking out of it would either strand the user or be silently
+undone when the transport snaps back to the loop's A handle.
+
+### Junction offset for anacrusis pickups
+
+Sections are always a whole number of measures long, but with a pickup their junctions do **not**
+sit on the barlines. In a 4/4 piece with a one-beat anacrusis, a section covering four measures ends
+after beat 3 of the fourth and the next section starts on beat 4 — the upbeat leading into it.
+
+The offset is the anacrusis length, read from OSMD's measure data
+(`measureMeta[0].implicit ? measureMeta[1].startTicks : 0`). It is applied at a junction **only when
+the pickup is real**:
+
+```
+window   = [barline - anacrusis, barline)
+apply if   there are note onsets inside the window
+      AND  nothing is sounding across the window's start
+```
+
+Testing merely for "notes in the window" would not discriminate — a section normally ends with a
+full measure, so there is material on its last beat whether or not it leads anywhere. The
+rest-separated test matches how an internal anacrusis is actually engraved: the previous phrase
+closes, a rest separates it, then the upbeat. Material flowing across the seam means the previous
+section is still playing, so the junction stays on the barline.
+
+This resolution lives in the WebView, which owns note durations; the domain module only ever emits
+0-based measure indices.
+
+## Persistence and scope
+
+- Detected sections are stored on the `Piece` (`sections` column, JSON) at **import time**. See
+  `specs/features/pieces-domain.md`.
+- Detection **never fails an import** — `detectSectionsSafely` degrades to `[]`.
+- Pieces imported **before** this feature keep `sections = NULL` and show no label. There is no
+  backfill pass.
+- **Editing sections is out of scope.** Names, boundaries and colors are all derived.
+
+## Acceptance criteria
+
+- [x] Sections are detected at import and persisted with the piece.
+- [x] A score with no readable form yields no sections, and PlayView shows no label.
+- [x] The label names the current section, or `Section N` when the score gives no name.
+- [x] A repeated section name keeps the same color throughout the piece.
+- [x] Arrows jump to the previous/next section start and are absent at the ends of the piece.
+- [x] Arrows are hidden while playing and while a loop is active.
+- [x] Section junctions absorb a real, rest-separated upbeat and otherwise land on the barline.
+- [x] Junctions do not move when the active hand changes.
