@@ -43,14 +43,20 @@ export const HeatmapColors = {
  * palette: the ochre and olive entries in particular are much darker than their
  * nominal hue would suggest, because a bright yellow-green cannot hold white type.
  * Any hue added here has to be checked against white before it goes in.
+ *
+ * Written as hex rather than the `hsl(H S% L%)` used elsewhere in this file, because
+ * these strings cross three different color parsers: React Native styles, the
+ * `react-native-svg` gradient stops behind the label, and CSS gradients inside the
+ * WebView, which receives them verbatim over SET_SECTIONS. Hex is the only notation
+ * all three parse identically. The source hue is kept in the comment.
  */
 export const SectionColors: readonly string[] = [
-  'hsl(214 90% 45%)', // blue
-  'hsl(12 85% 45%)', // vermilion
-  'hsl(150 80% 28%)', // green
-  'hsl(275 70% 48%)', // violet
-  'hsl(35 95% 34%)', // ochre
-  'hsl(330 80% 42%)', // magenta
-  'hsl(188 90% 30%)', // teal
-  'hsl(88 75% 28%)', // olive
+  '#0B65DA', // blue — hsl(214 90% 45%)
+  '#D43811', // vermilion — hsl(12 85% 45%)
+  '#0E8147', // green — hsl(150 80% 28%)
+  '#8925D0', // violet — hsl(275 70% 48%)
+  '#A96404', // ochre — hsl(35 95% 34%)
+  '#C1156B', // magenta — hsl(330 80% 42%)
+  '#087F91', // teal — hsl(188 90% 30%)
+  '#4B7D12', // olive — hsl(88 75% 28%)
 ] as const;

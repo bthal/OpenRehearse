@@ -107,10 +107,12 @@ w.__rn_set_count_in = (measures: number) => {
 // measure metadata that initPlayback builds, which does not exist before the load.
 w.__rn_set_sections = (json: string) => {
   try {
-    const parsed: unknown = JSON.parse(json);
-    setSections(Array.isArray(parsed) ? (parsed as number[]) : []);
+    const parsed = JSON.parse(json) as { measures?: unknown; colors?: unknown };
+    const measures = Array.isArray(parsed?.measures) ? (parsed.measures as number[]) : [];
+    const colors = Array.isArray(parsed?.colors) ? (parsed.colors as string[]) : [];
+    setSections(measures, colors);
   } catch {
-    setSections([]);
+    setSections([], []);
   }
 };
 

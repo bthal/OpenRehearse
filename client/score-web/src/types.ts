@@ -8,7 +8,7 @@ export type InboundMessage =
   | { type: 'TOGGLE_METRONOME' }
   | { type: 'SET_ACTIVE_HAND'; payload: 'both' | 'right' | 'left' }
   | { type: 'SET_COUNT_IN'; payload: number }
-  | { type: 'SET_SECTIONS'; payload: number[] }
+  | { type: 'SET_SECTIONS'; payload: { measures: number[]; colors: string[] } }
   | { type: 'SEEK_SECTION'; payload: -1 | 1 };
 
 export type OutboundMessage =

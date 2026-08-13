@@ -254,9 +254,16 @@ export default function PlayView() {
           setLoadingScore(false);
           // Only now: the web side resolves section starts against measure metadata
           // that initPlayback builds during the load.
-          const starts = (sectionsRef.current ?? []).map((s) => s.startMeasureIndex);
+          const loaded = sectionsRef.current ?? [];
+          const indices = assignSectionColorIndices(loaded, SectionColors.length);
+          // Colors travel with the indices because the WebView paints the junction
+          // marks in the score and cannot reach the native theme.
+          const payload = {
+            measures: loaded.map((s) => s.startMeasureIndex),
+            colors: indices.map((i) => SectionColors[i] ?? SectionColors[0]!),
+          };
           webViewRef.current?.injectJavaScript(
-            `window.__rn_set_sections(${JSON.stringify(JSON.stringify(starts))});void 0;`,
+            `window.__rn_set_sections(${JSON.stringify(JSON.stringify(payload))});void 0;`,
           );
           break;
         }
@@ -341,6 +348,20 @@ export default function PlayView() {
   // An armed loop is a deliberate "stay here" gesture, so section navigation stands
   // down rather than yanking the playhead out of the bit the user just set.
   const canNavigateSections = !isPlaying && !loopActive;
+
+  // The label is a carousel and needs its neighbours, not just the current section:
+  // a swipe drags the adjacent name and color into view before the seek has landed.
+  const sectionAt = useCallback(
+    (index: number): { name: string; color: string } | null => {
+      const section = sections?.[index];
+      if (!section) return null;
+      return {
+        name: section.name ?? t('playView.sectionOrdinal', { n: index + 1 }),
+        color: SectionColors[sectionColorIndices[index] ?? 0] ?? SectionColors[0]!,
+      };
+    },
+    [sections, sectionColorIndices, t],
+  );
 
   if (!piece) {
     return (
@@ -478,19 +499,17 @@ export default function PlayView() {
                 name={
                   activeSection.name ?? t('playView.sectionOrdinal', { n: currentSectionIndex + 1 })
                 }
+                previousName={sectionAt(currentSectionIndex - 1)?.name ?? null}
+                nextName={sectionAt(currentSectionIndex + 1)?.name ?? null}
                 color={
                   SectionColors[sectionColorIndices[currentSectionIndex] ?? 0] ?? SectionColors[0]!
                 }
-                onPrevious={
-                  canNavigateSections && currentSectionIndex > 0
-                    ? () => handleSeekSection(-1)
-                    : undefined
-                }
-                onNext={
-                  canNavigateSections && sections && currentSectionIndex < sections.length - 1
-                    ? () => handleSeekSection(1)
-                    : undefined
-                }
+                previousColor={sectionAt(currentSectionIndex - 1)?.color ?? SectionColors[0]!}
+                nextColor={sectionAt(currentSectionIndex + 1)?.color ?? SectionColors[0]!}
+                sectionIndex={currentSectionIndex}
+                collapsed={isPlaying}
+                canNavigate={canNavigateSections}
+                onSeek={handleSeekSection}
               />
             </View>
           )}

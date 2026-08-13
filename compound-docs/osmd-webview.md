@@ -187,6 +187,12 @@ Native never computes section positions itself: it sends indices and receives `S
 Keeping the tick math on one side is what stops the label and the seek target from disagreeing about
 the anacrusis offset.
 
+The payload is `{ measures, colors }`, not a bare index array: the WebView paints the junction marks
+into the score and has no access to the native theme, so each section's palette entry travels with
+its index. `colors` holds plain hex strings — `SectionColors` is written in hex precisely because
+the same string has to survive React Native's style parser, `react-native-svg`'s gradient stops and
+a CSS `linear-gradient()` inside the WebView, and hex is the only notation all three read alike.
+
 ## OSMD `FingeringPosition` default hides bass-clef fingerings
 
 **LANDMINE:** `EngravingRules.FingeringPosition` defaults to `PlacementEnum.AboveOrBelow = 5`. When `calculateFingerings()` encounters `AboveOrBelow`, it overrides to `isUpperStaffOfInstrument() ? Above : Below`. Bass staves resolve to `Below` — fingerings are placed below the staff, outside the visible viewport (`overflow: hidden`).

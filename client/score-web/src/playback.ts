@@ -57,6 +57,18 @@ const FERMATA_DURATION_MULTIPLIER = 1.75;
 // Ticks between successive notes in an arpeggio roll (~15 ms at 120 BPM with PPQ=192).
 const ARPEGGIO_STEP_TICKS = 6;
 
+// Section junction marks drawn into the score. Each junction gets the outgoing
+// section's color fading away to its left and the incoming section's fading away to
+// its right, meeting at a crisp two-pixel seam — one pixel of each — so the junction
+// stays legible even where two neighbouring sections happen to draw the same hue.
+const SECTION_FADE_ALPHA = 0.35;
+const SECTION_SEAM_PX = 1;
+// The fade reaches roughly half a measure to each side, but engraved measure widths
+// vary wildly (a whole-note bar against a run of semiquavers), so it is clamped.
+const SECTION_FADE_MEASURES = 0.5;
+const SECTION_FADE_MIN_PX = 20;
+const SECTION_FADE_MAX_PX = 130;
+
 interface NoteEvent {
   time: string;
   midi: number;
@@ -114,6 +126,9 @@ interface NoteSpan {
 let noteSpans: NoteSpan[] = [];
 // Section start positions in ticks, ascending, already offset for anacrusis pickups.
 let sectionStartTicks: number[] = [];
+// Palette color of each section, index-for-index with sectionStartTicks. Supplied by
+// native, which owns the theme; the web side only paints with it.
+let sectionColors: string[] = [];
 // Last index reported to native, so SECTION_INDEX is emitted on change only.
 let currentSectionIndex: number | null = null;
 // Count-in setting: measures of metronome pre-roll before a fresh start (0 = off).
@@ -130,6 +145,7 @@ let animFrameId: number | null = null;
 let osmdRef: OpenSheetMusicDisplay | null = null;
 
 let osmdEl: HTMLElement | null = null;
+let sectionMarksEl: HTMLElement | null = null;
 let handleAEl: HTMLElement | null = null;
 let handleBEl: HTMLElement | null = null;
 let shadeEl: HTMLElement | null = null;
@@ -989,7 +1005,7 @@ function initLoopHandles(): void {
 // ─── Loop create / clear ──────────────────────────────────────────────────────
 
 function setOverlayBounds(top: number, height: number): void {
-  for (const el of [handleAEl, handleBEl, shadeEl]) {
+  for (const el of [handleAEl, handleBEl, shadeEl, sectionMarksEl]) {
     if (!el) continue;
     el.style.top = `${top}px`;
     el.style.height = `${height}px`;
@@ -1215,19 +1231,104 @@ function emitSectionIfChanged(ticks: number): void {
   postToNative({ type: 'SECTION_INDEX', payload: index });
 }
 
+/** Score-pixel position of a tick, via the cursor step that owns it. */
+function pxAtTicks(ticks: number): number {
+  return cursorSteps[ticksToStep(ticks)]?.pxLeft ?? 0;
+}
+
 /**
- * Installs the piece's section starts, given as 0-based measure indices.
+ * How far a junction's fade reaches to each side: half a measure of engraved score,
+ * measured in pixels rather than assumed, because measure widths vary with how many
+ * notes they hold.
+ */
+function fadeReachPx(ticks: number): number {
+  const meta = measureAtTicks(ticks);
+  const reachTicks = ((TONE_PPQ * 4) / meta.den) * meta.num * SECTION_FADE_MEASURES;
+  const here = pxAtTicks(ticks);
+  const span = Math.max(
+    here - pxAtTicks(Math.max(0, ticks - reachTicks)),
+    pxAtTicks(ticks + reachTicks) - here,
+  );
+  return Math.min(SECTION_FADE_MAX_PX, Math.max(SECTION_FADE_MIN_PX, span));
+}
+
+function markDiv(left: number, width: number, background: string, opacity: number): HTMLElement {
+  const el = document.createElement('div');
+  el.style.left = `${left}px`;
+  el.style.width = `${width}px`;
+  el.style.background = background;
+  el.style.opacity = `${opacity}`;
+  return el;
+}
+
+/**
+ * Paints a colored mark into the score at every junction between two sections.
+ *
+ * Junctions only — a mark sits *between* two sections, so a piece with n sections
+ * gets n-1 of them and the opening of the piece is left unmarked.
+ *
+ * The elements live inside #osmd, so they translate with the score for free and
+ * need no per-frame work; they are rebuilt only when the section list changes.
+ */
+function renderSectionMarks(): void {
+  if (!sectionMarksEl) return;
+  sectionMarksEl.textContent = '';
+  if (sectionStartTicks.length < 2 || cursorSteps.length === 0) return;
+
+  for (let i = 1; i < sectionStartTicks.length; i++) {
+    const ticks = sectionStartTicks[i];
+    if (ticks === undefined) continue;
+    const px = pxAtTicks(ticks);
+    const reach = fadeReachPx(ticks);
+    const outgoing = sectionColors[i - 1];
+    const incoming = sectionColors[i];
+    if (outgoing === undefined || incoming === undefined) continue;
+
+    sectionMarksEl.appendChild(
+      markDiv(
+        px - reach,
+        reach,
+        `linear-gradient(to right, transparent, ${outgoing})`,
+        SECTION_FADE_ALPHA,
+      ),
+    );
+    sectionMarksEl.appendChild(
+      markDiv(px, reach, `linear-gradient(to right, ${incoming}, transparent)`, SECTION_FADE_ALPHA),
+    );
+    // The seam itself, at full strength: without it two adjacent sections drawing
+    // the same hue would blur into one continuous wash with no junction visible.
+    sectionMarksEl.appendChild(markDiv(px - SECTION_SEAM_PX, SECTION_SEAM_PX, outgoing, 1));
+    sectionMarksEl.appendChild(markDiv(px, SECTION_SEAM_PX, incoming, 1));
+  }
+}
+
+/**
+ * Installs the piece's sections, given as 0-based start measure indices with the
+ * palette color each one draws.
  *
  * Must be called after initPlayback: measure metadata and note spans only exist
  * once the score has been walked.
  */
-export function setSections(startMeasureIndices: number[]): void {
-  const ticks: number[] = [];
-  for (const measureIndex of startMeasureIndices) {
+export function setSections(startMeasureIndices: number[], colors: string[]): void {
+  // Two sections can resolve to the same tick (adjacent measures with a pickup
+  // absorbed between them). Dedupe on the resolved tick, keeping colors aligned.
+  const seen = new Set<number>();
+  const resolved: { ticks: number; color: string }[] = [];
+  for (let i = 0; i < startMeasureIndices.length; i++) {
+    const measureIndex = startMeasureIndices[i];
+    const color = colors[i];
+    if (measureIndex === undefined || color === undefined) continue;
     const tick = sectionStartTickFor(measureIndex);
-    if (tick !== null) ticks.push(tick);
+    if (tick === null || seen.has(tick)) continue;
+    seen.add(tick);
+    resolved.push({ ticks: tick, color });
   }
-  sectionStartTicks = [...new Set(ticks)].sort((a, b) => a - b);
+  resolved.sort((a, b) => a.ticks - b.ticks);
+  sectionStartTicks = resolved.map((s) => s.ticks);
+  sectionColors = resolved.map((s) => s.color);
+
+  renderSectionMarks();
+
   // Always report, even when null: a previously loaded piece may have left the
   // native label showing a section this score does not have.
   currentSectionIndex = sectionIndexAtTicks(Tone.Transport.ticks);
@@ -1273,6 +1374,7 @@ export function initPlayback(
   handleAEl = document.getElementById('loop-handle-a');
   handleBEl = document.getElementById('loop-handle-b');
   shadeEl = document.getElementById('loop-shade');
+  sectionMarksEl = document.getElementById('section-marks');
   scoreWidth = osmdEl?.scrollWidth ?? 0;
   viewportWidth = window.innerWidth;
 
@@ -1547,7 +1649,11 @@ export function disposePlayback(): void {
   measureMeta = [];
   noteSpans = [];
   sectionStartTicks = [];
+  sectionColors = [];
   currentSectionIndex = null;
+  // Marks are score-pixel positioned: left in place they would sit at stale
+  // coordinates over the next score, exactly like the loop handles below.
+  if (sectionMarksEl) sectionMarksEl.textContent = '';
   cursorSteps = [];
   currentCursorStep = -1;
   osmdActualIdx = -1;

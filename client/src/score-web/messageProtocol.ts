@@ -10,11 +10,15 @@ export type NativeToWebMessage =
   /** Measures of metronome count-in (0 = none) before a piece/routine/loop starts. */
   | { type: 'SET_COUNT_IN'; payload: number }
   /**
-   * 0-based start measure indices of the piece's detected sections, ascending.
-   * Must be sent after LOADED: the web side resolves them against measure metadata
-   * that only exists once playback has been initialised.
+   * The piece's detected sections: `measures` holds their 0-based start measure
+   * indices, ascending, and `colors` the palette entry each one draws, index for
+   * index. Colors travel with them because the WebView paints the junction marks
+   * in the score and has no access to the native theme.
+   *
+   * Must be sent after LOADED: the web side resolves the measure indices against
+   * metadata that only exists once playback has been initialised.
    */
-  | { type: 'SET_SECTIONS'; payload: number[] }
+  | { type: 'SET_SECTIONS'; payload: { measures: number[]; colors: string[] } }
   /** Jump to the start of the previous (-1) or next (+1) section. */
   | { type: 'SEEK_SECTION'; payload: -1 | 1 };
 

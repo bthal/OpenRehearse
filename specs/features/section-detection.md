@@ -138,18 +138,35 @@ Unit tests use inline XML fixtures only: `testfiles/` is gitignored and unavaila
 ### The label
 
 A small label in the **upper-right** corner of the score area names the section the cursor is
-currently in. It is **always visible** — during playback and while paused — and **inert**: tapping
-it does nothing, and it never swallows a tap meant for the score beneath it.
+currently in. It responds to a horizontal **swipe** (see Navigation) but never to a tap: a tap on it
+falls through to the score beneath, which toggles playback.
 
 - **Name**: the section's score-given `name`, else the ordinal `Section N` (1-based). Large and
   bold, always in **white**.
-- **Ground**: a plain block of the section's color — square corners, no gradient or fade.
-- **Fixed geometry**: the height and the two arrow slots are fixed, and the block is pinned in
-  absolute screen space above the WebView (`elevation` as well as `zIndex`, or Android renders the
-  WebView over it). Arrows appear and disappear inside their slots, so nothing reflows and the
-  label never shifts as playback state changes.
+- **Ground**: the section's color, at full strength across the middle and fading to transparent at
+  the left and right ends.
+- **Two states.** Paused, the label is expanded and shows the name. Playing, it rolls up to a thin
+  **strip** — the label's own top edge, same width and same color, with no text. Only the height
+  moves, while the contents cross-fade, so it reads as one object rolling up rather than a swap. The
+  name is not readable during playback; the color alone carries which section is running.
+- **Fixed geometry**: one width for every section, pinned in absolute screen space above the WebView
+  (`elevation` as well as `zIndex`, or Android renders the WebView over it).
 - **Nothing is shown** when the piece has no sections. There is no "whole piece" label.
 - The name updates **continuously while the score is panned**, not once the scroll settles.
+
+### Junctions marked in the score
+
+Each junction between two sections is also drawn into the score itself, under the notation: the
+outgoing section's color fades away to the left of the junction, the incoming section's fades away to
+the right, and the two meet at a crisp two-pixel seam carrying one pixel of each color.
+
+- **Junctions only.** A mark sits *between* two sections, so *n* sections produce *n−1* marks; the
+  opening of the piece is not marked.
+- The fade reaches roughly **half a measure** to each side, measured from the engraving rather than
+  assumed, and is held at low opacity so it never competes with the notes or with a loop's shade.
+- Marks sit at the same resolved junction the label and the swipe use, **including** the anacrusis
+  offset below — so at a junction that absorbs an upbeat the mark sits mid-measure, before the
+  barline, and all three agree about where the section begins.
 
 ### Colors
 
@@ -164,15 +181,36 @@ entry is held at a lightness that carries white at roughly 4.5:1 — which is wh
 entries are much darker than their nominal hue suggests. Any hue added here must be checked against
 white first.
 
+They are written as **hex**, unlike the `hsl()` used elsewhere in `colors.ts`, because the same
+string crosses three color parsers: React Native styles, the SVG gradient behind the label, and a CSS
+gradient inside the WebView, which receives the palette verbatim over `SET_SECTIONS`. The source hue
+is kept in a comment beside each entry.
+
 ### Navigation
 
-Arrows flank the label, jumping to the **start of the previous / next section** — strictly, with no
-"restart the current section" behaviour. Each arrow is present only when a section exists in that
-direction, so the first section shows only a right arrow and the last only a left.
+The label is **swiped** horizontally to move between sections, jumping to the **start of the previous
+/ next section** — strictly, with no "restart the current section" behaviour.
 
-Arrows are hidden while **playing**, and hidden while a **loop is active**: arming a bit is a
-deliberate "stay here" gesture, and seeking out of it would either strand the user or be silently
-undone when the transport snaps back to the loop's A handle.
+It behaves as a pager: the names travel with the finger, so dragging **rightward** brings the
+*earlier* section in from the left and dragging leftward brings the next one in from the right. The
+ground **crossfades** between the two sections' colors as the drag progresses. A swipe commits past
+about a quarter of the label's width, or on a flick; short of that it settles back.
+
+**One swipe is one section.** The only cells that exist are the two immediate neighbours, so the
+gesture cannot be ridden further than one section in either direction, however far the finger
+travels. Past the first or last section the label follows the finger at reduced distance and springs
+back, so the gesture is visibly received even where there is nothing to move to.
+
+The label is a **fixed width** so that names slide through a stable frame; a box that resized itself
+to each name would reshape at the end of every swipe. Long names truncate.
+
+The gesture is only claimed once a drag is clearly horizontal, so a tap still falls through to the
+score beneath. It stands down entirely while **playing**, and while a **loop is active**: arming a
+bit is a deliberate "stay here" gesture, and seeking out of it would either strand the user or be
+silently undone when the transport snaps back to the loop's A handle.
+
+Because a swipe is the only pointer affordance, the label also exposes the same two moves as
+increment/decrement **accessibility actions**.
 
 ### Junction offset for anacrusis pickups
 
@@ -214,7 +252,13 @@ This resolution lives in the WebView, which owns note durations; the domain modu
 - [x] A score with no readable form yields no sections, and PlayView shows no label.
 - [x] The label names the current section, or `Section N` when the score gives no name.
 - [x] A repeated section name keeps the same color throughout the piece.
-- [x] Arrows jump to the previous/next section start and are absent at the ends of the piece.
-- [x] Arrows are hidden while playing and while a loop is active.
+- [x] Swiping the label jumps to the previous/next section start, one section per swipe.
+- [x] The swipe rubber-bands and springs back at the first and last section.
+- [x] The swipe is inert while playing and while a loop is active.
 - [x] Section junctions absorb a real, rest-separated upbeat and otherwise land on the barline.
 - [x] Junctions do not move when the active hand changes.
+- [x] The label's ground fades out to the left and right.
+- [x] Names travel with the finger and the two sections' colors crossfade during a swipe.
+- [x] Playing rolls the label up to a bare strip and pausing unrolls it, animated both ways.
+- [x] Every junction between two sections is marked in the score, two-sided, with a crisp seam.
+- [x] The opening of the piece carries no mark; *n* sections produce *n−1* marks.

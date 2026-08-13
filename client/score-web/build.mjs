@@ -24,6 +24,10 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
       position: absolute; top: 0;
       background: rgba(100,149,237,0.20); pointer-events: none; display: none;
     }
+    /* Section junction marks. Declared before #loop-shade so an armed loop's shade
+       paints over them, and before the OSMD svg so both stay under the notation. */
+    #section-marks { position: absolute; top: 0; left: 0; pointer-events: none; }
+    #section-marks > div { position: absolute; top: 0; height: 100%; }
     .loop-handle {
       position: absolute; top: 0; width: 28px;
       background: rgba(75,122,110,0.75); cursor: ew-resize;
@@ -41,6 +45,7 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
   <div id="cursor-line"></div>
   <div id="osmd-wrapper">
     <div id="osmd">
+      <div id="section-marks"></div>
       <div id="loop-shade"></div>
       <!-- Grip glyphs are seagrass-700 (#3C5D57) rather than the handle's own seagrass-600:
            the icon was previously the same hue as the handle and barely read against it. -->

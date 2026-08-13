@@ -417,12 +417,16 @@ for both `height` and `top` on all overlay elements:
 ```typescript
 const systemTop = parseFloat(cEl.style.top || '0');
 const systemH = parseInt(cEl.getAttribute('height') ?? '0', 10);
-for (const el of [handleAEl, handleBEl, shadeEl]) {
+for (const el of [handleAEl, handleBEl, shadeEl, sectionMarksEl]) {
   if (!el) continue;
   el.style.top = `${systemTop}px`;
   el.style.height = `${systemH}px`;
 }
 ```
+
+The section-mark container (`#section-marks`) goes through the same call for the same reason. Its
+children are the only overlay elements sized with `height: 100%` in CSS, and that is safe *because*
+their parent's height is set here — they inherit the staff system height, not the SVG canvas.
 
 Set these in `initPlayback` immediately after `cursor.show()` (which triggers
 `updateWidthAndStyle` internally and populates the cursor element's position data).
@@ -913,7 +917,7 @@ a user setting, is preserved across score reloads (`disposePlayback` keeps it).
 
 ## Sections: junction ticks, and why they must not come from `noteEvents`
 
-`setSections(indices)` turns 0-based measure indices into transport ticks once per load, then
+`setSections(indices, colors)` turns 0-based measure indices into transport ticks once per load, then
 `emitSectionIfChanged` posts `SECTION_INDEX` only when the index actually changes — about once per
 section, never per frame, even though it is called from several per-frame paths.
 
@@ -956,3 +960,26 @@ compare with a 1-tick epsilon because note ends are rounded.
 (`advanceCursorTo`), the cursor element's `style.left`, and `applyTranslate` all have to move
 together; the loop-start seek in `startPlayback` and `seekSection` both go through it so they cannot
 drift apart.
+
+**Junction marks are static DOM, not per-frame drawing.** `renderSectionMarks` builds four absolutely
+positioned divs per junction (two gradient ramps, two 1px seam lines) as children of `#section-marks`
+inside `#osmd`. Because `#osmd` is what `applyTranslate` transforms, the marks scroll with the score
+for free — there is no per-frame cost and nothing to keep in sync. They are rebuilt only when the
+section list changes, and cleared in `disposePlayback` for the same reason the loop handles are: they
+are positioned in score pixels, so surviving into the next score would paint them at stale
+coordinates.
+
+Marks sit at **junctions only** — between two sections, so *n* sections produce *n−1* marks and the
+opening of the piece is unmarked. Each junction draws the outgoing section's color fading away to the
+left and the incoming section's fading away to the right, meeting at a two-pixel seam (one pixel of
+each) at full opacity. The seam is what keeps a junction visible when two neighbouring sections
+happen to draw the same hue, which the gradients alone would blur into one continuous wash.
+
+The fade reach is *measured*, not assumed: `fadeReachPx` converts half a measure of the junction's
+own meter into pixels via `pxAtTicks`, then clamps to `[20, 130]`. Engraved measure widths vary by an
+order of magnitude between a whole-note bar and a run of semiquavers, so a fixed pixel reach reads as
+a different amount of music in different parts of the same score.
+
+Gradients ramp to `transparent` rather than to an explicit zero-alpha color. CSS interpolates gradient
+stops with premultiplied alpha, so `transparent` does not drag the ramp through grey; writing
+`rgba(r,g,b,0)` instead would require parsing the palette string web-side for no gain.
