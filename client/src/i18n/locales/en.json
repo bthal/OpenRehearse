@@ -49,6 +49,7 @@
     "key": "Key",
     "octave_one": "Octave",
     "octave_other": "Octaves",
+    "peak": "Peak",
     "failedToGenerate": "Failed to generate score."
   },
   "settings": {
@@ -111,6 +112,7 @@
     "octave_other": "{{count}} Octaves",
     "measure_one": "{{count}} Measure",
     "measure_other": "{{count}} Measures",
+    "peakRepeats": "Peak ×{{times}}",
     "swapExercises": "Swap Exercises"
   },
   "routineRow": {

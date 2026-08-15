@@ -37,3 +37,9 @@ export const DEFAULT_WARMUP_BPM: WarmUpBpm = 60;
 
 export const WARMUP_OCTAVES = [1, 2, 3] as const;
 export type WarmUpOctaves = (typeof WARMUP_OCTAVES)[number];
+
+// 4-5 drill only: how many times the peak bar (fingers 2-3 at the top of the melody,
+// G-A in C major) is played before the melody turns around. 1 = no repeat.
+export const WARMUP_PEAK_REPEATS = [1, 2, 4, 8, 16] as const;
+export type WarmUpPeakRepeats = (typeof WARMUP_PEAK_REPEATS)[number];
+export const DEFAULT_PEAK_REPEATS: WarmUpPeakRepeats = 1;

@@ -1,4 +1,4 @@
-import type { WarmUpHand, WarmUpScaleMode } from './warmup';
+import { WARMUP_PEAK_REPEATS, type WarmUpHand, type WarmUpScaleMode } from './warmup';
 
 type PitchClass = 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11;
 
@@ -585,6 +585,26 @@ const D45_LH_MELODY: number[][] = [
   [60], // C4 (whole)
 ];
 
+// The peak bar (RH G4 A4 / LH F3 E3) — the hard spot, where the melody is played by
+// fingers 2 and 3 with no thumb anchor while 4+5 keep the ostinato going.
+const D45_PEAK_INDEX = 2;
+
+// Returns the melody with the peak bar played `peakRepeats` times in total, so the
+// student stays on fingers 2-3 for longer before the melody turns around.
+// Clamped rather than validated: routines saved before this parameter existed have no
+// value at all, and settings come back off disk unchecked.
+function expandDrill45Melody(melody: number[][], peakRepeats: number): number[][] {
+  const max = Math.max(...WARMUP_PEAK_REPEATS);
+  const extra = Math.max(0, Math.min(max - 1, Math.round(peakRepeats || 1) - 1));
+  if (extra === 0) return melody;
+  const peak = melody[D45_PEAK_INDEX]!;
+  return [
+    ...melody.slice(0, D45_PEAK_INDEX + 1),
+    ...Array.from({ length: extra }, () => peak),
+    ...melody.slice(D45_PEAK_INDEX + 1),
+  ];
+}
+
 function d45Eighth(
   midi: number,
   voice: 1 | 2,
@@ -613,9 +633,9 @@ function d45Whole(midi: number, voice: 1 | 2, names: KeyInfo['names']): string {
 
 const D45_BACKUP = '<backup><duration>8</duration></backup>';
 
-function buildDrill45RhMeasures(showFingering: boolean): string[][] {
+function buildDrill45RhMeasures(showFingering: boolean, peakRepeats: number): string[][] {
   const names = getKeyInfo(0, 'major').names;
-  return D45_RH_MELODY.map((melody, m) => {
+  return expandDrill45Melody(D45_RH_MELODY, peakRepeats).map((melody, m) => {
     const notes: string[] = [];
     if (melody.length === 1) {
       // Last measure: whole note per voice, no rhythm pattern
@@ -639,9 +659,9 @@ function buildDrill45RhMeasures(showFingering: boolean): string[][] {
   });
 }
 
-function buildDrill45LhMeasures(showFingering: boolean): string[][] {
+function buildDrill45LhMeasures(showFingering: boolean, peakRepeats: number): string[][] {
   const names = getKeyInfo(0, 'major').names;
-  return D45_LH_MELODY.map((melody, m) => {
+  return expandDrill45Melody(D45_LH_MELODY, peakRepeats).map((melody, m) => {
     const notes: string[] = [];
     if (melody.length === 1) {
       notes.push(d45Whole(melody[0]!, 1, names));
@@ -667,14 +687,15 @@ function buildDrill45LhMeasures(showFingering: boolean): string[][] {
 export function getDrill45MeasureNotes(
   hand: WarmUpHand,
   showFingering = true,
+  peakRepeats = 1,
 ): { rh: string[][] | null; lh: string[][] | null } {
-  const rh = hand === 'left' ? null : buildDrill45RhMeasures(showFingering);
-  const lh = hand === 'right' ? null : buildDrill45LhMeasures(showFingering);
+  const rh = hand === 'left' ? null : buildDrill45RhMeasures(showFingering, peakRepeats);
+  const lh = hand === 'right' ? null : buildDrill45LhMeasures(showFingering, peakRepeats);
   return { rh, lh };
 }
 
-export function generateDrill45Xml(hand: WarmUpHand): string {
-  const { rh, lh } = getDrill45MeasureNotes(hand);
+export function generateDrill45Xml(hand: WarmUpHand, peakRepeats = 1): string {
+  const { rh, lh } = getDrill45MeasureNotes(hand, true, peakRepeats);
   return buildTwoHandXml(0, 'major', hand, rh, lh);
 }
 

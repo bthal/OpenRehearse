@@ -39,6 +39,7 @@ RN/OSMD/Tone imports. See `specs/architecture.md` for the authoritative version.
 | State & domain | `specs/features/pieces-domain.md` |
 | Warm-up exercises | `specs/features/warmup.md` |
 | Routines (build + playback) | `specs/features/warmup.md` (Routines section) |
+| Adding a persisted setting | `compound-docs/settings-persistence.md` |
 
 ## Module map (where code goes)
 

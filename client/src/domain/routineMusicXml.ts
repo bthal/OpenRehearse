@@ -97,7 +97,7 @@ function measureNotesForBlock(block: ExerciseBlock): {
     case 'fiveScale':
       return getFiveScaleMeasureNotes(block.pitchClass, block.mode, block.hand, block.octaves);
     case 'drill45':
-      return getDrill45MeasureNotes(block.hand, false);
+      return getDrill45MeasureNotes(block.hand, false, block.peakRepeats);
   }
 }
 
