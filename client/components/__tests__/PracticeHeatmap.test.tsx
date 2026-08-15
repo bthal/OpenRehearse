@@ -7,6 +7,16 @@ import { HeatmapColors } from '@theme/colors';
 import { PracticeHeatmap, weeksThatFit } from '../PracticeHeatmap';
 
 /**
+ * The heatmap resets its selected day whenever the dashboard regains focus,
+ * which means a real navigation tree. Standing one up would test expo-router
+ * rather than the grid, so focus is stubbed as "fires once on mount" — which is
+ * what focusing a freshly rendered screen does anyway.
+ */
+jest.mock('expo-router', () => ({
+  useFocusEffect: (callback: () => void) => require('react').useEffect(callback, [callback]),
+}));
+
+/**
  * The slice of the rendered tree these tests walk. Declared locally because
  * react-test-renderer ships no types.
  */

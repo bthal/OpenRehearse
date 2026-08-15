@@ -21,6 +21,46 @@ export interface PracticeDelta {
 }
 
 const MS_PER_SECOND = 1000;
+const SECONDS_PER_MINUTE = 60;
+const MINUTES_PER_HOUR = 60;
+
+/**
+ * A day's practice total, shaped for display but not yet worded.
+ *
+ * The heatmap's day caption has to phrase four genuinely different cases, and
+ * the wording lives in i18n rather than here — so this returns the *shape* of
+ * the total and leaves the strings to the caller.
+ *
+ * `underMinute` exists because a day with a few seconds on it rounds to zero
+ * minutes and is therefore left out of the grid entirely: its cell looks empty,
+ * and a caption claiming "no practice" would contradict a total the app did
+ * record. Saying "under a minute" explains the empty cell instead.
+ */
+export type PracticeDayDuration =
+  | { kind: 'none' }
+  | { kind: 'underMinute' }
+  | { kind: 'minutes'; minutes: number }
+  | { kind: 'hours'; hours: number; minutes: number };
+
+/**
+ * Shape a day's total for the heatmap caption.
+ *
+ * Minutes are rounded the same way the grid rounds them into cell counts, so a
+ * cell's colour band and its caption can never disagree about the same day.
+ */
+export function practiceDayDuration(seconds: number): PracticeDayDuration {
+  if (seconds <= 0) return { kind: 'none' };
+
+  const totalMinutes = Math.round(seconds / SECONDS_PER_MINUTE);
+  if (totalMinutes === 0) return { kind: 'underMinute' };
+  if (totalMinutes < MINUTES_PER_HOUR) return { kind: 'minutes', minutes: totalMinutes };
+
+  return {
+    kind: 'hours',
+    hours: Math.floor(totalMinutes / MINUTES_PER_HOUR),
+    minutes: totalMinutes % MINUTES_PER_HOUR,
+  };
+}
 
 /** Local-time `YYYY-MM-DD` key for a timestamp. Days are local, not UTC. */
 export function practiceDayKey(ms: number): string {

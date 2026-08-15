@@ -2,6 +2,7 @@ import {
   applyPracticeDeltas,
   mergePracticeTotals,
   PracticeClock,
+  practiceDayDuration,
   practiceDayKey,
   splitIntervalByDay,
 } from '../practiceTime';
@@ -26,6 +27,31 @@ describe('practiceDayKey', () => {
   it('formats the local calendar day, zero-padded', () => {
     expect(practiceDayKey(at(2026, 3, 7, 23, 59, 59))).toBe('2026-03-07');
     expect(practiceDayKey(at(2026, 12, 31, 0, 0, 0))).toBe('2026-12-31');
+  });
+});
+
+describe('practiceDayDuration', () => {
+  it('separates an untouched day from one with only a few seconds on it', () => {
+    // A sub-minute day rounds to 0 minutes and is left out of the grid, so its
+    // cell looks empty — the caption has to distinguish the two cases.
+    expect(practiceDayDuration(0)).toEqual({ kind: 'none' });
+    expect(practiceDayDuration(20)).toEqual({ kind: 'underMinute' });
+  });
+
+  it('rounds minutes the same way the grid rounds cell counts', () => {
+    expect(practiceDayDuration(29)).toEqual({ kind: 'underMinute' });
+    expect(practiceDayDuration(31)).toEqual({ kind: 'minutes', minutes: 1 });
+    expect(practiceDayDuration(42 * 60)).toEqual({ kind: 'minutes', minutes: 42 });
+  });
+
+  it('splits an hour or more into hours and minutes', () => {
+    expect(practiceDayDuration(60 * 60)).toEqual({ kind: 'hours', hours: 1, minutes: 0 });
+    expect(practiceDayDuration(70 * 60)).toEqual({ kind: 'hours', hours: 1, minutes: 10 });
+    expect(practiceDayDuration(125 * 60)).toEqual({ kind: 'hours', hours: 2, minutes: 5 });
+  });
+
+  it('treats a negative total as no practice rather than throwing', () => {
+    expect(practiceDayDuration(-5)).toEqual({ kind: 'none' });
   });
 });
 
