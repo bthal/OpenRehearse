@@ -26,6 +26,70 @@ export interface GridPoint {
  */
 export const LOOP_MIN_QUARTERS = 1;
 
+/**
+ * Smallest pixel gap left between two adjacent grid points when an anchor is
+ * clamped. Matches the margin {@link buildSnapGrid} keeps ahead of the final
+ * onset, so no two points can ever collapse onto one pixel.
+ */
+const MIN_STEP_SEPARATION_PX = 1;
+
+/** An onset, plus the barline that opens its measure when it starts one. */
+export interface AnchorableStep {
+  /** Where the onset's notehead group sits, in rendered score pixels. */
+  pxLeft: number;
+  /**
+   * The barline opening this onset's measure — set only on the first onset of a
+   * measure, and never on the opening measure of the piece, whose left edge is
+   * the edge of the engraving itself (clef and key signature would end up right
+   * of the playhead).
+   */
+  barPxLeft?: number;
+}
+
+/**
+ * Moves the onset that starts a measure onto that measure's barline, and returns
+ * one pixel per step. Onsets without a barline are returned untouched.
+ *
+ * Why the grid is worth bending: a measure start is the position users actually
+ * aim at — a section junction divides two measures exactly, and a practice loop
+ * is nearly always a whole number of bars. OSMD positions its cursor on the
+ * notehead group, which sits inside the measure by the stave's note-start inset,
+ * so without this every seam, handle and shade edge lands *after* the barline
+ * that defines it.
+ *
+ * **The cost, measured rather than assumed.** On Bach BWV 846 at zoom 1 the shift
+ * is a median 6.9 px (max 22.8 where accidentals widen the first entry). Those
+ * pixels have to be traversed by someone: they leave the segment arriving at the
+ * downbeat and join the one leaving it. Taking a typical sixteenth-note step in
+ * that score as 1.0x, the two steps either side of a barline go from 1.50x / 1.28x
+ * to 1.25x / 1.52x — the engraving already bulges there, and anchoring only
+ * redistributes the bulge. Not noticeable in practice.
+ *
+ * Do not "fix" even that by splitting the pixel in two, one for overlays and one
+ * for playback. A single value shared by the snap search, the overlays and the
+ * playback interpolation is exactly what guarantees the playhead and the loop
+ * handles can never disagree at rest; the alternative parks the playhead inside
+ * the loop shade forever.
+ */
+export function anchorToBarlines(steps: readonly AnchorableStep[]): number[] {
+  return steps.map((step, i) => {
+    if (step.barPxLeft === undefined) return step.pxLeft;
+
+    let target = step.barPxLeft;
+    // Never let an anchor reach back past the previous onset. Skipped where the
+    // raw sequence descends, which is a repeat's back-jump: there the previous
+    // step belongs to a later pass over earlier engraving and says nothing about
+    // how far left this one may go.
+    const prev = steps[i - 1];
+    if (prev !== undefined && prev.pxLeft <= step.pxLeft) {
+      target = Math.max(target, prev.pxLeft + MIN_STEP_SEPARATION_PX);
+    }
+    // An anchor only ever pulls left; a barline right of its own notehead would
+    // mean the geometry was misread.
+    return Math.min(target, step.pxLeft);
+  });
+}
+
 export interface LoopIndices {
   aIndex: number;
   bIndex: number;

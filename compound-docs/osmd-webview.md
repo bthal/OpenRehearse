@@ -169,6 +169,44 @@ Two traps:
    the animation ends, when a drag starts, and on clear/dispose. A handle grabbed *during* its own
    release settle is exactly this case.
 
+## LANDMINE: do NOT copy the cursor's `- 1.5` when converting OSMD geometry
+
+OSMD lays out in abstract units. The drawn position of anything is `10 * units * zoom` — verified
+directly against VexFlow: for any measure that expression equals its `stave.getX()`.
+
+OSMD's `Cursor.updateWidthAndStyle` looks like it disagrees:
+
+```
+left = 10 * (x - 1.5) * zoom      // default cursor type
+```
+
+**It does not.** The cursor element is an `<img>` **30 px wide**, and 1.5 units is half of it, so the
+offset centres the image on the note. `cursorElement.style.left` is the left edge of a box, not a
+point. The note grid reads it as a point deliberately — that is what puts the playhead just left of
+a notehead instead of through it.
+
+So a barline, which is drawn geometry and already a point, must use `10 * units * zoom` with **no**
+offset. Copying the cursor's `- 1.5` onto it renders every seam, handle and settled cursor exactly
+15 px left of the barline at zoom 1 — subtle enough to look like a layout quirk rather than a bug,
+and this repo shipped it once for exactly that reason.
+
+Two further traps in the same area:
+
+- **`GraphicalMeasure.PositionAndShape.AbsolutePosition.x` is the barline**, measured *before*
+  `beginInstructionsWidth`. Adding that width instead gives you the position after the clef, key and
+  time signature — a different thing, and not what "start of measure" means.
+- **`MeasureList` is keyed by the printed measure index**, which is what the iterator reports as
+  `CurrentMeasureIndex`. Pick the staff row entry the way OSMD itself does in
+  `Cursor.findVisibleGraphicalMeasure` — first entry whose `ParentStaff.isVisible()` — or a score
+  with a hidden staff resolves to geometry that is never drawn.
+
+Measured on Bach BWV 846 at zoom 1: VexFlow's own note-start inset is `stave.getNoteStartX() -
+stave.getX()` = **5 px**, and a measure's first grid pixel ends up a median **6.9 px** right of its
+barline (max 22.8 where accidentals widen the entry). None of that is an engraving margin — sweeping
+`EngravingRules.MeasureLeftMargin` from 2.0 to 0.0 does not move it by a single pixel. It is
+VexFlow's inset inside the stave and it cannot be configured away, which is why the note grid
+anchors measure starts explicitly instead.
+
 ## Score-pixel overlays must be hidden **and** reset on dispose
 
 `#loop-handle-a`, `#loop-handle-b`, `#loop-shade`, `#section-marks` and `#snap-preview` are all

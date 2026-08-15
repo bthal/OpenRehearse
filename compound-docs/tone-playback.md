@@ -745,6 +745,44 @@ position is not an exact tick multiple — tuplets, mostly. `seekToStep(step, ti
 wherever the caller already knows the index, pass the index. `startPlayback`'s seek to loop A goes
 through it, otherwise a loop starting on a triplet would begin one note early.
 
+## A measure's first onset is anchored to its barline — one pixel, shared by everything
+
+**PATTERN:** `buildTimelines` records each measure-opening step's barline (`measureBoundsPx`) and
+`anchorToBarlines` (`domain/scoreGrid.ts`) writes the result straight into `CursorStep.pxLeft`.
+There is exactly **one** pixel per grid point, read by the snap search, the preview line, the loop
+overlay, `pxAtTicks` for section seams, the scroll clamp and the playback interpolation alike.
+
+That single value is the whole point. The obvious alternative — a "notehead pixel" for playback and
+a "barline pixel" for overlays — was designed and rejected: it parks the playhead ~22 px inside the
+loop shade at every loop start and wrap, which is the same defect as the off-grid cursor bug that
+motivated the grid in the first place, only permanent.
+
+**The cost, measured on Bach BWV 846 (28 px per sixteenth as 1.0×; median shift 6.9 px, max 22.8):**
+
+| step | before | after |
+|---|---|---|
+| into the barline (last note of the measure) | 1.50× | **1.25×** |
+| out of the barline (downbeat) | 1.28× | **1.52×** |
+
+The engraving already bulges either side of a barline; anchoring only redistributes the bulge, and
+the result is not noticeable in practice. **Do not "smooth" even that** by reintroducing a second
+pixel per step.
+
+An earlier revision of this note claimed 0.71× / 2.06×. That was measured while `measureBoundsPx`
+still carried the cursor's `- 1.5` offset (see `osmd-webview.md`), which inflated the shift from
+6.9 px to 21.9 px. If you find figures in that range anywhere, the offset bug is back.
+
+Two rules inside `anchorToBarlines` that are not decoration:
+
+- **The opening measure is never anchored.** Its left edge is the edge of the engraving, so the
+  playhead would sit left of the clef, and `scrollMaxPx` (which reads `cursorSteps[0].pxLeft`) would
+  follow it there.
+- **An anchor never reaches back past the previous onset**, except across a repeat's back-jump,
+  where the pixel sequence descends and the previous step says nothing about how far left this one
+  may go. That guard is what preserves the ascending-pixel invariant `nearestGridIndex`
+  binary-searches on. On the prelude it never has to fire (34 anchored steps, 0 clamped), but a
+  measure whose first entry carries accidentals has a 37.8 px inset against ~28 px steps, so it can.
+
 ## LANDMINE: `Iterator.EndReached` fires while cursor is still AT the final note
 
 **LANDMINE:** Some OSMD builds set `cursor.Iterator.EndReached = true` while the cursor is still

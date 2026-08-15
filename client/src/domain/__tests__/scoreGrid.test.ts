@@ -1,8 +1,10 @@
 import {
+  anchorToBarlines,
   buildSnapGrid,
   clampLoopIndices,
   LOOP_MIN_QUARTERS,
   nearestGridIndex,
+  type AnchorableStep,
   type GridPoint,
 } from '../scoreGrid';
 
@@ -196,5 +198,76 @@ describe('clampLoopIndices', () => {
     expect(
       clampLoopIndices({ grid: [{ quarters: 0, pxLeft: 100 }], aIndex: 0, bIndex: 0, moved: 'a' }),
     ).toEqual({ aIndex: 0, bIndex: 0 });
+  });
+});
+
+describe('anchorToBarlines', () => {
+  // Distances taken from a real render of Bach BWV 846 at zoom 1: onsets a
+  // sixteenth apart sit 28 px apart, and a measure's first notehead sits about
+  // 22 px right of its barline.
+  const SPAN = 28;
+  const GAP = 22;
+
+  it('leaves onsets that do not open a measure untouched', () => {
+    const steps: AnchorableStep[] = [{ pxLeft: 100 }, { pxLeft: 128 }, { pxLeft: 156 }];
+    expect(anchorToBarlines(steps)).toEqual([100, 128, 156]);
+  });
+
+  it('pulls the onset that opens a measure onto its barline', () => {
+    const steps: AnchorableStep[] = [
+      { pxLeft: 100 },
+      { pxLeft: 128 },
+      { pxLeft: 156, barPxLeft: 156 - GAP },
+      { pxLeft: 184 },
+    ];
+    expect(anchorToBarlines(steps)).toEqual([100, 128, 134, 184]);
+  });
+
+  it('never moves an onset to the right', () => {
+    const steps: AnchorableStep[] = [{ pxLeft: 100 }, { pxLeft: 128, barPxLeft: 140 }];
+    expect(anchorToBarlines(steps)).toEqual([100, 128]);
+  });
+
+  it('keeps a pixel of daylight between an anchor and the previous onset', () => {
+    // A wide inset against a narrow preceding step: the barline lies left of the
+    // previous notehead, so the anchor is held back rather than crossing it.
+    const steps: AnchorableStep[] = [{ pxLeft: 170 }, { pxLeft: 172, barPxLeft: 150 }];
+    expect(anchorToBarlines(steps)).toEqual([170, 171]);
+  });
+
+  it('prefers staying put over being pushed right by that clamp', () => {
+    const steps: AnchorableStep[] = [{ pxLeft: 172 }, { pxLeft: 172.5, barPxLeft: 150 }];
+    expect(anchorToBarlines(steps)).toEqual([172, 172.5]);
+  });
+
+  it('still anchors across a repeat back-jump', () => {
+    // The iterator unrolls the repeat while the engraving draws it once, so the
+    // pixel sequence drops. Clamping against the previous step here would refuse
+    // to anchor the measure at all.
+    const steps: AnchorableStep[] = [{ pxLeft: 500 }, { pxLeft: 200, barPxLeft: 178 }];
+    expect(anchorToBarlines(steps)).toEqual([500, 178]);
+  });
+
+  it('anchors a first step, which has no predecessor to clamp against', () => {
+    expect(anchorToBarlines([{ pxLeft: 100, barPxLeft: 78 }])).toEqual([78]);
+  });
+
+  it('returns one pixel per step and keeps them ascending', () => {
+    const steps: AnchorableStep[] = [];
+    for (let measure = 0; measure < 4; measure++) {
+      for (let onset = 0; onset < 4; onset++) {
+        const pxLeft = 100 + (measure * 4 + onset) * SPAN;
+        steps.push(onset === 0 && measure > 0 ? { pxLeft, barPxLeft: pxLeft - GAP } : { pxLeft });
+      }
+    }
+    const out = anchorToBarlines(steps);
+    expect(out).toHaveLength(steps.length);
+    for (let i = 1; i < out.length; i++) {
+      expect(out[i] ?? 0).toBeGreaterThan(out[i - 1] ?? 0);
+    }
+  });
+
+  it('survives a score with no onsets', () => {
+    expect(anchorToBarlines([])).toEqual([]);
   });
 });

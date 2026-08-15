@@ -166,6 +166,9 @@ the right, and the two meet at a crisp two-pixel seam carrying one pixel of each
   assumed, and is held at low opacity so it never competes with the notes or with a loop's shade.
 - Marks sit at the same resolved junction the label and the swipe use — always a barline, per the
   pickup policy below — so all three agree about where a section begins.
+- The seam is drawn **on the engraved barline**, not on the first notehead of the incoming section.
+  It inherits that position from the note grid, where a measure's first onset is anchored to its
+  barline (see `specs/features/playview.md` § one-line mode); no separate placement rule exists here.
 
 ### Colors
 

@@ -28,6 +28,17 @@ The entire piece is rendered in a **single horizontal line** — all measures la
     onset sits exactly under the cursor, and the line fades out as the two meet.
   - The nearest onset wins, not the preceding one: scrolling most of the way to the next note lands
     on it.
+  - **The onset that opens a measure is positioned on that measure's barline**, not on its notehead.
+    OSMD engraves the first note a little inside the measure, so without this every position that
+    means "start of measure" — the cursor, a loop bound, a section junction — lands *after* the
+    barline that defines it. The opening measure is deliberately excluded: its left edge is the edge
+    of the engraving, so anchoring there would park the playhead left of the clef.
+  - That single pixel is shared by the snap search, the preview line, the loop overlay **and** the
+    playback interpolation, which is what keeps the playhead, the handles and the section seams from
+    ever disagreeing. The cost is slightly uneven playhead motion at each barline — the pixels
+    between barline and notehead move from the step arriving at the downbeat to the step leaving it
+    — but the engraving already spaces those steps unevenly, so anchoring only redistributes it
+    (measured: 1.50×/1.28× becomes 1.25×/1.52× of a normal step).
   - On next **play**: if no loop is set, playback resumes from the cursor's current position — which
     is already exactly on a note, so **nothing moves when playback starts**. If a loop is set, the
     cursor smoothly scrolls to the loop start and playback begins from there.
@@ -70,8 +81,10 @@ The entire piece is rendered in a **single horizontal line** — all measures la
   under B is the **first note not played**. Both handles therefore cover excluded material — A's
   body sits to the left of its note, B's sits on the note it excludes — so the pair reads as a
   bracket around the region.
-- **End of the piece**: a virtual target at the **final barline** sits past the last onset, so
-  dragging B fully right includes the final note in the loop.
+- **End of the piece**: a virtual target on the **engraved closing barline** sits past the last
+  onset, so dragging B fully right includes the final note and shades up to the double bar the user
+  can see. It is clamped to a reachable pixel, since the score only scrolls until the last onset
+  reaches the cursor and a handle parked beyond that could not be dragged back.
 - **Handle dragging**:
   - Dragging is **continuous** — the handle follows the finger — but the position is **discretised
     to the note grid immediately**. The same **preview line** used by manual scroll marks the onset
@@ -151,6 +164,8 @@ Slices: `activePieceId`, `webViewReady`, `isLoadingScore`, `scoreError`, `isPlay
 - [x] Scrolling and handle dragging are discretised to the note grid: a system-height preview line
   marks the nearest onset while the finger moves and while momentum coasts, and the score or handle
   glides onto it on settle. Pressing play after positioning by hand moves nothing.
+- [x] A measure's first onset sits on its barline, so the cursor, loop bounds and section junctions
+  all align with the engraved barlines; the opening measure is excluded (`domain/scoreGrid.ts`).
 - [x] Toolbar renders vertically on the left. *(Phase 4)*
 - [x] Tapping loop button creates loop at cursor with fixed pixel span (`LOOP_DEFAULT_PX`);
   also pauses playback if running. Tapping again (× icon) removes it. *(Phase 4/5)*

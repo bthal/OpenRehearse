@@ -6,14 +6,29 @@ import type { OutboundMessage } from './types';
 import { computeCountIn, loopLeadInBeats } from '../../src/domain/countIn';
 import { placeLoopAtCursor } from '../../src/domain/loop';
 import {
+  anchorToBarlines,
   buildSnapGrid,
   clampLoopIndices,
   nearestGridIndex,
+  type AnchorableStep,
   type GridPoint,
 } from '../../src/domain/scoreGrid';
 
 // Matches Tone.js default PPQ; must stay in sync with Tone.Transport.PPQ.
 const TONE_PPQ = 192;
+
+// OSMD lays out in abstract units; `10 * units * zoom` is where a thing is actually
+// drawn. Verified against VexFlow directly: for any measure this equals its
+// `stave.getX()`.
+//
+// Do NOT copy the `- 1.5` from OSMD's Cursor.updateWidthAndStyle here, tempting as
+// it looks. That offset is not a coordinate convention — the cursor element is a
+// 30 px-wide image, and 1.5 units is half of it, so the shift centres the image on
+// the note. `cursorElement.style.left` is therefore the left edge of a box, and
+// reading it as a point (which the note grid does, deliberately) is what puts the
+// playhead just left of a notehead rather than through it. Drawn geometry like a
+// barline is a point already; giving it the cursor's offset renders it 15 px early.
+const OSMD_UNIT_PX = 10;
 
 const PIANO_URLS: Record<string, string> = {
   A0: 'A0.mp3',
@@ -87,7 +102,11 @@ interface NoteEvent {
 
 interface CursorStep {
   quarters: number; // expanded time (fermata hold adds extra quarters)
-  pxLeft: number; // exact value of cursorElement.style.left at this step
+  // Where this step sits in the score, and the single pixel every part of the UI
+  // reads: the snap search, the preview line, the loop overlay and the playback
+  // interpolation. It starts as cursorElement.style.left, but the onset that opens
+  // a measure is then pulled onto that measure's barline — see anchorToBarlines.
+  pxLeft: number;
   osmdIdx: number; // how many cursor.next() calls from start to reach this OSMD position
 }
 
@@ -176,6 +195,9 @@ let previewEl: HTMLElement | null = null;
 let previewStep = -1;
 let scrollOffsetPx = 0;
 let scoreWidth = 0;
+// Right edge of the last printed measure — the closing barline — in the cursor's
+// pixel frame. 0 until a score has been walked.
+let finalBarlinePx = 0;
 let viewportWidth = 0;
 let scrollMinPx = 0; // translateX that puts the last note at center
 let scrollMaxPx = 0; // translateX that puts the first note at center
@@ -267,13 +289,40 @@ export interface ExternalTempoChange {
   bpm: number;
 }
 
+/**
+ * Where a printed measure's opening and closing barlines are drawn, in score pixels.
+ *
+ * `MeasureList` is keyed by the printed measure index — the same index the
+ * iterator reports as `CurrentMeasureIndex` — and the first visible staff is
+ * picked the way OSMD's own `Cursor.findVisibleGraphicalMeasure` does. The
+ * measure's `AbsolutePosition.x` is its left edge *before* `beginInstructionsWidth`,
+ * so it is the barline itself and not the first thing engraved after it.
+ */
+function measureBoundsPx(
+  osmd: OpenSheetMusicDisplay,
+  index: number,
+): { leftPx: number; rightPx: number } | null {
+  const row = osmd.GraphicSheet.MeasureList[index];
+  if (!row) return null;
+  for (const measure of row) {
+    if (!measure?.ParentStaff.isVisible()) continue;
+    const box = measure.PositionAndShape;
+    const toPx = (units: number): number => OSMD_UNIT_PX * units * osmd.zoom;
+    return {
+      leftPx: toPx(box.AbsolutePosition.x),
+      rightPx: toPx(box.AbsolutePosition.x + box.Size.width),
+    };
+  }
+  return null;
+}
+
 function buildTimelines(osmd: OpenSheetMusicDisplay): {
   noteEvents: NoteEvent[];
   scoreBpm: number;
   tempoChanges: TempoChange[];
 } {
   const noteEvents: NoteEvent[] = [];
-  const steps: CursorStep[] = [];
+  const steps: (CursorStep & AnchorableStep)[] = [];
   const tempoChanges: TempoChange[] = [];
 
   osmd.cursor.reset();
@@ -302,6 +351,12 @@ function buildTimelines(osmd: OpenSheetMusicDisplay): {
     const expandedQuarters = quarters + tickShift / TONE_PPQ;
     lastExpandedQuarters = expandedQuarters;
 
+    // Set on the first step of each measure, so anchorToBarlines can pull that
+    // step onto the barline. Left undefined for the opening measure: its left
+    // edge is the edge of the engraving, and anchoring there would park the
+    // playhead left of the clef.
+    let barPxLeft: number | undefined;
+
     const measure = osmd.cursor.Iterator.CurrentMeasure as unknown;
     if (measure !== lastMeasure) {
       lastMeasure = measure;
@@ -329,10 +384,13 @@ function buildTimelines(osmd: OpenSheetMusicDisplay): {
       if (sourceIndex >= 0 && firstTicksBySourceIndex[sourceIndex] === undefined) {
         firstTicksBySourceIndex[sourceIndex] = startTicks;
       }
+      // A repeat visits the same printed measure twice; both passes anchor to the
+      // one barline that was engraved for it.
+      if (sourceIndex > 0) barPxLeft = measureBoundsPx(osmd, sourceIndex)?.leftPx;
     }
     // Use style.left (exact value OSMD sets) rather than offsetLeft (integer, may round).
     const pxLeft = parseFloat(el?.style.left ?? '0');
-    steps.push({ quarters: expandedQuarters, pxLeft, osmdIdx });
+    steps.push({ quarters: expandedQuarters, pxLeft, osmdIdx, barPxLeft });
 
     // Extra ticks to insert after this position due to a fermata at this step.
     let fermataExtraTicks = 0;
@@ -453,8 +511,17 @@ function buildTimelines(osmd: OpenSheetMusicDisplay): {
     steps.push({ quarters: expandedQ, pxLeft: finalPxLeft, osmdIdx });
   }
 
+  // The closing barline, for the loop's terminal target. Falls back to 0, which
+  // rebuildSnapGrid reads as "unknown" and replaces with the score's full width.
+  finalBarlinePx = measureBoundsPx(osmd, osmd.GraphicSheet.MeasureList.length - 1)?.rightPx ?? 0;
+
   totalQuarters = lastExpandedQuarters + 1;
-  cursorSteps = steps;
+  const anchoredPx = anchorToBarlines(steps);
+  cursorSteps = steps.map((step, i) => ({
+    quarters: step.quarters,
+    pxLeft: anchoredPx[i] ?? step.pxLeft,
+    osmdIdx: step.osmdIdx,
+  }));
   osmd.cursor.reset();
 
   return { noteEvents, scoreBpm, tempoChanges };
@@ -485,18 +552,21 @@ function applyTranslate(px: number): void {
  * of `scoreWidth` — on a fresh load scoreWidth still holds the previous score's
  * value until then.
  *
- * The terminal's pixel position is clamped into the reachable span. The score can
- * only scroll until the last *onset* sits at the centre line, so anything further
- * right than half a viewport past that onset can never be dragged to, and a handle
- * parked there could not be dragged back.
+ * The terminal sits on the closing barline, so "loop to the end" shades up to the
+ * double bar the user can see rather than to an arbitrary pixel past the last note.
+ * It is then clamped into the reachable span: the score only scrolls until the last
+ * *onset* sits at the centre line, so anything further right than half a viewport
+ * past that onset can never be dragged to, and a handle parked there could not be
+ * dragged back.
  */
 function rebuildSnapGrid(): void {
   const lastOnsetPx = cursorSteps[cursorSteps.length - 1]?.pxLeft ?? scoreWidth;
   const reachablePx = lastOnsetPx + viewportWidth / 2 - HANDLE_WIDTH;
+  const closingBarPx = finalBarlinePx > 0 ? finalBarlinePx : scoreWidth;
   snapGrid = buildSnapGrid({
     onsets: cursorSteps,
     terminalQuarters: totalQuarters,
-    terminalPxLeft: Math.min(scoreWidth, reachablePx),
+    terminalPxLeft: Math.min(closingBarPx, reachablePx),
   });
 }
 
@@ -1973,6 +2043,7 @@ export function disposePlayback(): void {
   currentCursorStep = -1;
   osmdActualIdx = -1;
   totalQuarters = 0;
+  finalBarlinePx = 0;
   loopRegion = null;
   endLoopOverlayTransition();
   // Same reason as the marks and the handles: the preview holds a score-pixel
