@@ -1,6 +1,7 @@
 import {
   generateArpeggioXml,
   generateChromaticXml,
+  generateDrill45Xml,
   generateFiveScaleXml,
   generateScaleXml,
 } from '../warmupMusicXml';
@@ -20,9 +21,22 @@ function pitches(xml: string): string[] {
   return out;
 }
 
+function partXml(xml: string, partId: string): string {
+  const start = xml.indexOf(`<part id="${partId}">`);
+  return xml.slice(start, xml.indexOf('</part>', start));
+}
+
 function measureCount(xml: string, partId: string): number {
-  const part = xml.slice(xml.indexOf(`<part id="${partId}">`));
-  return (part.match(/<measure number=/g) ?? []).length;
+  return (partXml(xml, partId).match(/<measure number=/g) ?? []).length;
+}
+
+// The 4-5 drill's melody voice is written in half notes; the 4-5 ostinato is all
+// eighths and the closing bar is whole notes, so this isolates the melody.
+function halfNotePitches(xml: string, partId: string): string[] {
+  return partXml(xml, partId)
+    .split('<note>')
+    .filter((note) => note.includes('<type>half</type>'))
+    .flatMap((note) => pitches(note));
 }
 
 describe('generateScaleXml (refactor regression)', () => {
@@ -89,5 +103,67 @@ describe('generateFiveScaleXml', () => {
       'C4','D4','E4','F4','G4','C5','D5','E5','F5','G5',
       'F5','E5','D5','C5','G4','F4','E4','D4','C4',
     ]); // prettier-ignore
+  });
+});
+
+describe('generateDrill45Xml', () => {
+  it('renders the plain 6-measure drill by default', () => {
+    const xml = generateDrill45Xml('both');
+    expect(measureCount(xml, 'P1')).toBe(6);
+    expect(measureCount(xml, 'P2')).toBe(6);
+    // RH melody rises C-D-E-F-G-A then falls G-F-E-D; the closing C is a whole note.
+    expect(halfNotePitches(xml, 'P1')).toEqual([
+      'C4','D4','E4','F4','G4','A4','G4','F4','E4','D4',
+    ]); // prettier-ignore
+    expect(halfNotePitches(xml, 'P2')).toEqual([
+      'C4','B3','A3','G3','F3','E3','F3','G3','A3','B3',
+    ]); // prettier-ignore
+  });
+
+  it('adds one measure per extra peak repeat', () => {
+    expect(measureCount(generateDrill45Xml('both', 2), 'P1')).toBe(7);
+    expect(measureCount(generateDrill45Xml('both', 4), 'P1')).toBe(9);
+    expect(measureCount(generateDrill45Xml('both', 8), 'P1')).toBe(13);
+    expect(measureCount(generateDrill45Xml('both', 16), 'P1')).toBe(21);
+    expect(measureCount(generateDrill45Xml('both', 16), 'P2')).toBe(21);
+  });
+
+  it('repeats the peak bar (G-A), not the turnaround', () => {
+    const xml = generateDrill45Xml('both', 4);
+    expect(halfNotePitches(xml, 'P1')).toEqual([
+      'C4','D4','E4','F4','G4','A4','G4','A4','G4','A4','G4','A4','G4','F4','E4','D4',
+    ]); // prettier-ignore
+    // LH mirrors in contrary motion: its peak bar is F-E.
+    expect(halfNotePitches(xml, 'P2')).toEqual([
+      'C4','B3','A3','G3','F3','E3','F3','E3','F3','E3','F3','E3','F3','G3','A3','B3',
+    ]); // prettier-ignore
+  });
+
+  it('keeps the 4-5 ostinato and the whole-note ending intact when repeating', () => {
+    const rh = partXml(generateDrill45Xml('right', 4), 'P1');
+    const measures = rh.split('<measure number=').slice(1);
+    expect(measures).toHaveLength(9);
+    // Every bar but the last carries the 8-eighth C5/B4 ostinato.
+    for (const measure of measures.slice(0, -1)) {
+      expect((measure.match(/<type>eighth<\/type>/g) ?? []).length).toBe(8);
+    }
+    expect(measures[measures.length - 1]).toContain('<type>whole</type>');
+    expect(measures[measures.length - 1]).not.toContain('<type>eighth</type>');
+  });
+
+  it('marks fingering 5 and 4 once, in the first measure only', () => {
+    const rh = partXml(generateDrill45Xml('right', 16), 'P1');
+    expect((rh.match(/<fingering>5<\/fingering>/g) ?? []).length).toBe(1);
+    expect((rh.match(/<fingering>4<\/fingering>/g) ?? []).length).toBe(1);
+    const firstMeasure = rh.split('<measure number=')[1]!;
+    expect(firstMeasure).toContain('<fingering>5</fingering>');
+    expect(firstMeasure).toContain('<fingering>4</fingering>');
+  });
+
+  it('clamps out-of-range repeat counts (routines saved before this parameter)', () => {
+    expect(measureCount(generateDrill45Xml('both', undefined), 'P1')).toBe(6);
+    expect(measureCount(generateDrill45Xml('both', 0), 'P1')).toBe(6);
+    expect(measureCount(generateDrill45Xml('both', -5), 'P1')).toBe(6);
+    expect(measureCount(generateDrill45Xml('both', 999), 'P1')).toBe(21);
   });
 });

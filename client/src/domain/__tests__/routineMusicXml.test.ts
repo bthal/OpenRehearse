@@ -1,4 +1,4 @@
-import { generateRoutineXml } from '../routineMusicXml';
+import { estimateRoutineSeconds, generateRoutineXml } from '../routineMusicXml';
 import type { Routine } from '../routine';
 
 function makeRoutine(overrides: Partial<Routine> = {}): Routine {
@@ -9,6 +9,12 @@ function makeRoutine(overrides: Partial<Routine> = {}): Routine {
     blocks: [],
     ...overrides,
   };
+}
+
+function measureCount(xml: string, partId: string): number {
+  const start = xml.indexOf(`<part id="${partId}">`);
+  const part = xml.slice(start, xml.indexOf('</part>', start));
+  return (part.match(/<measure number=/g) ?? []).length;
 }
 
 describe('generateRoutineXml', () => {
@@ -149,5 +155,28 @@ describe('generateRoutineXml', () => {
       }),
     );
     expect(xml).toContain('<time><beats>4</beats><beat-type>4</beat-type></time>');
+  });
+
+  it('honours a drill45 block peak repeats setting', () => {
+    const drill = (peakRepeats?: 1 | 2 | 4 | 8 | 16) =>
+      makeRoutine({
+        blocks: [
+          {
+            type: 'drill45' as const,
+            pitchClass: 0,
+            mode: 'major' as const,
+            hand: 'both' as const,
+            bpm: 60,
+            octaves: 1 as const,
+            peakRepeats,
+          },
+        ],
+      });
+
+    expect(measureCount(generateRoutineXml(drill()), 'P1')).toBe(6);
+    expect(measureCount(generateRoutineXml(drill(2)), 'P1')).toBe(7);
+    expect(measureCount(generateRoutineXml(drill(16)), 'P1')).toBe(21);
+    // One extra 4/4 bar at 60 BPM = 4 seconds.
+    expect(estimateRoutineSeconds(drill(2)) - estimateRoutineSeconds(drill())).toBeCloseTo(4);
   });
 });

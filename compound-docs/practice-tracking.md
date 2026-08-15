@@ -101,6 +101,99 @@ matches no key and falls back to `cellDefaultColor`. Pin `theme.scheme: 'light'`
 otherwise follows `Appearance.getColorScheme()` and would pick its dark palette on a dark-mode
 device, which the app does not support.
 
+## The 8px content inset overflows the library's own viewport — the last week gets clipped
+
+**LANDMINE:** `HorizontalHeatMap` puts its 8px left inset on the scroll view's *contentContainer*
+but caps that scroll view at `maxWidth: <bare grid width>` — a value that excludes the inset. The
+content is therefore always `8 - cellGap` px wider than the viewport holding it, and because the
+grid renders with `scrollable={false}`, those pixels are **clipped, not scrollable**: the trailing
+week loses its right edge. The library's container is also a centring flex row
+(`justifyContent: 'center'`), which floats the whole grid a few more pixels right of the heading.
+
+**Failed approach:** reserving the inset by subtracting it from the available width in
+`weeksThatFit()`. It cannot work — dropping a week shrinks the content *and* the viewport cap by
+the same `CELL_SIZE + CELL_GAP`, so the overflow is invariant. Measured across six screen widths
+(320–1024), the clip stayed exactly 5px at every one. The clipping happens inside the library's
+own scroll view, so no choice of week count can reach it.
+
+**Fix:** pass `scrollStyle={{ paddingLeft: 0 }}` — a public prop the library merges **last** into
+its content container style — and wrap the grid in an `items-start` view so the centring row hugs
+its content instead of stretching. `weeksThatFit()` then models the painted width: `n` weeks paint
+`n * (CELL_SIZE + CELL_GAP) - CELL_GAP` wide, because the library draws the grid one gap narrower
+than it reserves.
+
+Layout regressions here are invisible to colour-based tests, so the geometry is asserted directly
+in `components/__tests__/PracticeHeatmap.test.tsx`: content width must fit inside the scroll
+view's `maxWidth`, and the left inset must be 0.
+
+## There is no selection API — marking a day means reproducing the library's layout maths
+
+**LANDMINE:** `cellColor` is keyed by **count**, not by day, and there is no per-cell stroke, no
+selected state, and no highlight prop. Marking one day is therefore an ordinary `View` positioned
+over the grid, which means duplicating four pieces of the library's internal layout in
+`PracticeHeatmap.tsx`:
+
+```
+x = differenceInCalendarWeeks(date, start, { weekStartsOn }) * (cellSize + cellGap)
+y = date.getDay() * (cellSize + cellGap)     // raw getDay(), Sunday = 0
+headerHeight = headerTextFontSize + headerBottomSpace
+```
+
+Two of those bite:
+
+- **Rows ignore `weekStartsOn`.** Columns are grouped Monday-first as asked, but rows are laid out
+  by raw `getDay()`, so Sunday is the **top** row of a Monday-started week. Row order and column
+  grouping disagree by design.
+- **The ring's origin depends on the grid's origin.** It is positioned against the `items-start`
+  wrapper, which only shares an origin with the grid because that wrapper hugs the grid and the
+  8px inset is overridden away (see the section above). Both fixes are load-bearing for the ring.
+
+**LANDMINE within the landmine:** the header's height is **not** `headerTextFontSize +
+headerBottomSpace`, even though that is what the library composes it from. Android adds font
+padding around a `Text`'s line box, so the rendered header is a few pixels taller than its line
+height and the ring sat visibly high — the kind of bug that never shows up in a test, because
+react-test-renderer computes no layout at all.
+
+**Fix:** measure it. `onLayout` on the wrapper gives the wrapper's height, and the grid's own
+height is known exactly (`7 * (cellSize + cellGap) - cellGap`, since the library always lays out a
+full Sunday–Saturday week), so the difference is whatever the labels really occupy. The
+`headerTextFontSize + headerBottomSpace` sum survives only as the first-frame estimate.
+`headerBottomSpace` is passed explicitly rather than left to the library's default of 4, so even
+that estimate is built from a value we set.
+
+The dependency is pinned to an **exact** version (`"1.0.0"`, no caret) because of all this: a
+minor bump could move the grid without any API changing. Two tests guard it —
+`cellOffset` is checked against the library's own hit-testing by firing a press at the coordinate
+it computes and asserting the caption names that day, and the header's `lineHeight`/`marginBottom`
+are asserted to be the numbers `HEADER_HEIGHT` is built from.
+
+## Taps are hit-tested by coordinate, and `onCellPress` does nothing without `pressable`
+
+**LANDMINE:** `onCellPress` is silently inert unless `pressable` is also passed — the handler is
+wired but `useController` gates it. Once enabled, the library hit-tests on a **single `Pressable`
+wrapping the whole SVG**, scanning cells for `x >= cell.x && x <= cell.x + cellSize`. Consequences:
+
+- A tap landing in the gap between cells matches nothing and fires **no** callback — there is no
+  nearest-cell fallback and no `hitSlop`. Cells started at 12pt, went to 14pt, briefly to 21pt, and
+  settled at **16pt** — 14 was still fiddly in the hand, 21 ate too much history. Even 16 is well
+  under the ~44pt touch-target guideline, which a season-at-a-glance grid rules out. Every bump
+  costs weeks: 16pt fits roughly 18 on a 390pt-wide phone, against 23 at 12pt.
+- The handler's `count` is the **rounded minutes** already fed to `data`, and `0` for any day the
+  grid left out. The caption reads `dailySeconds[day]` from the store instead, which is why a day
+  holding 20 seconds can say "under a minute" while its cell is drawn empty.
+- Because the press carries the point, a test can drive the real round trip: fire a press with a
+  synthesized `nativeEvent.locationX/locationY` on a host node inside the `Pressable`. Note that
+  `UNSAFE_getByType(Pressable)` does **not** match it — RN's `Pressable` is memo-wrapped — so
+  press a child (the SVG) and let RNTL walk up to the handler.
+
+## `useFocusEffect` pulls a navigation context into the component tree
+
+The heatmap resets its selected day on focus, so it imports `useFocusEffect` from `expo-router`.
+That makes the component unrenderable without a navigation tree: its test stubs `expo-router`
+rather than standing one up. Without the stub the failure is
+`Couldn't find a navigation object. Is your component inside NavigationContainer?`, and before
+that a transform error from `standard-navigation`, which expo-router pulls in as ESM.
+
 ## The package is ESM-only — Jest needs it in `transformIgnorePatterns`
 
 **LANDMINE:** `@symbiot.dev/react-native-heatmap` ships only `index.esm.js` (`"type": "module"`).

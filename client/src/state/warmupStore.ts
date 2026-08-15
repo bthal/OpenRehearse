@@ -2,10 +2,12 @@ import * as FileSystem from 'expo-file-system/legacy';
 import { create } from 'zustand';
 
 import {
+  DEFAULT_PEAK_REPEATS,
   DEFAULT_WARMUP_BPM,
   type WarmUpBpm,
   type WarmUpHand,
   type WarmUpOctaves,
+  type WarmUpPeakRepeats,
   type WarmUpScaleMode,
 } from '@domain/warmup';
 
@@ -20,6 +22,7 @@ interface ExerciseSettings {
 export interface Drill45Settings {
   hand: WarmUpHand;
   bpm: WarmUpBpm;
+  peakRepeats: WarmUpPeakRepeats;
 }
 
 interface WarmUpSettings {
@@ -45,7 +48,7 @@ const DEFAULTS: WarmUpSettings = {
   arpeggio: defaultExerciseSettings(),
   chromatic: defaultExerciseSettings(),
   fiveScale: defaultExerciseSettings(),
-  drill45: { hand: 'both', bpm: DEFAULT_WARMUP_BPM },
+  drill45: { hand: 'both', bpm: DEFAULT_WARMUP_BPM, peakRepeats: DEFAULT_PEAK_REPEATS },
 };
 
 const SETTINGS_PATH = (FileSystem.documentDirectory ?? '') + 'warmup-settings.json';
@@ -79,7 +82,17 @@ async function loadSettings(): Promise<WarmUpSettings> {
     const info = await FileSystem.getInfoAsync(SETTINGS_PATH);
     if (!info.exists) return DEFAULTS;
     const raw = await FileSystem.readAsStringAsync(SETTINGS_PATH);
-    return { ...DEFAULTS, ...(JSON.parse(raw) as Partial<WarmUpSettings>) };
+    const saved = JSON.parse(raw) as Partial<WarmUpSettings>;
+    // Merge per exercise, not just per top-level key: a file written before a setting
+    // was added would otherwise replace that exercise wholesale and drop its default.
+    return {
+      hanon: { ...DEFAULTS.hanon, ...saved.hanon },
+      scales: { ...DEFAULTS.scales, ...saved.scales },
+      arpeggio: { ...DEFAULTS.arpeggio, ...saved.arpeggio },
+      chromatic: { ...DEFAULTS.chromatic, ...saved.chromatic },
+      fiveScale: { ...DEFAULTS.fiveScale, ...saved.fiveScale },
+      drill45: { ...DEFAULTS.drill45, ...saved.drill45 },
+    };
   } catch {
     return DEFAULTS;
   }

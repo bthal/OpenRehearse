@@ -34,8 +34,16 @@
     "warmUpsNote": "Use the exercises as building blocks for your personal warm-up routines.",
     "privacyNote": "Your files stay on this device — \nnothing is uploaded.",
     "importFailed": "Import failed",
-    "practice": "Practice",
-    "practiceNote": "Minutes played per day.",
+    "stats": "Stats",
+    "currentStreak": "Current streak",
+    "longestStreak": "Longest streak",
+    "practiceDayToday": "Today, {{date}}",
+    "practiceDayNone": "{{date}} · no practice",
+    "practiceDayUnderMinute": "{{date}} · under a minute",
+    "practiceDayMinutes_one": "{{date}} · {{count}} min",
+    "practiceDayMinutes_other": "{{date}} · {{count}} min",
+    "practiceDayHours": "{{date}} · {{hours}} h {{minutes}} min",
+    "practiceDayHoursOnly": "{{date}} · {{hours}} h",
     "practiceLess": "Less",
     "practiceMore": "More"
   },
@@ -50,6 +58,7 @@
     "key": "Key",
     "octave_one": "Octave",
     "octave_other": "Octaves",
+    "peak": "Peak",
     "failedToGenerate": "Failed to generate score."
   },
   "settings": {
@@ -148,6 +157,7 @@
     "octave_other": "{{count}} Octaves",
     "measure_one": "{{count}} Measure",
     "measure_other": "{{count}} Measures",
+    "peakRepeats": "Peak ×{{times}}",
     "swapExercises": "Swap Exercises"
   },
   "routineRow": {

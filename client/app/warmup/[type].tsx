@@ -41,18 +41,22 @@ import {
   WARMUP_BPMS,
   WARMUP_KEYS,
   WARMUP_OCTAVES,
+  WARMUP_PEAK_REPEATS,
   type WarmUpBpm,
   type WarmUpHand,
   type WarmUpOctaves,
+  type WarmUpPeakRepeats,
   type WarmUpType,
 } from '@domain/warmup';
 import { useWarmUpStore } from '@state/warmupStore';
 
-type OpenPanel = 'speed' | 'hand' | 'key' | 'octave' | null;
+type PanelKey = 'speed' | 'hand' | 'key' | 'octave' | 'peak';
+type OpenPanel = PanelKey | null;
 
 const PANEL_WIDTH = 176; // key panel (4 keys visible, scroll for more)
 const HAND_PANEL_WIDTH = 132; // 3 × 44
 const OCTAVE_PANEL_WIDTH = 132; // 3 × 44
+const PEAK_PANEL_WIDTH = 220; // 5 × 44
 
 const WARM_UP_TYPES: WarmUpType[] = [
   'hanon',
@@ -97,6 +101,8 @@ export default function WarmUpView() {
     mode: 'major' as const,
     octaves: 1 as const,
   };
+  // Drill-only parameter — read off its own slice rather than the shared settings shape.
+  const peakRepeats = drill45RawSettings.peakRepeats;
 
   const settings =
     warmUpType === 'hanon'
@@ -143,14 +149,14 @@ export default function WarmUpView() {
     hand: new Animated.Value(0),
     key: new Animated.Value(0),
     octave: new Animated.Value(0),
+    peak: new Animated.Value(0),
   }));
-  const [panelLayout, setPanelLayout] = useState<
-    Record<'speed' | 'hand' | 'key' | 'octave', { top: number; left: number }>
-  >({
+  const [panelLayout, setPanelLayout] = useState<Record<PanelKey, { top: number; left: number }>>({
     speed: { top: 0, left: 0 },
     hand: { top: 0, left: 0 },
     key: { top: 0, left: 0 },
     octave: { top: 0, left: 0 },
+    peak: { top: 0, left: 0 },
   });
 
   const scoreAreaRef = useRef<View>(null);
@@ -158,6 +164,7 @@ export default function WarmUpView() {
   const handTriggerRef = useRef<View>(null);
   const keyTriggerRef = useRef<View>(null);
   const octaveTriggerRef = useRef<View>(null);
+  const peakTriggerRef = useRef<View>(null);
   const toolbarRef = useRef<View>(null);
   const webViewRef = useRef<WebView>(null);
 
@@ -180,7 +187,7 @@ export default function WarmUpView() {
         warmUpType === 'hanon'
           ? generateHanonXml(settings.pitchClass, settings.mode, settings.hand, settings.octaves)
           : warmUpType === 'drill45'
-            ? generateDrill45Xml(settings.hand)
+            ? generateDrill45Xml(settings.hand, peakRepeats)
             : warmUpType === 'arpeggio'
               ? generateArpeggioXml(
                   settings.pitchClass,
@@ -219,6 +226,7 @@ export default function WarmUpView() {
     settings.mode,
     settings.hand,
     settings.octaves,
+    peakRepeats,
     setLoadingScore,
     setScoreError,
     t,
@@ -268,7 +276,7 @@ export default function WarmUpView() {
     [setLoadingScore, setScoreError, setPlaying, setLoopActive],
   );
 
-  function animatePanel(panel: 'speed' | 'hand' | 'key' | 'octave', toValue: number) {
+  function animatePanel(panel: PanelKey, toValue: number) {
     Animated.spring(panelAnim[panel], {
       toValue,
       useNativeDriver: false,
@@ -277,10 +285,7 @@ export default function WarmUpView() {
     }).start();
   }
 
-  function measureTrigger(
-    triggerRef: React.RefObject<View | null>,
-    panelKey: 'speed' | 'hand' | 'key' | 'octave',
-  ) {
+  function measureTrigger(triggerRef: React.RefObject<View | null>, panelKey: PanelKey) {
     triggerRef.current?.measureLayout(
       scoreAreaRef.current as never,
       (_tx, ty, _tw, th) => {
@@ -299,10 +304,7 @@ export default function WarmUpView() {
     );
   }
 
-  function togglePanel(
-    panel: 'speed' | 'hand' | 'key' | 'octave',
-    triggerRef: React.RefObject<View | null>,
-  ) {
+  function togglePanel(panel: PanelKey, triggerRef: React.RefObject<View | null>) {
     const isOpening = openPanel !== panel;
 
     // Close whichever panel is open
@@ -371,6 +373,17 @@ export default function WarmUpView() {
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [isPlaying, updateSettings],
+  );
+
+  const handlePeakRepeatsChange = useCallback(
+    (value: WarmUpPeakRepeats) => {
+      if (isPlaying) webViewRef.current?.injectJavaScript('window.__rn_pause();void 0;');
+      updateDrill45({ peakRepeats: value });
+      setOpenPanel(null);
+      animatePanel('peak', 0);
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [isPlaying, updateDrill45],
   );
 
   const handleMetronomeToggle = useCallback(() => {
@@ -513,6 +526,25 @@ export default function WarmUpView() {
                   </View>
                 )}
 
+                {/* Peak repeats trigger — drill45 only */}
+                {!showKeyOctave && (
+                  <View ref={peakTriggerRef}>
+                    <TouchableOpacity
+                      onPress={() => togglePanel('peak', peakTriggerRef)}
+                      hitSlop={8}
+                      className="items-center px-2 py-1"
+                    >
+                      <Text
+                        className="text-base font-semibold mt-0.5"
+                        style={{ color: openPanel === 'peak' ? '#4B7A6E' : '#374151' }}
+                      >
+                        ×{peakRepeats}
+                      </Text>
+                      <Text className="text-[9px] text-black mt-0.5">{t('warmup.peak')}</Text>
+                    </TouchableOpacity>
+                  </View>
+                )}
+
                 {/* Octave trigger — hidden for drill45 */}
                 {showKeyOctave && (
                   <View ref={octaveTriggerRef}>
@@ -640,6 +672,40 @@ export default function WarmUpView() {
                   );
                 })}
               </ScrollView>
+            </Animated.View>
+          )}
+
+          {/* Peak repeats panel — drill45 only */}
+          {!showKeyOctave && (
+            <Animated.View
+              pointerEvents={openPanel === 'peak' ? 'auto' : 'none'}
+              style={[
+                panelBase,
+                {
+                  top: panelLayout.peak.top,
+                  left: panelLayout.peak.left,
+                  width: panelWidthInterp('peak', PEAK_PANEL_WIDTH),
+                },
+              ]}
+            >
+              {WARMUP_PEAK_REPEATS.map((n) => (
+                <TouchableOpacity
+                  key={n}
+                  onPress={() => handlePeakRepeatsChange(n)}
+                  hitSlop={4}
+                  style={{ width: 44, height: 44, alignItems: 'center', justifyContent: 'center' }}
+                >
+                  <Text
+                    style={{
+                      fontSize: 13,
+                      fontWeight: '600',
+                      color: peakRepeats === n ? '#4B7A6E' : '#9CA3AF',
+                    }}
+                  >
+                    ×{n}
+                  </Text>
+                </TouchableOpacity>
+              ))}
             </Animated.View>
           )}
 

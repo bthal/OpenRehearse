@@ -16,13 +16,16 @@ import {
   validateRoutine,
 } from '@domain/routine';
 import {
+  DEFAULT_PEAK_REPEATS,
   DEFAULT_WARMUP_BPM,
   WARMUP_BPMS,
   WARMUP_KEYS,
   WARMUP_OCTAVES,
+  WARMUP_PEAK_REPEATS,
   type WarmUpBpm,
   type WarmUpHand,
   type WarmUpOctaves,
+  type WarmUpPeakRepeats,
 } from '@domain/warmup';
 import { Colors } from '@theme/colors';
 import { useRoutinesStore } from '@state/routinesStore';
@@ -31,7 +34,15 @@ import { useRoutinesStore } from '@state/routinesStore';
 
 type BlockWithKey = RoutineBlock & { _key: string };
 
-type PickerType = 'key' | 'bpm' | 'hand' | 'octaves' | 'measures' | 'addType' | 'addMeasures';
+type PickerType =
+  | 'key'
+  | 'bpm'
+  | 'hand'
+  | 'octaves'
+  | 'peakRepeats'
+  | 'measures'
+  | 'addType'
+  | 'addMeasures';
 
 interface PickerState {
   blockKey?: string;
@@ -81,6 +92,7 @@ function defaultExerciseBlock(type: ExerciseBlock['type']): ExerciseBlock {
     hand: 'both',
     bpm: DEFAULT_WARMUP_BPM,
     octaves: 1,
+    ...(type === 'drill45' ? { peakRepeats: DEFAULT_PEAK_REPEATS } : {}),
   };
 }
 
@@ -96,6 +108,10 @@ function keyLabel(pitchClass: number, mode: 'major' | 'minor', t: TFn): string {
 
 function octavesLabel(octaves: WarmUpOctaves, t: TFn): string {
   return t('routineEdit.octave', { count: octaves });
+}
+
+function peakRepeatsLabel(peakRepeats: WarmUpPeakRepeats | undefined, t: TFn): string {
+  return t('routineEdit.peakRepeats', { times: peakRepeats ?? DEFAULT_PEAK_REPEATS });
 }
 
 // ─── Small presentational components (defined outside to satisfy lint) ─────────
@@ -284,6 +300,9 @@ export default function RoutineEditScreen() {
     } else if (type === 'octaves' && block.type !== 'pause') {
       options = WARMUP_OCTAVES.map((o) => ({ label: octavesLabel(o, t), value: o }));
       currentValue = block.octaves;
+    } else if (type === 'peakRepeats' && block.type !== 'pause') {
+      options = WARMUP_PEAK_REPEATS.map((p) => ({ label: peakRepeatsLabel(p, t), value: p }));
+      currentValue = block.peakRepeats ?? DEFAULT_PEAK_REPEATS;
     }
 
     setPicker({ blockKey, type, options, currentValue });
@@ -333,6 +352,8 @@ export default function RoutineEditScreen() {
       patchBlock(blockKey!, { hand: value as WarmUpHand });
     } else if (type === 'octaves') {
       patchBlock(blockKey!, { octaves: value as WarmUpOctaves });
+    } else if (type === 'peakRepeats') {
+      patchBlock(blockKey!, { peakRepeats: value as WarmUpPeakRepeats });
     }
     setPicker(null);
   }
@@ -430,6 +451,12 @@ export default function RoutineEditScreen() {
                           <Pill
                             label={octavesLabel(block.octaves, t)}
                             onPress={() => openPicker(block._key, 'octaves', block)}
+                          />
+                        )}
+                        {block.type === 'drill45' && (
+                          <Pill
+                            label={peakRepeatsLabel(block.peakRepeats, t)}
+                            onPress={() => openPicker(block._key, 'peakRepeats', block)}
                           />
                         )}
                       </View>
