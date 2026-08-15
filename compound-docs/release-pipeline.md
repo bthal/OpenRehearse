@@ -25,10 +25,25 @@ Both hooks are declared on purpose. `postinstall` covers local installs and CI; 
 twice — roughly 30 seconds wasted per release build, deliberately traded for not losing one of the
 15 monthly build slots to a hook that silently did not run.
 
+**LANDMINE (one-time, on pulling the commit that untracked it):** git deletes the file when you
+move onto a commit where it is no longer tracked, so the first `git pull` after this change leaves
+you with `Unable to resolve path to module '@score-web/html'` from ESLint and `tsc`. CI never sees
+this because it always runs `npm ci`. Locally, run `cd client && npm run build:score-web`.
+
 **LANDMINE:** do not add a drift check or a pre-commit rebuild for this file. A pre-commit rebuild
 still puts the blob in git, requires auto-staging files the developer did not stage, and is
 bypassable with `--no-verify`. Because three screens import the module, `typecheck` and `test` in
 CI already fail loudly if generation did not happen. Drift is structurally impossible, not detected.
+
+## Prettier must not police the generated CHANGELOG
+
+**LANDMINE:** release-please writes `client/CHANGELOG.md`, and `client/package.json`'s
+`format:check` runs `prettier --check .` across `client/`. release-please's markdown uses `*`
+bullets and double blank lines; Prettier wants `-` and single. The result is that **every release
+PR fails CI**, forever, on a file no human wrote and release-please rewrites on its next run.
+
+**Fix:** `CHANGELOG.md` is listed in `client/.prettierignore`. Do not "fix" it by formatting the
+file — release-please regenerates it from scratch each release and the fix would not survive.
 
 ## Pull requests opened with GITHUB_TOKEN do not trigger workflows
 
