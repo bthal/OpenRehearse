@@ -1,5 +1,16 @@
 # Changelog
 
+## [1.2.0](https://github.com/bthal/OpenRehearse/compare/v1.1.0...v1.2.0) (2026-08-15)
+
+
+### Features
+
+* **dashboard:** add streaks and day details to the practice heatmap ([#10](https://github.com/bthal/OpenRehearse/issues/10)) ([3c5df99](https://github.com/bthal/OpenRehearse/commit/3c5df995d5897aed38222fd306656360906323a5))
+* **playview:** discretise cursor and loop handles onto a barline-aligned note grid ([#11](https://github.com/bthal/OpenRehearse/issues/11)) ([e80a44d](https://github.com/bthal/OpenRehearse/commit/e80a44d33478d7fee0240fa01a84475edf30370b))
+* **sections:** align section junctions to barlines and resolve them in score order ([#5](https://github.com/bthal/OpenRehearse/issues/5)) ([4d44558](https://github.com/bthal/OpenRehearse/commit/4d44558a81922770e89d668f09b006bcb5dd40dc))
+* **sections:** let users create, edit and delete sections in the piece editor ([#12](https://github.com/bthal/OpenRehearse/issues/12)) ([c206f06](https://github.com/bthal/OpenRehearse/commit/c206f06a4230bf810da589c580f87818431ac1c8))
+* **warmup:** add peak repeats to the 4-5 drill ([#9](https://github.com/bthal/OpenRehearse/issues/9)) ([f3941b4](https://github.com/bthal/OpenRehearse/commit/f3941b49d5f7be235a78279f7c3f47e29df30722))
+
 ## [1.1.0](https://github.com/bthal/OpenRehearse/compare/v1.0.0...v1.1.0) (2026-08-15)
 
 
