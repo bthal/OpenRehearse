@@ -10,7 +10,8 @@
     "bpm": "BPM",
     "preparingScore": "Preparing score…",
     "loadingScore": "Loading score…",
-    "couldNotRender": "Could not render score"
+    "couldNotRender": "Could not render score",
+    "done": "Done"
   },
   "dashboard": {
     "title": "OpenRehearse",
@@ -87,7 +88,43 @@
     "removeTitle": "Remove piece?",
     "removeMessage": "Remove \"{{title}}\" from your library? This cannot be undone.",
     "removeMultipleTitle": "Remove {{count}} pieces?",
-    "removeMultipleMessage": "Remove these {{count}} pieces from your library? This cannot be undone."
+    "removeMultipleMessage": "Remove these {{count}} pieces from your library? This cannot be undone.",
+    "sections": {
+      "heading": "Sections",
+      "count_one": "{{count}} section",
+      "count_other": "{{count}} sections",
+      "loading": "Reading the score…",
+      "unreadable": "The measures in this score can't be read, so section bounds can't be changed. You can still rename and recolor.",
+      "nameLabel": "Name",
+      "namePlaceholder": "Section {{n}}",
+      "fromLabel": "From",
+      "toLabel": "To",
+      "pickup": "pickup",
+      "measureUnknown": "No measure {{number}} in this score.",
+      "measureOutOfRange": "Must be between {{min}} and {{max}}.",
+      "measureAmbiguous": "This score has more than one measure {{number}}; using the first.",
+      "chooseColor": "Choose a color for {{name}}",
+      "presets": "Preset colors",
+      "hueRamp": "Hue",
+      "split": "Split",
+      "delete": "Delete…",
+      "deletePrompt": "Give {{range}} to:",
+      "deleteToPrevious": "{{name}} (before)",
+      "deleteToNext": "{{name}} (after)",
+      "deleteOnly": "A piece must keep at least one section.",
+      "add": "Add section",
+      "reset": "Reset to detected",
+      "resetTitle": "Reset sections?",
+      "resetMessage_one": "This discards your changes and restores the {{count}} section found in the score.",
+      "resetMessage_other": "This discards your changes and restores the {{count}} sections found in the score.",
+      "resetConfirm": "Reset",
+      "unnamed": "Section {{n}}",
+      "range": "Measures {{from}}–{{to}}",
+      "rangeSingle": "Measure {{from}}",
+      "editSection": "Edit {{name}}",
+      "splitAction": "Split section",
+      "deleteAction": "Delete section"
+    }
   },
   "warmUpRow": {
     "description": "Exercise"

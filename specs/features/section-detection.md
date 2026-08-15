@@ -244,14 +244,59 @@ index refers to the page, and resolves to the tick that measure **first** sounds
 - Detected sections are stored on the `Piece` (`sections` column, JSON) at **import time**. See
   `specs/features/pieces-domain.md`.
 - Detection **never fails an import** — `detectSectionsSafely` degrades to `[]`.
-- Pieces imported **before** this feature keep `sections = NULL` and show no label. There is no
-  backfill pass.
-- **Editing sections is out of scope.** Names, boundaries and colors are all derived.
+- Sections **seed** the user's own list; they are not the final word. Detection runs once, at
+  import. Nothing re-runs it afterwards except an explicit "Reset to detected".
+
+## Editing
+
+Detection is a heuristic, and students know their own piece's form better than the rule engine
+does. Sections are user-owned after import, edited from a collapsible **Sections** block in the
+piece edit modal (`components/sections/`). Pure logic lives in `domain/sectionEditing.ts`.
+
+- Sections **tile** the piece: no gaps, no overlaps, every measure in exactly one section. A
+  section is therefore described by its start alone, which is why `Section` has no `end` field.
+  The editable things are the n-1 **junctions**; moving one always changes exactly two sections,
+  and the first section's start and the last section's end are pinned to the ends of the piece.
+- The invariants are: at least one section, starts strictly ascending from 0, and every section
+  at least one measure. `MIN_SECTION_MEASURES`, `MAX_SECTIONS` and `MIN_BOUNDARY_SCORE` are
+  **detector** tunables and deliberately do not constrain user-authored sections.
+- Every piece has **at least one** section. `normaliseSections` runs on every repository read, so
+  a null column — a pre-feature import, an unreadable score, a corrupt blob — becomes one
+  whole-piece section in memory. The column stays null until the user saves; there is no
+  migration and no re-parsing at startup. What used to be "no sections" is now the
+  single-section case, and PlayView keys off `length > 1` to decide whether to show a label.
+- `Section.color` is **stored**, not derived at render. Name matching still happens, but as an
+  event: renaming onto an existing section's name adopts its color, and otherwise the color is
+  left alone. Structural edits never repaint a row the user did not touch. Colors are validated
+  as `#RRGGBB` on read, because the string is concatenated into a CSS gradient in the WebView.
+- Users type the **printed** measure number. No arithmetic relates it to the array index — a
+  pickup score numbers measure 0 at index 0, numbers repeat, carry suffixes like `9a`, and jump
+  across multirests — so `domain/measureMap.ts` reads the mapping out of the score when the
+  modal opens. A score whose measures cannot be read degrades to rename, recolor and delete
+  only. The map also supplies the measure count, which is what lets a stored boundary sitting
+  past the end of the score be dropped on load.
+- Names are stored **exactly as typed** while editing and trimmed on commit. Trimming per
+  keystroke deletes the space in "Da Capo" the moment it is typed.
+- The WebView resolves section starts to ticks, drops what it cannot place, and re-sorts — so a
+  web-side index is not a native-side index. `src/score-web/sectionResolve.ts` carries the
+  original position through both, and is the tested part of that path; `score-web/` itself is
+  outside the app's tsconfig and has no test setup.
+- A user-authored or user-moved boundary carries `sources: []` and no `score`. There is
+  deliberately no `'USER'` member of `SectionSource`: `WEIGHTS` is keyed by that type, and a
+  user-placed boundary has no rule weight to give it.
+- The color picker is hue-only, at constant OKLCH lightness (`domain/oklch.ts`), so every
+  reachable color holds white text at 4.5:1 by construction rather than by validation.
 
 ## Acceptance criteria
 
 - [x] Sections are detected at import and persisted with the piece.
-- [x] A score with no readable form yields no sections, and PlayView shows no label.
+- [ ] A score with no readable form yields one whole-piece section, and PlayView shows no label.
+- [ ] Section edits survive an app restart.
+- [x] Sections can be renamed, recolored, resized, split and deleted.
+- [x] Editing a section's end moves the next section's start, and vice versa.
+- [x] Deleting a section hands its measures to a neighbour — chosen by the user in the middle of
+      the piece, and to the only candidate at either end.
+- [x] Every color reachable from the picker carries white text at 4.5:1.
 - [x] The label names the current section, or `Section N` when the score gives no name.
 - [x] A repeated section name keeps the same color throughout the piece.
 - [x] Swiping the label jumps to the previous/next section start, one section per swipe.

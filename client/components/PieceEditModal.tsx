@@ -1,5 +1,5 @@
 import { mdiClose } from '@mdi/js';
-import { useMemo, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   Modal,
@@ -13,9 +13,12 @@ import {
 import { useTranslation } from 'react-i18next';
 
 import type { Piece } from '@domain/piece';
+import { normaliseSections, sectionsEqual } from '@domain/sectionEditing';
+import type { Section } from '@domain/sections';
+import { SectionsBlock } from '@components/sections/SectionsBlock';
 import { clampTargetBpm, isValidTargetBpm, MAX_TARGET_BPM, MIN_TARGET_BPM } from '@domain/tempo';
 import { AppIcon } from '@components/AppIcon';
-import { Colors } from '@theme/colors';
+import { Colors, SectionColors } from '@theme/colors';
 import { usePiecesStore } from '@state/piecesStore';
 
 /**
@@ -72,6 +75,19 @@ function PieceEditForm({
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
 
+  // Sections live beside FormValues rather than inside it: they are a list with their
+  // own equality, and the text fields above compare as plain strings.
+  const initialSections = useMemo<Section[]>(
+    // Normalised, not `?? []`: every invariant in sectionEditing assumes at least one
+    // section, and a bare fallback is the one place that assumption could be bypassed.
+    () => normaliseSections(piece.sections, SectionColors),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [], // intentional: capture only at mount, like `initial`
+  );
+  const [sections, setSections] = useState<Section[]>(initialSections);
+  const [sectionsPendingInvalid, setSectionsPendingInvalid] = useState(false);
+  const sectionsDirty = !sectionsEqual(sections, initialSections);
+
   // Live per-field validation drives both the red markers and the submit gate.
   const titleError = values.title.trim() === '';
   const composerError = values.composer.trim() === '';
@@ -79,9 +95,18 @@ function PieceEditForm({
   const speedError = speedRaw === '' || !isValidTargetBpm(Number(speedRaw));
 
   const isComplete = !titleError && !composerError && !speedError;
-  const isDirty = !valuesEqual(values, initial);
+  const isDirty = !valuesEqual(values, initial) || sectionsDirty;
   // Import must be completed regardless of "dirtiness"; edit only saves real changes.
-  const canSubmit = isComplete && !saving && (mode === 'import' || isDirty);
+  // `sectionsPendingInvalid` matters because tapping Save does not reliably blur a
+  // TextInput on React Native, so without it a measure field could still hold
+  // unresolvable text at the moment the piece is written.
+  const canSubmit =
+    isComplete && !sectionsPendingInvalid && !saving && (mode === 'import' || isDirty);
+
+  const onSectionsValidityChange = useCallback(
+    (pending: boolean) => setSectionsPendingInvalid(pending),
+    [],
+  );
 
   async function onSave() {
     if (!canSubmit) return;
@@ -92,6 +117,8 @@ function PieceEditForm({
         title: values.title.trim(),
         composer: values.composer.trim(),
         targetBpm: Number(speedRaw),
+        // Omitted unless touched, so an unrelated title edit never rewrites sections.
+        ...(sectionsDirty ? { sections } : {}),
       });
       onClose();
     } catch {
@@ -189,6 +216,16 @@ function PieceEditForm({
             </Text>
           ) : null}
         </View>
+
+        {/* Sections — collapsed by default; the common edit here is the title. */}
+        {mode === 'edit' ? (
+          <SectionsBlock
+            piece={piece}
+            sections={sections}
+            onChange={setSections}
+            onValidityChange={onSectionsValidityChange}
+          />
+        ) : null}
 
         {formError ? <Text className="text-sm text-mauve-shadow-800">{formError}</Text> : null}
       </ScrollView>

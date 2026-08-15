@@ -33,7 +33,7 @@ RN/OSMD/Tone imports. See `specs/architecture.md` for the authoritative version.
 | Practice-time tracking & heatmap | `specs/features/dashboard.md`, `compound-docs/practice-tracking.md` |
 | Settings & count-in | `specs/features/settings.md`, `compound-docs/tone-playback.md` (count-in) |
 | Files & MusicXML | `specs/features/import.md` |
-| Section detection & the PlayView section label | `specs/features/section-detection.md` |
+| Sections: detection, user editing & the PlayView label | `specs/features/section-detection.md`, `compound-docs/osmd-webview.md` |
 | Local data & offline | `specs/features/offline-storage.md` |
 | Audio + cursor sync | `specs/features/playback-synthesis.md`, `specs/features/playview.md` |
 | State & domain | `specs/features/pieces-domain.md` |
@@ -51,7 +51,8 @@ RN/OSMD/Tone imports. See `specs/architecture.md` for the authoritative version.
 | `client/src/data/` | `LocalPieceRepository`, XML cache, file pickers — storage adapters |
 | `client/src/state/` | Zustand stores — one `*Store.ts` per concern (see the directory for the current set) |
 | `client/src/i18n/` | String catalogue (`locales/en.json`) and i18next init — import as side-effect only |
-| `client/score-web/` | OSMD surface, playback controller, cursor/loop web UI, Tone.js integration — **web-only** |
+| `client/score-web/` | OSMD surface, playback controller, cursor/loop web UI, Tone.js integration — **web-only**; outside the app tsconfig and untested, so keep pure logic out of it |
+| `client/src/score-web/` | The native↔WebView seam: message protocol, generated `html.ts`, and pure WebView logic that needs typechecking and tests |
 | `client/app/` | Expo Router screens (Dashboard, PlayView route) |
 | `client/components/` | Shared UI (`AppIcon`, toolbars, modals) — NativeWind + MDI icons |
 

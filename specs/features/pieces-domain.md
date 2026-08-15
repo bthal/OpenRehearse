@@ -13,10 +13,12 @@
   (`scrapeTempoBpm`); surfaced to the user as the file's original speed
 - Optional: `targetBpm` — user-chosen target speed that overrides `importedBpm` as the PlayView
   100% reference; valid range and helpers live in `domain/tempo.ts`
-- Optional: `sections` — formal sections detected from the notation at import
-  (`domain/sections.ts`; see `specs/features/section-detection.md`). Three distinct states:
-  `undefined` = never analysed (imported before the feature existed), `[]` = analysed with no
-  readable form, non-empty = at least two sections. Derived data, never user-edited.
+- Optional: `sections` — the piece's sections in score order, seeded by detection at import
+  (`domain/sections.ts`) and editable by the user thereafter (`domain/sectionEditing.ts`; see
+  `specs/features/section-detection.md`). A tiling: no gaps, no overlaps, every measure in
+  exactly one section, so a section carries a start and no end. Optional only for a piece in
+  flight during import — anything returned by `PieceRepository` has run `normaliseSections` and
+  carries at least one section, each with a valid `#RRGGBB` color.
 
 ### Bit (active loop)
 

@@ -2,7 +2,8 @@ import { Asset } from 'expo-asset';
 import * as FileSystem from 'expo-file-system/legacy';
 
 import { scrapeMusicXmlMetadata, scrapeTempoBpm } from '@domain/musicxml';
-import { detectSectionsSafely } from '@domain/sections';
+import { sectionsFromXml } from '@domain/sectionEditing';
+import { SectionColors } from '@theme/colors';
 import { pieceRepository } from './index';
 import { extractXmlFromMxl } from './mxlExtract';
 
@@ -47,9 +48,10 @@ export async function seedDemoDataIfNeeded(): Promise<void> {
         // of 80 BPM so the demo plays at a musical tempo out of the box.
         ...(importedBpm != null ? { importedBpm } : {}),
         targetBpm: 80,
-        // The prelude is a single unbroken movement, so this is expected to be
-        // empty; run it anyway so the seed and the import path agree.
-        sections: detectSectionsSafely(xmlContent),
+        // The prelude is a single unbroken movement, so detection is expected to
+        // decline; normalising turns that into one whole-piece section. Run it anyway
+        // so the seed and the import path agree.
+        sections: sectionsFromXml(xmlContent, SectionColors),
       },
       xmlContent,
     );

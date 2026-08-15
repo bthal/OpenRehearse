@@ -21,15 +21,18 @@ export interface Piece {
    */
   targetBpm?: number;
   /**
-   * Formal sections detected from the notation at import time, in score order.
+   * The piece's sections in score order, seeded by detection at import and editable
+   * by the user thereafter. A tiling: no gaps, no overlaps, every measure in exactly
+   * one section, so a section is described by where it starts and nothing else.
    *
-   * Three states, all meaningful:
-   * - `undefined` — never analysed (imported before detection existed). No label.
-   * - `[]` — analysed, no readable form. No label; a piece we cannot parse into
-   *   sections has none, rather than one section spanning the whole score.
-   * - non-empty — always at least two sections.
+   * Optional only for a piece in flight during import. Anything that has been through
+   * `PieceRepository` has run `normaliseSections` and carries at least one section —
+   * a piece whose form we cannot read gets one section spanning the whole score, not
+   * zero. What used to be the "no sections" case is now the single-section case, and
+   * the PlayView keys off `length > 1` to decide whether to show a label at all.
    *
-   * See `domain/sections.ts` and `specs/features/section-detection.md`.
+   * See `domain/sections.ts`, `domain/sectionEditing.ts` and
+   * `specs/features/section-detection.md`.
    */
   sections?: Section[];
 }
