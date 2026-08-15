@@ -45,6 +45,20 @@ PR fails CI**, forever, on a file no human wrote and release-please rewrites on 
 **Fix:** `CHANGELOG.md` is listed in `client/.prettierignore`. Do not "fix" it by formatting the
 file — release-please regenerates it from scratch each release and the fix would not survive.
 
+## A PR-title check must trigger on `edited`
+
+**LANDMINE:** a bare `on: pull_request` defaults to `[opened, synchronize, reopened]`. `edited` is
+not included, so renaming a PR to fix a failed title check does not re-run it — the PR stays red
+with no way forward. Re-running the job by hand does not help either: a re-run replays the original
+event payload, which still carries the **old** title.
+
+**Fix:** the check lives in its own `pr-title.yml` with `types: [opened, edited, synchronize,
+reopened]`. Keeping it out of `ci.yml` also stops a description edit from re-running jest.
+
+**LANDMINE:** do not "solve" a related problem by adding `edited` to `ci.yml` and guarding the
+heavy jobs with `if:`. A required status check that is *skipped* never reports a conclusion, so
+branch protection blocks the merge forever.
+
 ## Pull requests opened with GITHUB_TOKEN do not trigger workflows
 
 **LANDMINE:** GitHub deliberately suppresses workflow runs for events caused by the built-in

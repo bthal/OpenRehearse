@@ -101,7 +101,8 @@ The `pre-commit` hook runs the full `cd client && npm run ci`, but only when the
 
 | Workflow | Trigger | What it does |
 |---|---|---|
-| `.github/workflows/ci.yml` | every PR + push to `main` | `client` quality gate, version sync, PR-title lint |
+| `.github/workflows/ci.yml` | every PR + push to `main` | `client` quality gate, version sync |
+| `.github/workflows/pr-title.yml` | PR opened/**edited**/synchronised | Conventional-Commit lint on the PR title (separate so a rename re-runs it) |
 | `.github/workflows/release.yml` | push to `main`; `workflow_dispatch` for recovery | Maintains the release PR; on merge, tags, builds an APK on EAS and attaches it to a **draft** release |
 | `.github/workflows/release-pr-sync.yml` | release-please PRs | Writes `client/app.json` version + versionCode into the release PR |
 
