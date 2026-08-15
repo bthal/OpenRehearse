@@ -27,9 +27,31 @@ export interface Section {
   startMeasureNumber: string;
   /** Score-given name: `<rehearsal>` text, else a matched section word, else null. */
   name: string | null;
-  /** Every rule that contributed to this boundary. Empty for the implicit opening boundary. */
+  /**
+   * Stored fill color as `#RRGGBB`.
+   *
+   * Assigned when the section is created — by detection, by a split, or by a rename
+   * that matched an earlier section — and then frozen. Structural edits never repaint
+   * a row the user did not touch, which is why this is stored rather than derived on
+   * every render as it was before sections became editable.
+   *
+   * Hex rather than `hsl(H S% L%)` because the string crosses three parsers: React
+   * Native styles, `react-native-svg` gradient stops, and CSS gradients inside the
+   * WebView, which receives it verbatim over SET_SECTIONS. See theme/colors.ts.
+   *
+   * Optional only so a row persisted before this field existed still parses.
+   * `normaliseSections` fills it, so anything past the repository has one.
+   */
+  color?: string;
+  /**
+   * Every rule that contributed to this boundary. Empty when no rule did: the
+   * implicit opening boundary, and any boundary the user created or moved.
+   *
+   * Deliberately has no `'USER'` member — `WEIGHTS` below is keyed by this type and
+   * a user-authored boundary has no rule weight to give it.
+   */
   sources: SectionSource[];
-  /** Merged rule weight, capped at 15. Absent for the implicit opening boundary. */
+  /** Merged rule weight, capped at 15. Absent wherever `sources` is empty. */
   score?: number;
 }
 

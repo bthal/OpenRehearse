@@ -178,14 +178,36 @@ both, then rebuilding the bundle.
 
 ### `SET_SECTIONS` must be sent after `LOADED`, not with the XML
 
-`__rn_set_sections` resolves 0-based measure indices against `measureMeta` and `noteSpans`, both of
-which `initPlayback` builds while walking the score. Injecting it alongside `__rn_load_xml` runs it
+`__rn_set_sections` resolves 0-based measure indices against `firstTicksBySourceIndex`, which
+`initPlayback` builds while walking the score. Injecting it alongside `__rn_load_xml` runs it
 against the *previous* score's data (or none at all). PlayView therefore injects it from its
 `LOADED` handler.
 
 Native never computes section positions itself: it sends indices and receives `SECTION_INDEX` back.
-Keeping the tick math on one side is what stops the label and the seek target from disagreeing about
-the anacrusis offset.
+Keeping the tick math on one side is what stops the label and the seek target from disagreeing.
+
+### LANDMINE: a web-side section index is not a native-side section index
+
+`setSections` **drops** any section it cannot place — `firstTicksBySourceIndex` is sparse, holding
+only measures the OSMD cursor actually visited — and then **re-sorts** the survivors by tick. So
+position *k* in the WebView's list is not position *k* in what native sent, and native looks
+`SECTION_INDEX` up in its own `piece.sections` array. One drop shifts every index after it: the
+label names the wrong section and the swipe lands in the wrong place.
+
+This was invisible while sections came only from detection, whose boundaries are already ascending
+and all resolvable. User-editable sections removed that guarantee — a hand-placed boundary can sit
+on a measure the cursor never reaches.
+
+The fix is to carry each entry's original position through both the drop and the sort, and translate
+on the way out; `currentSectionIndex` stays a web-side index internally and is converted only where
+it crosses the bridge.
+
+**That logic lives in `client/src/score-web/sectionResolve.ts`, not in `playback.ts`, on purpose.**
+`client/score-web/` is excluded from the app's tsconfig (`exclude: ["score-web/**"]`) and has no
+test script of its own, so nothing in it is typechecked or unit-tested — the bundle is only ever
+run through esbuild. Anything there whose failure is silent should be a pure module under
+`client/src/score-web/`, which the app's tsconfig and Jest both cover; the bundler inlines it
+across the directory boundary without complaint.
 
 The payload is `{ measures, colors }`, not a bare index array: the WebView paints the junction marks
 into the score and has no access to the native theme, so each section's palette entry travels with

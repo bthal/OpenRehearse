@@ -2,7 +2,12 @@ import * as FileSystem from 'expo-file-system/legacy';
 import * as SQLite from 'expo-sqlite';
 
 import type { Piece } from '@domain/piece';
+import { normaliseSections } from '@domain/sectionEditing';
 import type { Section } from '@domain/sections';
+// The one place storage reaches for the theme: section colors became part of the
+// persisted record when sections became editable, so filling a missing one on read
+// needs the palette that used to be applied at render time.
+import { SectionColors } from '@theme/colors';
 import { getAppDatabase } from './db';
 import type { PieceRepository } from './PieceRepository';
 
@@ -80,7 +85,15 @@ export class ExpoLocalPieceRepository implements PieceRepository {
   }
 
   private static rowToPiece(r: PieceRow): Piece {
-    const sections = ExpoLocalPieceRepository.parseSections(r.sections);
+    // Normalising on read is what lets every consumer past this point assume a
+    // well-formed tiling with valid colors, with no migration and no re-parsing of
+    // the score at startup. A null column — a piece imported before sections existed,
+    // one whose form we could not read, or a corrupt blob — becomes a single
+    // whole-piece section here, and the column stays null until the user saves.
+    const sections = normaliseSections(
+      ExpoLocalPieceRepository.parseSections(r.sections),
+      SectionColors,
+    );
     return {
       id: r.id,
       title: r.title,
@@ -90,7 +103,7 @@ export class ExpoLocalPieceRepository implements PieceRepository {
       ...(r.last_opened_at ? { lastOpenedAt: r.last_opened_at } : {}),
       ...(r.imported_bpm != null ? { importedBpm: r.imported_bpm } : {}),
       ...(r.target_bpm != null ? { targetBpm: r.target_bpm } : {}),
-      ...(sections ? { sections } : {}),
+      sections,
     };
   }
 
@@ -148,10 +161,14 @@ export class ExpoLocalPieceRepository implements PieceRepository {
   async update(piece: Piece): Promise<void> {
     const db = await this.getDb();
     await db.runAsync(
-      'UPDATE pieces SET title = ?, composer = ?, target_bpm = ? WHERE id = ?',
+      // COALESCE so update() can add or replace sections but never erase them: a caller
+      // holding a Piece that never went through rowToPiece has `sections` undefined,
+      // and that must leave the stored blob alone rather than wiping the user's edits.
+      'UPDATE pieces SET title = ?, composer = ?, target_bpm = ?, sections = COALESCE(?, sections) WHERE id = ?',
       piece.title,
       piece.composer ?? null,
       piece.targetBpm ?? null,
+      piece.sections ? JSON.stringify(piece.sections) : null,
       piece.id,
     );
   }

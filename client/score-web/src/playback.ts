@@ -2,6 +2,7 @@ import * as Tone from 'tone';
 import type { OpenSheetMusicDisplay } from 'opensheetmusicdisplay';
 import { ArpeggioType, ArticulationEnum } from 'opensheetmusicdisplay';
 import type { OutboundMessage } from './types';
+import { resolveSections } from '../../src/score-web/sectionResolve';
 // Pure count-in and loop-geometry math live in the domain layer (screens/score-web → domain).
 import { computeCountIn, loopLeadInBeats } from '../../src/domain/countIn';
 import { LOOP_MIN_GAP_PX, placeLoopAtCursor } from '../../src/domain/loop';
@@ -128,7 +129,17 @@ let sectionStartTicks: number[] = [];
 // Palette color of each section, index-for-index with sectionStartTicks. Supplied by
 // native, which owns the theme; the web side only paints with it.
 let sectionColors: string[] = [];
-// Last index reported to native, so SECTION_INDEX is emitted on change only.
+// Position in native's original SET_SECTIONS array for each entry above.
+//
+// setSections drops sections it cannot resolve and re-sorts what survives, so a
+// web-side index is not a native-side index. Native looks SECTION_INDEX up in its own
+// list, so translating back through this is what keeps the label naming the section the
+// user actually chose. Detection alone never triggered it — its boundaries are already
+// ascending and resolvable — but user-placed boundaries can land on a measure the OSMD
+// cursor never visits, and one drop shifts every index after it.
+let sectionInputIndices: number[] = [];
+// Last web-side index reported, so SECTION_INDEX is emitted on change only. Web-side
+// throughout; it is translated on the way out, never stored translated.
 let currentSectionIndex: number | null = null;
 // Count-in setting: measures of metronome pre-roll before a fresh start (0 = off).
 let countInMeasures = 0;
@@ -1191,6 +1202,17 @@ function sectionIndexAtTicks(ticks: number): number | null {
 }
 
 /**
+ * Translates a web-side section index into the position native sent it at.
+ *
+ * Everything inside this file indexes the resolved, re-sorted list; everything native
+ * does with SECTION_INDEX indexes `piece.sections`. This is the one place the two meet.
+ */
+function nativeSectionIndex(webIndex: number | null): number | null {
+  if (webIndex === null) return null;
+  return sectionInputIndices[webIndex] ?? null;
+}
+
+/**
  * Reports the current section to native, but only when it actually changes —
  * roughly once per section rather than once per animation frame.
  */
@@ -1198,7 +1220,7 @@ function emitSectionIfChanged(ticks: number): void {
   const index = sectionIndexAtTicks(ticks);
   if (index === currentSectionIndex) return;
   currentSectionIndex = index;
-  postToNative({ type: 'SECTION_INDEX', payload: index });
+  postToNative({ type: 'SECTION_INDEX', payload: nativeSectionIndex(index) });
 }
 
 /** Score-pixel position of a tick, via the cursor step that owns it. */
@@ -1280,30 +1302,18 @@ function renderSectionMarks(): void {
  * score has been walked.
  */
 export function setSections(startMeasureIndices: number[], colors: string[]): void {
-  // Distinct measures resolve to distinct ticks, so this dedupe should never fire.
-  // It is kept because a measure the cursor never reaches resolves to null and is
-  // dropped, and a malformed list is better collapsed than drawn twice over itself.
-  const seen = new Set<number>();
-  const resolved: { ticks: number; color: string }[] = [];
-  for (let i = 0; i < startMeasureIndices.length; i++) {
-    const measureIndex = startMeasureIndices[i];
-    const color = colors[i];
-    if (measureIndex === undefined || color === undefined) continue;
-    const tick = sectionStartTickFor(measureIndex);
-    if (tick === null || seen.has(tick)) continue;
-    seen.add(tick);
-    resolved.push({ ticks: tick, color });
-  }
-  resolved.sort((a, b) => a.ticks - b.ticks);
+  const resolved = resolveSections(startMeasureIndices, colors, sectionStartTickFor);
   sectionStartTicks = resolved.map((s) => s.ticks);
   sectionColors = resolved.map((s) => s.color);
+  // Carried through the drop and the sort so SECTION_INDEX can be translated back.
+  sectionInputIndices = resolved.map((s) => s.inputIndex);
 
   renderSectionMarks();
 
   // Always report, even when null: a previously loaded piece may have left the
   // native label showing a section this score does not have.
   currentSectionIndex = sectionIndexAtTicks(Tone.Transport.ticks);
-  postToNative({ type: 'SECTION_INDEX', payload: currentSectionIndex });
+  postToNative({ type: 'SECTION_INDEX', payload: nativeSectionIndex(currentSectionIndex) });
 }
 
 /**
@@ -1621,6 +1631,7 @@ export function disposePlayback(): void {
   firstTicksBySourceIndex = [];
   sectionStartTicks = [];
   sectionColors = [];
+  sectionInputIndices = [];
   currentSectionIndex = null;
   // Marks are score-pixel positioned: left in place they would sit at stale
   // coordinates over the next score, exactly like the loop handles below.

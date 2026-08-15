@@ -3,7 +3,9 @@ import { create } from 'zustand';
 
 import type { Piece } from '@domain/piece';
 import { scrapeMusicXmlMetadata, scrapeTempoBpm, validateMusicXml } from '@domain/musicxml';
-import { detectSectionsSafely } from '@domain/sections';
+import { sectionsFromXml } from '@domain/sectionEditing';
+import type { Section } from '@domain/sections';
+import { SectionColors } from '@theme/colors';
 import type { PickedFile } from '@data/index';
 import { pieceRepository } from '@data/index';
 
@@ -32,7 +34,13 @@ interface PiecesState {
   importPiece: (file: PickedFile, fallbackTitle: string) => Promise<string | null>;
   updatePiece: (
     id: string,
-    updates: { title: string; composer: string | null; targetBpm?: number },
+    updates: {
+      title: string;
+      composer: string | null;
+      targetBpm?: number;
+      /** Omit to leave the piece's sections untouched. */
+      sections?: Section[];
+    },
   ) => Promise<void>;
   touchPiece: (id: string) => Promise<void>;
   deletePiece: (id: string) => Promise<void>;
@@ -79,9 +87,11 @@ export const usePiecesStore = create<PiecesState>()((set, get) => ({
       // Only set when the file actually declares a tempo — a tempo-less score
       // keeps importedBpm undefined and plays at OSMD's own default.
       ...(importedBpm != null ? { importedBpm } : {}),
-      // Always set, even when empty: `[]` records "analysed, no readable form",
-      // which is a different thing from the `undefined` of a pre-detection import.
-      sections: detectSectionsSafely(file.content),
+      // Normalised here rather than on read, because this object goes straight into
+      // the store and to save() without passing through rowToPiece. A score with no
+      // readable form gets one whole-piece section, not none — the PlayView simply
+      // does not label a piece that has a single section.
+      sections: sectionsFromXml(file.content, SectionColors),
     };
 
     try {
@@ -104,7 +114,10 @@ export const usePiecesStore = create<PiecesState>()((set, get) => ({
     const { piecesById } = get();
     const existing = piecesById[id];
     if (!existing) return;
+    // Spreading `updates` would clobber sections to undefined whenever the key is
+    // present but unset, which is the common case: most edits do not touch sections.
     const updated: Piece = { ...existing, ...updates };
+    if (updates.sections === undefined) updated.sections = existing.sections;
     await pieceRepository.update(updated);
     set({ piecesById: { ...piecesById, [id]: updated } });
   },

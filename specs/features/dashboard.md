@@ -33,6 +33,7 @@ Home surface listing the user's **pieces** and entry points to **import** and **
 
 - **Edit**: enter selection mode with one piece → tap Edit → modal to change **title**, **composer**, and **target speed** (BPM). The modal shows the tempo read from the file on import for reference. Title, composer, and target speed are all **required** — missing fields are marked and Save stays disabled until each is valid.
 - **Input needed** (import): when an imported file lacks a required field, the same modal opens automatically in a non-dismissable "Input needed" state (no close button; **Import** button gated on completeness). A **Cancel** button discards the in-progress piece and returns to the dashboard.
+- **Sections**: the edit modal carries a **Sections** block listing one row per section as a table — swatch, name, and the measures it covers — above a **Reset to detected** button. The score is read when the modal opens, to map printed measure numbers. A row rests in display mode and opens into an editor on tap; the editor carries the name, the "from"/"to" measures, an always-visible hue picker, and Split / Delete / Cancel / Done. Sections tile the piece, so a row's "to" field and the next row's "from" field are the same junction — editing either moves both, and **Cancel restores the whole list**, since one junction move changes two sections. **Done** only closes the row editor; the modal's Save is the only thing that persists. Splitting takes the section's last measure as a new section and drops the caret into its cleared "from" field. Deleting asks which neighbour absorbs the measures, except at the ends of the piece where only one answer exists. Measure fields commit on blur, and Save stays disabled while any of them holds text that does not resolve. See `specs/features/section-detection.md`.
 - **Delete**: enter selection mode → tap Remove → native confirm dialog → piece(s) removed from library.
 
 ## Practice-time tracking
@@ -66,6 +67,8 @@ Home surface listing the user's **pieces** and entry points to **import** and **
 - [x] Edit modal lets the user set a target speed (validated whole-number BPM, 40–240) and shows the tempo read from the file on import.
 - [x] Title, composer, and target speed are required; missing fields are marked and Save/Import is disabled until all are valid.
 - [x] Importing a file missing any required field opens a non-dismissable "Input needed" modal that must be completed before the piece is usable.
+- [x] The edit modal has a Sections block that edits section names, colors and bounds.
+- [ ] Section edits made in the modal survive an app restart.
 - [x] Privacy note and brand header visible at all times on the dashboard.
 - [x] Practice heatmap sits at the very bottom, populated from tracked practice time and coloured
       from the app palette.

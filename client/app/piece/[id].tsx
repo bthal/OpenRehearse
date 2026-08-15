@@ -14,7 +14,7 @@ import {
   mdiSpeedometer,
 } from '@mdi/js';
 import { router, Stack, useLocalSearchParams } from 'expo-router';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Animated, ActivityIndicator, Text, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import WebView, { type WebViewMessageEvent } from 'react-native-webview';
@@ -23,7 +23,7 @@ import { useTranslation } from 'react-i18next';
 import { AppIcon } from '@components/AppIcon';
 import { SectionLabel } from '@components/SectionLabel';
 import { pieceRepository } from '@data/index';
-import { assignSectionColorIndices, type Section } from '@domain/sections';
+import type { Section } from '@domain/sections';
 import { SectionColors } from '@theme/colors';
 import { SCORE_WEB_HTML } from '@score-web/html';
 import type { WebToNativeMessage } from '@score-web/messageProtocol';
@@ -255,12 +255,12 @@ export default function PlayView() {
           // Only now: the web side resolves section starts against measure metadata
           // that initPlayback builds during the load.
           const loaded = sectionsRef.current ?? [];
-          const indices = assignSectionColorIndices(loaded, SectionColors.length);
           // Colors travel with the indices because the WebView paints the junction
-          // marks in the score and cannot reach the native theme.
+          // marks in the score and cannot reach the native theme. They are stored on
+          // the section now that the user can pick them, not derived per render.
           const payload = {
             measures: loaded.map((s) => s.startMeasureIndex),
-            colors: indices.map((i) => SectionColors[i] ?? SectionColors[0]!),
+            colors: loaded.map((s) => s.color ?? SectionColors[0]!),
           };
           webViewRef.current?.injectJavaScript(
             `window.__rn_set_sections(${JSON.stringify(JSON.stringify(payload))});void 0;`,
@@ -339,12 +339,13 @@ export default function PlayView() {
   const scoreReady = webViewReady && !isLoadingScore && !scoreError;
 
   const sections = piece?.sections;
-  const sectionColorIndices = useMemo(
-    () => (sections ? assignSectionColorIndices(sections, SectionColors.length) : []),
-    [sections],
-  );
+  // A single section is the "no readable form" case: every piece has at least one
+  // after normalisation, so one section is not a form worth naming on screen.
+  const hasLabelledSections = (sections?.length ?? 0) > 1;
   const activeSection =
-    sections && currentSectionIndex !== null ? sections[currentSectionIndex] : undefined;
+    hasLabelledSections && sections && currentSectionIndex !== null
+      ? sections[currentSectionIndex]
+      : undefined;
   // An armed loop is a deliberate "stay here" gesture, so section navigation stands
   // down rather than yanking the playhead out of the bit the user just set.
   const canNavigateSections = !isPlaying && !loopActive;
@@ -357,10 +358,10 @@ export default function PlayView() {
       if (!section) return null;
       return {
         name: section.name ?? t('playView.sectionOrdinal', { n: index + 1 }),
-        color: SectionColors[sectionColorIndices[index] ?? 0] ?? SectionColors[0]!,
+        color: section.color ?? SectionColors[0]!,
       };
     },
-    [sections, sectionColorIndices, t],
+    [sections, t],
   );
 
   if (!piece) {
@@ -484,8 +485,9 @@ export default function PlayView() {
             </View>
           )}
 
-          {/* Section label — upper-right overlay. Absent entirely when the score has
-            no detected form; a piece we cannot read has no sections rather than one. */}
+          {/* Section label — upper-right overlay. Absent when the piece has a single
+            section: every piece has one after normalisation, so a lone section means
+            "no readable form" and there is nothing worth labelling. */}
           {scoreReady && activeSection && currentSectionIndex !== null && (
             // Pinned in absolute screen space and lifted above the WebView, like the
             // cursor line: it must not ride on anything the score layout can move.
@@ -501,9 +503,7 @@ export default function PlayView() {
                 }
                 previousName={sectionAt(currentSectionIndex - 1)?.name ?? null}
                 nextName={sectionAt(currentSectionIndex + 1)?.name ?? null}
-                color={
-                  SectionColors[sectionColorIndices[currentSectionIndex] ?? 0] ?? SectionColors[0]!
-                }
+                color={activeSection.color ?? SectionColors[0]!}
                 previousColor={sectionAt(currentSectionIndex - 1)?.color ?? SectionColors[0]!}
                 nextColor={sectionAt(currentSectionIndex + 1)?.color ?? SectionColors[0]!}
                 sectionIndex={currentSectionIndex}
