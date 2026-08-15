@@ -13,6 +13,10 @@
   (`scrapeTempoBpm`); surfaced to the user as the file's original speed
 - Optional: `targetBpm` — user-chosen target speed that overrides `importedBpm` as the PlayView
   100% reference; valid range and helpers live in `domain/tempo.ts`
+- Optional: `sections` — formal sections detected from the notation at import
+  (`domain/sections.ts`; see `specs/features/section-detection.md`). Three distinct states:
+  `undefined` = never analysed (imported before the feature existed), `[]` = analysed with no
+  readable form, non-empty = at least two sections. Derived data, never user-edited.
 
 ### Bit (active loop)
 

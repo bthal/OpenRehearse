@@ -40,7 +40,10 @@
   },
   "playView": {
     "pieceNotFound": "Piece not found.",
-    "failedToReadScore": "Failed to read score file."
+    "failedToReadScore": "Failed to read score file.",
+    "sectionOrdinal": "Section {{n}}",
+    "previousSection": "Previous section",
+    "nextSection": "Next section"
   },
   "warmup": {
     "key": "Key",

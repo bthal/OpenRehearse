@@ -27,3 +27,36 @@ export const HeatmapColors = {
     'hsl(169.1 21.6% 30%)', // seagrass-700
   ],
 } as const;
+
+/**
+ * Categorical palette for the PlayView section label — one entry per section,
+ * assigned by `domain/sections.ts#assignSectionColorIndices`.
+ *
+ * Deliberately outside the seagrass/ash-grey/mauve brand ramps: these hues carry
+ * information rather than decoration. A student glancing at the label needs to tell
+ * "this is a different section from the last one" at a distance, and tints of one
+ * hue cannot do that. Hues are spread around the wheel and ordered so that
+ * neighbours in the cycle are far apart.
+ *
+ * The label always draws white text, so every entry is held at a lightness that
+ * carries white at roughly 4.5:1 or better. That is the binding constraint on this
+ * palette: the ochre and olive entries in particular are much darker than their
+ * nominal hue would suggest, because a bright yellow-green cannot hold white type.
+ * Any hue added here has to be checked against white before it goes in.
+ *
+ * Written as hex rather than the `hsl(H S% L%)` used elsewhere in this file, because
+ * these strings cross three different color parsers: React Native styles, the
+ * `react-native-svg` gradient stops behind the label, and CSS gradients inside the
+ * WebView, which receives them verbatim over SET_SECTIONS. Hex is the only notation
+ * all three parse identically. The source hue is kept in the comment.
+ */
+export const SectionColors: readonly string[] = [
+  '#0B65DA', // blue — hsl(214 90% 45%)
+  '#D43811', // vermilion — hsl(12 85% 45%)
+  '#0E8147', // green — hsl(150 80% 28%)
+  '#8925D0', // violet — hsl(275 70% 48%)
+  '#A96404', // ochre — hsl(35 95% 34%)
+  '#C1156B', // magenta — hsl(330 80% 42%)
+  '#087F91', // teal — hsl(188 90% 30%)
+  '#4B7D12', // olive — hsl(88 75% 28%)
+] as const;

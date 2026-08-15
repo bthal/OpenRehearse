@@ -7,7 +7,9 @@ export type InboundMessage =
   | { type: 'TOGGLE_LOOP' }
   | { type: 'TOGGLE_METRONOME' }
   | { type: 'SET_ACTIVE_HAND'; payload: 'both' | 'right' | 'left' }
-  | { type: 'SET_COUNT_IN'; payload: number };
+  | { type: 'SET_COUNT_IN'; payload: number }
+  | { type: 'SET_SECTIONS'; payload: { measures: number[]; colors: string[] } }
+  | { type: 'SEEK_SECTION'; payload: -1 | 1 };
 
 export type OutboundMessage =
   | { type: 'LOADED' }
@@ -16,4 +18,5 @@ export type OutboundMessage =
   | { type: 'SCORE_BPM'; payload: number }
   | { type: 'PLAYBACK_STATE'; payload: 'playing' | 'paused' | 'stopped' }
   | { type: 'PLAYBACK_END' }
-  | { type: 'LOOP_STATE'; payload: boolean };
+  | { type: 'LOOP_STATE'; payload: boolean }
+  | { type: 'SECTION_INDEX'; payload: number | null };

@@ -171,6 +171,28 @@ Native→Web: native calls `webViewRef.current.injectJavaScript(code)`; executed
 
 Readiness signal: native's `onLoadEnd` fires after inline scripts have run and `window.__rn_load_xml` is defined. Do not rely on a `READY` postMessage from the web page — `DOMContentLoaded` will never fire for inline scripts (see above).
 
+The two protocol type files (`client/src/score-web/messageProtocol.ts` and
+`client/score-web/src/types.ts`) are **duplicated by hand** — `score-web/**` is excluded from the
+app tsconfig, so nothing links them and nothing fails if they drift. Adding a message means editing
+both, then rebuilding the bundle.
+
+### `SET_SECTIONS` must be sent after `LOADED`, not with the XML
+
+`__rn_set_sections` resolves 0-based measure indices against `measureMeta` and `noteSpans`, both of
+which `initPlayback` builds while walking the score. Injecting it alongside `__rn_load_xml` runs it
+against the *previous* score's data (or none at all). PlayView therefore injects it from its
+`LOADED` handler.
+
+Native never computes section positions itself: it sends indices and receives `SECTION_INDEX` back.
+Keeping the tick math on one side is what stops the label and the seek target from disagreeing about
+the anacrusis offset.
+
+The payload is `{ measures, colors }`, not a bare index array: the WebView paints the junction marks
+into the score and has no access to the native theme, so each section's palette entry travels with
+its index. `colors` holds plain hex strings — `SectionColors` is written in hex precisely because
+the same string has to survive React Native's style parser, `react-native-svg`'s gradient stops and
+a CSS `linear-gradient()` inside the WebView, and hex is the only notation all three read alike.
+
 ## OSMD `FingeringPosition` default hides bass-clef fingerings
 
 **LANDMINE:** `EngravingRules.FingeringPosition` defaults to `PlacementEnum.AboveOrBelow = 5`. When `calculateFingerings()` encounters `AboveOrBelow`, it overrides to `isUpperStaffOfInstrument() ? Above : Below`. Bass staves resolve to `Below` — fingerings are placed below the staff, outside the visible viewport (`overflow: hidden`).

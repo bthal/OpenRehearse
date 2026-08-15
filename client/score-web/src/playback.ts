@@ -57,6 +57,18 @@ const FERMATA_DURATION_MULTIPLIER = 1.75;
 // Ticks between successive notes in an arpeggio roll (~15 ms at 120 BPM with PPQ=192).
 const ARPEGGIO_STEP_TICKS = 6;
 
+// Section junction marks drawn into the score. Each junction gets the outgoing
+// section's color fading away to its left and the incoming section's fading away to
+// its right, meeting at a crisp two-pixel seam — one pixel of each — so the junction
+// stays legible even where two neighbouring sections happen to draw the same hue.
+const SECTION_FADE_ALPHA = 0.35;
+const SECTION_SEAM_PX = 1;
+// The fade reaches roughly half a measure to each side, but engraved measure widths
+// vary wildly (a whole-note bar against a run of semiquavers), so it is clamped.
+const SECTION_FADE_MEASURES = 0.5;
+const SECTION_FADE_MIN_PX = 20;
+const SECTION_FADE_MAX_PX = 130;
+
 interface NoteEvent {
   time: string;
   midi: number;
@@ -93,8 +105,10 @@ let part: Tone.Part<NoteEvent> | null = null;
 let metronomeEventId: number | null = null;
 let metronomeEnabled = false;
 let downbeatTicks: Set<number> = new Set();
-// Per-measure time signature + start tick, in score order. Lets the count-in
-// read the meter at the piece start or at a loop's start measure.
+// Per-measure time signature + start tick, in *playback* order: the cursor follows
+// repeats, so a repeated measure appears here once per pass. Lets the count-in read
+// the meter at the piece start or at a loop's start measure, both of which are
+// looked up by tick rather than by index.
 interface MeasureMeta {
   startTicks: number;
   num: number; // time-signature numerator (beats per measure)
@@ -102,6 +116,20 @@ interface MeasureMeta {
   implicit: boolean; // true for a pickup/anacrusis measure
 }
 let measureMeta: MeasureMeta[] = [];
+// Tick each measure of the *printed* score first sounds at, indexed by its position
+// in the score's measure list.
+//
+// Kept separate from measureMeta because the two orders diverge at the first repeat
+// back-jump: measureMeta is the unrolled timeline, this is the page. Sections arrive
+// from the domain as printed-score indices, so they must resolve through this one.
+let firstTicksBySourceIndex: (number | undefined)[] = [];
+// Section start positions in ticks, ascending. Always a measure downbeat.
+let sectionStartTicks: number[] = [];
+// Palette color of each section, index-for-index with sectionStartTicks. Supplied by
+// native, which owns the theme; the web side only paints with it.
+let sectionColors: string[] = [];
+// Last index reported to native, so SECTION_INDEX is emitted on change only.
+let currentSectionIndex: number | null = null;
 // Count-in setting: measures of metronome pre-roll before a fresh start (0 = off).
 let countInMeasures = 0;
 // True while the count-in pre-roll is sounding, before the transport starts.
@@ -116,6 +144,7 @@ let animFrameId: number | null = null;
 let osmdRef: OpenSheetMusicDisplay | null = null;
 
 let osmdEl: HTMLElement | null = null;
+let sectionMarksEl: HTMLElement | null = null;
 let handleAEl: HTMLElement | null = null;
 let handleBEl: HTMLElement | null = null;
 let shadeEl: HTMLElement | null = null;
@@ -231,6 +260,7 @@ function buildTimelines(osmd: OpenSheetMusicDisplay): {
   let lastBpm = scoreBpm;
   downbeatTicks = new Set();
   measureMeta = [];
+  firstTicksBySourceIndex = [];
 
   while (!osmd.cursor.Iterator.EndReached) {
     const quarters = osmd.cursor.Iterator.CurrentEnrolledTimestamp.RealValue * WHOLE_TO_QUARTER;
@@ -256,6 +286,14 @@ function buildTimelines(osmd: OpenSheetMusicDisplay): {
         den: den && den > 0 ? den : 4,
         implicit: sm.ImplicitMeasure === true,
       });
+      // CurrentMeasureIndex indexes Sheet.SourceMeasures — the printed score — and is
+      // rewound by the iterator on a repeat's back-jump. Keeping only the first visit
+      // maps a printed measure to the tick it first sounds at, which is where a
+      // section starting there begins.
+      const sourceIndex = osmd.cursor.Iterator.CurrentMeasureIndex;
+      if (sourceIndex >= 0 && firstTicksBySourceIndex[sourceIndex] === undefined) {
+        firstTicksBySourceIndex[sourceIndex] = startTicks;
+      }
     }
     // Use style.left (exact value OSMD sets) rather than offsetLeft (integer, may round).
     const pxLeft = parseFloat(el?.style.left ?? '0');
@@ -497,6 +535,21 @@ function ticksToStep(ticks: number): number {
   return best;
 }
 
+/**
+ * Moves the whole playhead — transport, OSMD iterator, cursor element and score
+ * translation — to a tick position. The four have to move together or the audio and
+ * the visible cursor disagree, so every seek goes through here.
+ */
+function seekToTicks(ticks: number): void {
+  Tone.Transport.ticks = ticks;
+  const targetStep = ticksToStep(ticks);
+  advanceCursorTo(targetStep);
+  const px = cursorSteps[targetStep]?.pxLeft ?? 0;
+  const el = cursorEl();
+  if (el) el.style.left = `${px}px`;
+  applyTranslate(viewportWidth / 2 - px);
+}
+
 // First step whose pxLeft ≥ px (ceiling). Used to find the first note inside the loop start.
 function ceilStepToPx(px: number): number {
   let lo = 0, hi = cursorSteps.length - 1, best = cursorSteps.length - 1;
@@ -570,6 +623,10 @@ function animateCursorLoop(): void {
   // advanced here to avoid main-thread stalls on backward seeks (loop wraps).
   currentCursorStep = targetStep;
 
+  // Cheap: a scan over at most a dozen section starts, and it posts nothing unless
+  // the cursor actually crossed a junction.
+  emitSectionIfChanged(effectiveQE * TONE_PPQ);
+
   // Interpolate position between current step and the next for smooth scrolling.
   // The interpolated px is used for BOTH the score translation AND the cursor element's
   // left position so they always align on the center line.
@@ -626,6 +683,9 @@ function _stopInternal(): void {
   const el = cursorEl();
   if (el) el.style.left = `${px0}px`;
   applyTranslate(viewportWidth / 2 - px0);
+  // Transport.stop() rewinds to 0, so the label has to come back to the first
+  // section — otherwise a piece that plays to the end leaves it on the last one.
+  emitSectionIfChanged(0);
 }
 
 // ─── Touch: manual score pan ──────────────────────────────────────────────────
@@ -637,6 +697,9 @@ function syncCursorToCenter(): void {
   Tone.Transport.ticks = Math.round((cursorSteps[step]?.quarters ?? 0) * TONE_PPQ);
   const el = cursorEl();
   if (el) el.style.left = `${cursorSteps[step]?.pxLeft ?? 0}px`;
+  // The frame loop is not running while paused, so a manual pan is the other way
+  // the playhead can cross a section junction.
+  emitSectionIfChanged(Tone.Transport.ticks);
 }
 
 function startMomentum(initialVelocity: number): void {
@@ -659,6 +722,7 @@ function startMomentum(initialVelocity: number): void {
     const next = scrollOffsetPx + velocity * dt;
     const clamped = clampTranslate(next);
     applyTranslate(clamped);
+    emitSectionAtScrollOffset();
     if (clamped !== next) {
       momentumFrameId = null;
       syncCursorToCenter();
@@ -724,6 +788,7 @@ function initTouchHandlers(): void {
     lastMoveTime = now;
     lastMoveX = clientX;
     applyTranslate(clampTranslate(startOffset + (clientX - startX)));
+    emitSectionAtScrollOffset();
   }, { passive: true });
 
   wrapper.addEventListener('touchend', () => {
@@ -941,7 +1006,7 @@ function initLoopHandles(): void {
 // ─── Loop create / clear ──────────────────────────────────────────────────────
 
 function setOverlayBounds(top: number, height: number): void {
-  for (const el of [handleAEl, handleBEl, shadeEl]) {
+  for (const el of [handleAEl, handleBEl, shadeEl, sectionMarksEl]) {
     if (!el) continue;
     el.style.top = `${top}px`;
     el.style.height = `${height}px`;
@@ -1090,6 +1155,183 @@ function cancelCountIn(): boolean {
 
 // ─── Public API ───────────────────────────────────────────────────────────────
 
+// ─── Sections ─────────────────────────────────────────────────────────────────
+
+// Tick comparisons at a section seam need slack: tick positions are rounded to whole
+// ticks, so a strict test would read the playhead sitting exactly on a junction as
+// still belonging to the previous section.
+const SEAM_EPSILON_TICKS = 1;
+
+/**
+ * Resolves a section's start measure — a printed-score index — to its tick.
+ *
+ * Sections always begin on a barline. Pickups are deliberately not compensated for:
+ * an opening anacrusis is simply part of the first section, and where an interior
+ * section is led into by an upbeat, that upbeat falls in the preceding section.
+ *
+ * The alternative was shifting junctions back off the barline by the anacrusis
+ * length, but nothing in the notation says whether a piece's opening pickup implies
+ * one at every later section, so that offset was as often wrong as right. Landing on
+ * the barline is at least predictable, and it keeps the label, the swipe target and
+ * the junction mark agreeing with the engraving the user is looking at.
+ */
+function sectionStartTickFor(measureIndex: number): number | null {
+  return firstTicksBySourceIndex[measureIndex] ?? null;
+}
+
+/** The section containing `ticks`, or null when the piece has no sections. */
+function sectionIndexAtTicks(ticks: number): number | null {
+  if (sectionStartTicks.length === 0) return null;
+  let index = 0;
+  for (let i = 0; i < sectionStartTicks.length; i++) {
+    if ((sectionStartTicks[i] ?? 0) <= ticks + SEAM_EPSILON_TICKS) index = i;
+    else break;
+  }
+  return index;
+}
+
+/**
+ * Reports the current section to native, but only when it actually changes —
+ * roughly once per section rather than once per animation frame.
+ */
+function emitSectionIfChanged(ticks: number): void {
+  const index = sectionIndexAtTicks(ticks);
+  if (index === currentSectionIndex) return;
+  currentSectionIndex = index;
+  postToNative({ type: 'SECTION_INDEX', payload: index });
+}
+
+/** Score-pixel position of a tick, via the cursor step that owns it. */
+function pxAtTicks(ticks: number): number {
+  return cursorSteps[ticksToStep(ticks)]?.pxLeft ?? 0;
+}
+
+/**
+ * How far a junction's fade reaches to each side: half a measure of engraved score,
+ * measured in pixels rather than assumed, because measure widths vary with how many
+ * notes they hold.
+ */
+function fadeReachPx(ticks: number): number {
+  const meta = measureAtTicks(ticks);
+  const reachTicks = ((TONE_PPQ * 4) / meta.den) * meta.num * SECTION_FADE_MEASURES;
+  const here = pxAtTicks(ticks);
+  const span = Math.max(
+    here - pxAtTicks(Math.max(0, ticks - reachTicks)),
+    pxAtTicks(ticks + reachTicks) - here,
+  );
+  return Math.min(SECTION_FADE_MAX_PX, Math.max(SECTION_FADE_MIN_PX, span));
+}
+
+function markDiv(left: number, width: number, background: string, opacity: number): HTMLElement {
+  const el = document.createElement('div');
+  el.style.left = `${left}px`;
+  el.style.width = `${width}px`;
+  el.style.background = background;
+  el.style.opacity = `${opacity}`;
+  return el;
+}
+
+/**
+ * Paints a colored mark into the score at every junction between two sections.
+ *
+ * Junctions only — a mark sits *between* two sections, so a piece with n sections
+ * gets n-1 of them and the opening of the piece is left unmarked.
+ *
+ * The elements live inside #osmd, so they translate with the score for free and
+ * need no per-frame work; they are rebuilt only when the section list changes.
+ */
+function renderSectionMarks(): void {
+  if (!sectionMarksEl) return;
+  sectionMarksEl.textContent = '';
+  if (sectionStartTicks.length < 2 || cursorSteps.length === 0) return;
+
+  for (let i = 1; i < sectionStartTicks.length; i++) {
+    const ticks = sectionStartTicks[i];
+    if (ticks === undefined) continue;
+    const px = pxAtTicks(ticks);
+    const reach = fadeReachPx(ticks);
+    const outgoing = sectionColors[i - 1];
+    const incoming = sectionColors[i];
+    if (outgoing === undefined || incoming === undefined) continue;
+
+    sectionMarksEl.appendChild(
+      markDiv(
+        px - reach,
+        reach,
+        `linear-gradient(to right, transparent, ${outgoing})`,
+        SECTION_FADE_ALPHA,
+      ),
+    );
+    sectionMarksEl.appendChild(
+      markDiv(px, reach, `linear-gradient(to right, ${incoming}, transparent)`, SECTION_FADE_ALPHA),
+    );
+    // The seam itself, at full strength: without it two adjacent sections drawing
+    // the same hue would blur into one continuous wash with no junction visible.
+    sectionMarksEl.appendChild(markDiv(px - SECTION_SEAM_PX, SECTION_SEAM_PX, outgoing, 1));
+    sectionMarksEl.appendChild(markDiv(px, SECTION_SEAM_PX, incoming, 1));
+  }
+}
+
+/**
+ * Installs the piece's sections, given as 0-based start measure indices into the
+ * printed score, with the palette color each one draws.
+ *
+ * Must be called after initPlayback: the measure-to-tick table only exists once the
+ * score has been walked.
+ */
+export function setSections(startMeasureIndices: number[], colors: string[]): void {
+  // Distinct measures resolve to distinct ticks, so this dedupe should never fire.
+  // It is kept because a measure the cursor never reaches resolves to null and is
+  // dropped, and a malformed list is better collapsed than drawn twice over itself.
+  const seen = new Set<number>();
+  const resolved: { ticks: number; color: string }[] = [];
+  for (let i = 0; i < startMeasureIndices.length; i++) {
+    const measureIndex = startMeasureIndices[i];
+    const color = colors[i];
+    if (measureIndex === undefined || color === undefined) continue;
+    const tick = sectionStartTickFor(measureIndex);
+    if (tick === null || seen.has(tick)) continue;
+    seen.add(tick);
+    resolved.push({ ticks: tick, color });
+  }
+  resolved.sort((a, b) => a.ticks - b.ticks);
+  sectionStartTicks = resolved.map((s) => s.ticks);
+  sectionColors = resolved.map((s) => s.color);
+
+  renderSectionMarks();
+
+  // Always report, even when null: a previously loaded piece may have left the
+  // native label showing a section this score does not have.
+  currentSectionIndex = sectionIndexAtTicks(Tone.Transport.ticks);
+  postToNative({ type: 'SECTION_INDEX', payload: currentSectionIndex });
+}
+
+/**
+ * Reports the section under the centre line from the current scroll offset.
+ *
+ * While the user pans, the transport has not moved — only the score has — so the
+ * label has to be driven from the translation instead. Called on every pan and
+ * momentum frame so the name flips the instant the centre line crosses a junction,
+ * rather than snapping once the scroll settles.
+ */
+function emitSectionAtScrollOffset(): void {
+  if (sectionStartTicks.length === 0) return;
+  const step = nearestStepToPx(viewportWidth / 2 - scrollOffsetPx);
+  emitSectionIfChanged(Math.round((cursorSteps[step]?.quarters ?? 0) * TONE_PPQ));
+}
+
+/** Jumps to the start of the previous (-1) or next (+1) section. */
+export function seekSection(direction: number): void {
+  const current = sectionIndexAtTicks(Tone.Transport.ticks);
+  if (current === null) return;
+
+  const targetTicks = sectionStartTicks[current + (direction < 0 ? -1 : 1)];
+  if (targetTicks === undefined) return; // already at the first or last section
+
+  seekToTicks(targetTicks);
+  emitSectionIfChanged(targetTicks);
+}
+
 export function initPlayback(
   osmd: OpenSheetMusicDisplay,
   externalTempoSchedule?: ExternalTempoChange[],
@@ -1103,6 +1345,7 @@ export function initPlayback(
   handleAEl = document.getElementById('loop-handle-a');
   handleBEl = document.getElementById('loop-handle-b');
   shadeEl = document.getElementById('loop-shade');
+  sectionMarksEl = document.getElementById('section-marks');
   scoreWidth = osmdEl?.scrollWidth ?? 0;
   viewportWidth = window.innerWidth;
 
@@ -1235,13 +1478,7 @@ export async function startPlayback(): Promise<void> {
     if (loopModified || posTicks < loopRegion.aTicks || posTicks >= loopRegion.bTicks) {
       loopModified = false;
       didLoopSeek = true;
-      Tone.Transport.ticks = loopRegion.aTicks;
-      const targetStep = ticksToStep(loopRegion.aTicks);
-      advanceCursorTo(targetStep);
-      const px = cursorSteps[targetStep]?.pxLeft ?? 0;
-      const el = cursorEl();
-      if (el) el.style.left = `${px}px`;
-      applyTranslate(viewportWidth / 2 - px);
+      seekToTicks(loopRegion.aTicks);
     }
   }
 
@@ -1381,6 +1618,13 @@ export function disposePlayback(): void {
   cancelCountIn();
   downbeatTicks = new Set();
   measureMeta = [];
+  firstTicksBySourceIndex = [];
+  sectionStartTicks = [];
+  sectionColors = [];
+  currentSectionIndex = null;
+  // Marks are score-pixel positioned: left in place they would sit at stale
+  // coordinates over the next score, exactly like the loop handles below.
+  if (sectionMarksEl) sectionMarksEl.textContent = '';
   cursorSteps = [];
   currentCursorStep = -1;
   osmdActualIdx = -1;

@@ -2,6 +2,7 @@ import * as FileSystem from 'expo-file-system/legacy';
 import * as SQLite from 'expo-sqlite';
 
 import type { Piece } from '@domain/piece';
+import type { Section } from '@domain/sections';
 import { getAppDatabase } from './db';
 import type { PieceRepository } from './PieceRepository';
 
@@ -16,6 +17,8 @@ interface PieceRow {
   last_opened_at: string | null;
   imported_bpm: number | null;
   target_bpm: number | null;
+  /** JSON-encoded Section[]; NULL for pieces imported before detection existed. */
+  sections: string | null;
 }
 
 export class ExpoLocalPieceRepository implements PieceRepository {
@@ -43,6 +46,7 @@ export class ExpoLocalPieceRepository implements PieceRepository {
       'ALTER TABLE pieces ADD COLUMN last_opened_at TEXT',
       'ALTER TABLE pieces ADD COLUMN imported_bpm INTEGER',
       'ALTER TABLE pieces ADD COLUMN target_bpm INTEGER',
+      'ALTER TABLE pieces ADD COLUMN sections TEXT',
     ]) {
       try {
         await db.execAsync(sql);
@@ -59,9 +63,24 @@ export class ExpoLocalPieceRepository implements PieceRepository {
   }
 
   private static readonly SELECT_COLUMNS =
-    'id, title, composer, xml_filename, imported_at, last_opened_at, imported_bpm, target_bpm';
+    'id, title, composer, xml_filename, imported_at, last_opened_at, imported_bpm, target_bpm, sections';
+
+  /**
+   * A corrupt sections blob degrades the piece to "never analysed" rather than
+   * breaking the pieces list — the label is a nicety, the library is not.
+   */
+  private static parseSections(raw: string | null): Section[] | undefined {
+    if (raw == null) return undefined;
+    try {
+      const parsed: unknown = JSON.parse(raw);
+      return Array.isArray(parsed) ? (parsed as Section[]) : undefined;
+    } catch {
+      return undefined;
+    }
+  }
 
   private static rowToPiece(r: PieceRow): Piece {
+    const sections = ExpoLocalPieceRepository.parseSections(r.sections);
     return {
       id: r.id,
       title: r.title,
@@ -71,6 +90,7 @@ export class ExpoLocalPieceRepository implements PieceRepository {
       ...(r.last_opened_at ? { lastOpenedAt: r.last_opened_at } : {}),
       ...(r.imported_bpm != null ? { importedBpm: r.imported_bpm } : {}),
       ...(r.target_bpm != null ? { targetBpm: r.target_bpm } : {}),
+      ...(sections ? { sections } : {}),
     };
   }
 
@@ -108,7 +128,7 @@ export class ExpoLocalPieceRepository implements PieceRepository {
     try {
       const db = await this.getDb();
       await db.runAsync(
-        'INSERT INTO pieces (id, title, composer, xml_filename, imported_at, imported_bpm, target_bpm) VALUES (?, ?, ?, ?, ?, ?, ?)',
+        'INSERT INTO pieces (id, title, composer, xml_filename, imported_at, imported_bpm, target_bpm, sections) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
         piece.id,
         piece.title,
         piece.composer ?? null,
@@ -116,6 +136,7 @@ export class ExpoLocalPieceRepository implements PieceRepository {
         piece.importedAt,
         piece.importedBpm ?? null,
         piece.targetBpm ?? null,
+        piece.sections ? JSON.stringify(piece.sections) : null,
       );
     } catch (err) {
       // Roll back the file write to avoid orphaned XML files

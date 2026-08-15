@@ -303,6 +303,31 @@ OSMD's cursor iterator follows repeats by default (`EngravingRules.CursorIgnoreR
 resulting linear timeline offset so `Tone.Part` events and cursor steps are both sequenced
 correctly.
 
+## LANDMINE: anything built by walking the cursor is in playback order, not score order
+
+The same back-jumps mean **a repeated measure is visited more than once**. Any array appended to
+inside the `while (!EndReached)` walk therefore holds one entry per *pass*, not per printed measure:
+`measureMeta` in `playback.ts` is the unrolled timeline, not the page.
+
+Indexing such an array with a printed-score measure number is silently correct up to the first
+repeat and wrong after it — the failure is invisible on a score without repeats, which is exactly
+what a first test file tends to be. Section boundaries hit this: they arrive from `domain/sections.ts`
+as 0-based indices into the MusicXML measure list, and a boundary past a repeat resolved to the
+second pass of an earlier measure.
+
+Two safe ways to consume the walk:
+
+- **Look up by tick, not by index** — `measureAtTicks()` scans for the last measure starting at or
+  before a tick, so the duplicates are harmless.
+- **Key by printed index while walking** — `Iterator.CurrentMeasureIndex` indexes
+  `Sheet.SourceMeasures` (the printed score) and is rewound by the iterator on a back-jump, so
+  recording only the first visit per index gives a printed-measure → tick table. This is what
+  `firstTicksBySourceIndex` is.
+
+Do not reach for `SourceMeasure.measureListIndex` instead: it is a graphical-layer field, whereas
+`CurrentMeasureIndex` is literally the index the iterator uses to fetch `CurrentMeasure`
+(`currentMeasure = musicSheet.SourceMeasures[currentMeasureIndex]`).
+
 ## LANDMINE: backward OSMD cursor seek inside RAF loop causes visual stall proportional to piece length
 
 **LANDMINE:** OSMD has no random-access seek. Moving the cursor backward requires `cursor.reset()`
@@ -417,12 +442,16 @@ for both `height` and `top` on all overlay elements:
 ```typescript
 const systemTop = parseFloat(cEl.style.top || '0');
 const systemH = parseInt(cEl.getAttribute('height') ?? '0', 10);
-for (const el of [handleAEl, handleBEl, shadeEl]) {
+for (const el of [handleAEl, handleBEl, shadeEl, sectionMarksEl]) {
   if (!el) continue;
   el.style.top = `${systemTop}px`;
   el.style.height = `${systemH}px`;
 }
 ```
+
+The section-mark container (`#section-marks`) goes through the same call for the same reason. Its
+children are the only overlay elements sized with `height: 100%` in CSS, and that is safe *because*
+their parent's height is set here — they inherit the staff system height, not the SVG canvas.
 
 Set these in `initPlayback` immediately after `cursor.show()` (which triggers
 `updateWidthAndStyle` internally and populates the cursor element's position data).
@@ -910,3 +939,72 @@ not mistaken for a count-in abort).
 pause during the pre-roll aborts it (`cancelCountIn` stops any un-played oscillators) and resets to
 the start rather than freezing mid-count. `countInMeasures` is set via `__rn_set_count_in` and, as
 a user setting, is preserved across score reloads (`disposePlayback` keeps it).
+
+## Sections: junction ticks, and why they must not come from `noteEvents`
+
+`setSections(indices, colors)` turns 0-based measure indices into transport ticks once per load, then
+`emitSectionIfChanged` posts `SECTION_INDEX` only when the index actually changes — about once per
+section, never per frame, even though it is called from several per-frame paths.
+
+There are **two** position sources, because the playhead moves in two different ways:
+
+- **Playing** — `animateCursorLoop` passes the transport position (loop-aware `effectiveQE`).
+- **Panning** — the transport has not moved, only the score has, so `emitSectionAtScrollOffset`
+  derives the position from `scrollOffsetPx` via `nearestStepToPx(viewportWidth / 2 - offset)`.
+  It is called on every `touchmove` and every momentum frame. Relying on `syncCursorToCenter`
+  alone (which runs on lift and when momentum settles) makes the label lag the score visibly —
+  the name only flips once the scroll stops, long after the centre line crossed the junction.
+
+`_stopInternal` also emits at tick 0: `Transport.stop()` rewinds, and without it a piece that plays
+to the end leaves the label showing the final section while the cursor sits at the start.
+
+**LANDMINE:** `noteEvents` is **filtered by `activeHand`**, and `setActiveHand` re-runs
+`buildTimelines` to rebuild it. Deriving anything score-structural from it means that structure
+silently changes when the user practises one hand. Section junctions did exactly this in an early
+draft: switching to left-hand-only moved every junction, because the rest-separation test stopped
+seeing the right-hand notes.
+
+`buildTimelines` therefore also fills `noteSpans` — `{start, end}` per note in ticks, pushed
+**before** the `activeHand` check, so it is identical for every hand setting:
+
+```typescript
+if (note.halfTone < 9 || note.halfTone > 115) continue;
+const spanQ = note.Length.RealValue * WHOLE_TO_QUARTER;
+if (spanQ > 0) spans.push({ start: baseTicks, end: baseTicks + Math.round(spanQ * TONE_PPQ) });
+if (activeHand !== 'both') { /* … filter … */ }
+```
+
+**Anacrusis offset.** With a pickup (`measureMeta[0].implicit`), phrase starts sit
+`measureMeta[1].startTicks` *before* each barline. `sectionStartTickFor` applies that offset only
+when the upbeat is real: note onsets inside `[bar - anacrusis, bar)` **and** nothing sounding across
+the window's start. Testing only for "notes in the window" fires almost always — a section normally
+ends with a full measure — so it would be indistinguishable from an unconditional offset. Ticks
+compare with a 1-tick epsilon because note ends are rounded.
+
+**`seekToTicks` is the single seek primitive.** Transport ticks, the OSMD iterator
+(`advanceCursorTo`), the cursor element's `style.left`, and `applyTranslate` all have to move
+together; the loop-start seek in `startPlayback` and `seekSection` both go through it so they cannot
+drift apart.
+
+**Junction marks are static DOM, not per-frame drawing.** `renderSectionMarks` builds four absolutely
+positioned divs per junction (two gradient ramps, two 1px seam lines) as children of `#section-marks`
+inside `#osmd`. Because `#osmd` is what `applyTranslate` transforms, the marks scroll with the score
+for free — there is no per-frame cost and nothing to keep in sync. They are rebuilt only when the
+section list changes, and cleared in `disposePlayback` for the same reason the loop handles are: they
+are positioned in score pixels, so surviving into the next score would paint them at stale
+coordinates.
+
+Marks sit at **junctions only** — between two sections, so *n* sections produce *n−1* marks and the
+opening of the piece is unmarked. Each junction draws the outgoing section's color fading away to the
+left and the incoming section's fading away to the right, meeting at a two-pixel seam (one pixel of
+each) at full opacity. The seam is what keeps a junction visible when two neighbouring sections
+happen to draw the same hue, which the gradients alone would blur into one continuous wash.
+
+The fade reach is *measured*, not assumed: `fadeReachPx` converts half a measure of the junction's
+own meter into pixels via `pxAtTicks`, then clamps to `[20, 130]`. Engraved measure widths vary by an
+order of magnitude between a whole-note bar and a run of semiquavers, so a fixed pixel reach reads as
+a different amount of music in different parts of the same score.
+
+Gradients ramp to `transparent` rather than to an explicit zero-alpha color. CSS interpolates gradient
+stops with premultiplied alpha, so `transparent` does not drag the ramp through grey; writing
+`rgba(r,g,b,0)` instead would require parsing the palette string web-side for no gain.

@@ -82,11 +82,30 @@ The entire piece is rendered in a **single horizontal line** — all measures la
     speedometer icon and **pauses playback**; expands a horizontal spring-animated panel over
     the score with ×0.5 / ×0.75 / ×1.0 text buttons. Selecting a speed closes the panel.
 
+## Section label
+
+- A label in the **upper-right** corner names the section the cursor is currently in: bold white
+  text on the section's color, fading out at the left and right ends. Inert (tapping does nothing).
+- **Playing** rolls it up to a thin strip of that color — same width, no text. **Pausing** unrolls
+  it. Only the height animates, so it reads as one object rather than a swap.
+- Pinned in absolute screen space above the WebView, at a fixed width so names slide through a
+  stable frame.
+- **Swiped** horizontally to move one section, while **paused** and while **no loop is active**. It
+  is a pager: dragging rightward brings the earlier section in from the left, names travel with the
+  finger, and the two sections' colors crossfade. One swipe moves exactly one section; at the first
+  and last it rubber-bands and springs back.
+- The name follows the score **continuously while panning**, not only once the scroll settles.
+- **Nothing is rendered** when the piece has no detected sections.
+- Every junction between two sections is also marked **in the score**, under the notation: the two
+  sections' colors fade away from a shared seam.
+- Full rules, colors and the anacrusis junction offset: `specs/features/section-detection.md`.
+
 ## State (Zustand)
 
 Slices: `activePieceId`, `webViewReady`, `isLoadingScore`, `scoreError`, `isPlaying`,
 `scoreBpm` (from MusicXML), `tempoMultiplier` (×0.5/×0.75/×1.0), `metronomeOn: boolean`,
 `activeHand: 'both' | 'right' | 'left'` (resets to `'both'` on piece unmount),
+`currentSectionIndex: number | null` (driven by `SECTION_INDEX` from the WebView, which owns position),
 `loop: { start, end } | null`,
 `displayMode: 'one-line' | 'standard'` (global preference; `'one-line'` in MVP, no UI to change it yet).
 
@@ -127,4 +146,10 @@ Slices: `activePieceId`, `webViewReady`, `isLoadingScore`, `scoreError`, `isPlay
   time signature. *(Phase 5)*
 - [x] Hand selector (Both/Right/Left): selected staff plays audio and notes stay black;
   inactive staff notes greyed (`#B0B0B0`); switching hand preserves cursor position.
+- [x] Section label shows the current section in the upper-right corner, and is absent entirely
+      for a piece with no detected sections.
+- [x] Swiping the label moves exactly one section, and is inert while playing or while a loop
+      is armed.
+- [x] The label rolls up to a strip while playing and unrolls on pause, animated in both directions.
+- [x] Section junctions are marked in the score with a two-sided color fade and a crisp seam.
 - [ ] Works **offline** once the piece is loaded from local storage. *(Phase 2)*

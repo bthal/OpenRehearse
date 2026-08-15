@@ -1,3 +1,5 @@
+import type { Section } from './sections';
+
 export interface Piece {
   id: string;
   title: string;
@@ -18,6 +20,18 @@ export interface Piece {
    * `importedBpm`. See `domain/tempo.ts` for the valid range.
    */
   targetBpm?: number;
+  /**
+   * Formal sections detected from the notation at import time, in score order.
+   *
+   * Three states, all meaningful:
+   * - `undefined` — never analysed (imported before detection existed). No label.
+   * - `[]` — analysed, no readable form. No label; a piece we cannot parse into
+   *   sections has none, rather than one section spanning the whole score.
+   * - non-empty — always at least two sections.
+   *
+   * See `domain/sections.ts` and `specs/features/section-detection.md`.
+   */
+  sections?: Section[];
 }
 
 /**
