@@ -1,13 +1,15 @@
 // Loop ("bit") geometry. Positions are horizontal pixel offsets inside the
-// rendered one-line score — the only coordinate the loop UI works in. The
-// score-web layer owns the pixel↔tick conversion; this module is pure math so
-// the placement rules stay testable without OSMD or a DOM.
+// rendered one-line score — the coordinate the loop UI draws in. This module is
+// pure math so the placement rules stay testable without OSMD or a DOM.
+//
+// Placement is the *first* half of creating a loop: the result is a pixel span,
+// which `scoreGrid.ts` then resolves onto the note grid. Legality (the minimum
+// loop length, A before B) is decided there, in musical time — a pixel gap means
+// nothing once positions are discrete, since the same distance spans four notes
+// in a run of semiquavers and less than one in a bar of whole notes.
 
 /** Width of a freshly created loop, in rendered score pixels. */
 export const LOOP_DEFAULT_PX = 200;
-
-/** Minimum gap kept between the A and B handles while dragging, in score pixels. */
-export const LOOP_MIN_GAP_PX = 40;
 
 export interface LoopPlacementParams {
   /** Cursor position in score pixels — where the loop should start. */

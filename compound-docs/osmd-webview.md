@@ -151,17 +151,37 @@ Use `visibility: hidden` (not `display: none`) so layout and position reads are 
 
 ## Loop overlay: CSS transitions need a style flush and must be torn down
 
-**LANDMINE:** The loop overlay animates out of the cursor on creation (`unfurlLoopFromCursor`
-in `playback.ts`) by setting the collapsed geometry, then the final geometry, with a CSS
-`transition` in between. Two traps:
+**LANDMINE:** The loop overlay runs two CSS transitions through one helper,
+`animateLoopOverlay(from, to)` in `playback.ts`: the create-time unfurl out of the cursor
+(`unfurlLoopFromCursor`) and the settle onto the note grid after a handle is released
+(`glideLoopOverlay`). Both set a start geometry, then the final geometry, with a CSS `transition` in
+between. Both share `loopUnfurlTimeoutId` so a single `endLoopOverlayTransition()` kills either one.
+Two traps:
 
-1. The handles go from `display: none` to `display: flex` in the same task. Without a forced
-   style flush the browser coalesces the collapsed and final writes into one recalculation, so
-   no transition runs and the loop pops into place. Read a layout property between the two
+1. On creation the handles go from `display: none` to `display: flex` in the same task. Without a
+   forced style flush the browser coalesces the collapsed and final writes into one recalculation,
+   so no transition runs and the loop pops into place. Read a layout property between the two
    writes: `void el.offsetWidth;` (it survives esbuild minification — verified in the bundle).
+   Keep it unconditional even though the release settle starts from already-visible elements: it is
+   free, and the failure mode — no animation at all — is silent.
 2. Handle dragging rewrites `style.left` every RAF frame. A transition left on the element
-   makes the handle lag behind the finger, so it must be cleared (`endLoopUnfurl`) when the
-   animation ends, when a drag starts, and on clear/dispose.
+   makes the handle lag behind the finger, so it must be cleared (`endLoopOverlayTransition`) when
+   the animation ends, when a drag starts, and on clear/dispose. A handle grabbed *during* its own
+   release settle is exactly this case.
+
+## Score-pixel overlays must be hidden **and** reset on dispose
+
+`#loop-handle-a`, `#loop-handle-b`, `#loop-shade`, `#section-marks` and `#snap-preview` are all
+children of `#osmd`, positioned in score pixels. That is what makes them scroll with the score for
+free — `applyTranslate` transforms their parent — but it also means they survive `__rn_load_xml`
+and would paint at stale coordinates over the next score. `disposePlayback` therefore clears the
+marks' children, hides the handles and shade, and hides the preview *and* resets its `left`.
+
+`#snap-preview` uses `transform: translateX(-50%)`, mirroring `#cursor-line`'s own centring, so the
+target line and the playhead coincide exactly when the score is settled instead of resting a pixel
+apart. `#osmd` has `will-change: transform` and so forms a stacking context: the preview's
+`z-index: 9` orders it against the shade and handles inside `#osmd`, while `#cursor-line` — a
+sibling of `#osmd-wrapper` — always paints above regardless, which is the order you want.
 
 ## WebView bridge message protocol
 

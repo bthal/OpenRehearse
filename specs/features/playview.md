@@ -20,7 +20,17 @@ The entire piece is rendered in a **single horizontal line** — all measures la
   - Manual scroll **stops playback**.
   - After lifting the finger, the score **decelerates with momentum** before stopping.
   - The cursor stays centered and corresponds to the scrolled-to position in the piece.
-  - On next **play**: if no loop is set, playback resumes from the cursor's current position; if a loop is set, the cursor smoothly scrolls to the loop start and playback begins from there.
+  - **Positions are discretised to the note grid.** Scrolling is continuous, but the position it
+    resolves to is always a **note onset**. While the finger moves and throughout the momentum
+    coast, a **vertical preview line** the height of the staff system marks the onset nearest the
+    centre line — paler and thinner than the cursor, so it reads as a target rather than a second
+    playhead. When the coast settles (or on lift with no fling) the score **glides** until that
+    onset sits exactly under the cursor, and the line fades out as the two meet.
+  - The nearest onset wins, not the preceding one: scrolling most of the way to the next note lands
+    on it.
+  - On next **play**: if no loop is set, playback resumes from the cursor's current position — which
+    is already exactly on a note, so **nothing moves when playback starts**. If a loop is set, the
+    cursor smoothly scrolls to the loop start and playback begins from there.
 
 ## Rendering
 
@@ -56,9 +66,25 @@ The entire piece is rendered in a **single horizontal line** — all measures la
   - Each handle's **outer** corners (facing away from the loop) are rounded so the pair frames the region; the grip glyph is a darker seagrass than the handle body so it reads clearly.
   - The region between A and B is shaded.
 - **Creation animation**: the loop **unfurls out of the cursor**. Every overlay element that is not already at the cursor slides from the cursor line to its final position (`LOOP_UNFURL_MS`, ease-out) — the end handle to the right, and in the near-end case the start handle to the left. A handle that genuinely starts at the cursor is placed directly and does not animate.
+- **Loop bounds are half-open `[A, B)`**: the note under A is the **first note played**; the note
+  under B is the **first note not played**. Both handles therefore cover excluded material — A's
+  body sits to the left of its note, B's sits on the note it excludes — so the pair reads as a
+  bracket around the region.
+- **End of the piece**: a virtual target at the **final barline** sits past the last onset, so
+  dragging B fully right includes the final note in the loop.
 - **Handle dragging**:
-  - Handles can be placed at **any continuous position** within the piece — no snap to beats or measures.
-  - A may not be dragged past B; B may not be dragged past A. A **minimum pixel gap** (`LOOP_MIN_GAP_PX`, constant) is enforced between the two handles.
+  - Dragging is **continuous** — the handle follows the finger — but the position is **discretised
+    to the note grid immediately**. The same **preview line** used by manual scroll marks the onset
+    the handle will land on; on release the handle and the shaded region **glide** onto it.
+  - The nearest onset wins. Audio loop bounds update as soon as the preview crosses to a new onset,
+    not on release.
+  - A loop must span at least **one quarter note**, measured in musical time and independent of the
+    meter — a pixel gap is meaningless once positions are discrete, since the same distance spans
+    several notes in a run of semiquavers and less than one in a bar of whole notes. The consequence
+    is that a passage shorter than a quarter cannot be looped on its own.
+  - A handle refused by that minimum **stops at the limit** rather than following the finger past it.
+    If the minimum cannot be met ahead of A, B anchors at the end of the piece and **A is pushed
+    backwards** — the same rule loop creation already uses near the end.
   - While dragging a handle, the score **scrolls to follow** the handle being dragged so it stays visible.
 - **Playback wrap**: on reaching B, playback **immediately jumps** to A (no fade or ritardando).
 
@@ -122,20 +148,26 @@ Slices: `activePieceId`, `webViewReady`, `isLoadingScore`, `scoreError`, `isPlay
 - [x] Cursor visible at position 0 after load and after stop; smooth left-slide between beats. *(Phase 3b)*
 - [x] Score renders in one-line mode (single horizontal system; cursor pinned to center). *(Phase 4)*
 - [x] Manual horizontal scroll pauses playback; play resumes from scrolled position, or from loop start if a loop is active. *(Phase 4)*
+- [x] Scrolling and handle dragging are discretised to the note grid: a system-height preview line
+  marks the nearest onset while the finger moves and while momentum coasts, and the score or handle
+  glides onto it on settle. Pressing play after positioning by hand moves nothing.
 - [x] Toolbar renders vertically on the left. *(Phase 4)*
 - [x] Tapping loop button creates loop at cursor with fixed pixel span (`LOOP_DEFAULT_PX`);
   also pauses playback if running. Tapping again (× icon) removes it. *(Phase 4/5)*
 - [x] Manual scroll has momentum: score decelerates after lift; `MOMENTUM_DECELERATION`
   constant in `playback.ts` controls glide length. *(Phase 5)*
-- [x] Loop handles are continuously draggable; A/B minimum gap (`LOOP_MIN_GAP_PX`) enforced. *(Phase 4)*
+- [x] Loop handles are continuously draggable and snap to note onsets on release; bounds are
+  half-open `[A, B)`, the minimum loop is one quarter note, and dragging B to the final barline
+  includes the last note.
 - [x] Dragging a handle auto-scrolls the view to keep the active handle visible. *(Phase 4)*
 - [x] Playback wraps from B to A with immediate jump. *(Phase 4)*
 - [x] Cursor is visually clamped to the loop region [A, B]; never drifts into handle areas.
 - [x] Tapping the score (outside a handle) toggles play/pause.
 - [x] Creating or editing a loop pauses playback; play after any create/edit always seeks to A first.
-- [x] Handles clamp to first/last note pixel positions (not raw SVG width). Loop placed near
-  the end of the piece anchors B at the last note and derives A backward by `LOOP_DEFAULT_PX`,
-  so the start lands before the cursor instead of the loop being shortened (`domain/loop.ts`).
+- [x] Handles clamp to the first onset and the final-barline target (not raw SVG width). Loop placed
+  near the end of the piece anchors B at the end and derives A backward by `LOOP_DEFAULT_PX`,
+  so the start lands before the cursor instead of the loop being shortened (`domain/loop.ts`),
+  and the placement is then resolved onto the grid (`domain/scoreGrid.ts`).
 - [x] On creation the loop unfurls out of the cursor: handles not already at the cursor animate
   outward to their final positions; one at the cursor does not animate.
 - [x] Loop handles have rounded outer corners and a darker grip glyph than the handle body.

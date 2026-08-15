@@ -1,0 +1,200 @@
+import {
+  buildSnapGrid,
+  clampLoopIndices,
+  LOOP_MIN_QUARTERS,
+  nearestGridIndex,
+  type GridPoint,
+} from '../scoreGrid';
+
+// Four quarter notes plus the terminal target. The terminal always sits exactly
+// LOOP_MIN_QUARTERS past the final onset, mirroring `totalQuarters` in playback.ts.
+const QUARTERS: GridPoint[] = [
+  { quarters: 0, pxLeft: 100 },
+  { quarters: 1, pxLeft: 200 },
+  { quarters: 2, pxLeft: 300 },
+  { quarters: 3, pxLeft: 400 },
+  { quarters: 4, pxLeft: 500 }, // terminal
+];
+
+// A bar of semiquavers: four onsets inside a single quarter, engraved close together.
+const SEMIQUAVERS: GridPoint[] = [
+  { quarters: 0, pxLeft: 100 },
+  { quarters: 0.25, pxLeft: 120 },
+  { quarters: 0.5, pxLeft: 140 },
+  { quarters: 0.75, pxLeft: 160 },
+  { quarters: 1, pxLeft: 180 },
+  { quarters: 2, pxLeft: 280 }, // terminal
+];
+
+describe('buildSnapGrid', () => {
+  const ONSETS: GridPoint[] = [
+    { quarters: 0, pxLeft: 100 },
+    { quarters: 1, pxLeft: 200 },
+  ];
+
+  it('appends the terminal after the final onset', () => {
+    const grid = buildSnapGrid({ onsets: ONSETS, terminalQuarters: 2, terminalPxLeft: 300 });
+    expect(grid).toHaveLength(3);
+    expect(grid[2]).toEqual({ quarters: 2, pxLeft: 300 });
+  });
+
+  it('pushes a terminal that is too close forward to the minimum', () => {
+    const grid = buildSnapGrid({ onsets: ONSETS, terminalQuarters: 1.25, terminalPxLeft: 300 });
+    expect(grid[2]?.quarters).toBe(1 + LOOP_MIN_QUARTERS);
+  });
+
+  it('keeps the terminal strictly right of the final onset', () => {
+    const grid = buildSnapGrid({ onsets: ONSETS, terminalQuarters: 2, terminalPxLeft: 150 });
+    expect(grid[2]?.pxLeft).toBeGreaterThan(200);
+  });
+
+  it('guarantees the final note is always loopable', () => {
+    const grid = buildSnapGrid({ onsets: ONSETS, terminalQuarters: 0, terminalPxLeft: 0 });
+    expect(clampLoopIndices({ grid, aIndex: 1, bIndex: 2, moved: 'b' })).toEqual({
+      aIndex: 1,
+      bIndex: 2,
+    });
+  });
+
+  it('returns an empty grid when the score has no onsets', () => {
+    expect(buildSnapGrid({ onsets: [], terminalQuarters: 4, terminalPxLeft: 500 })).toEqual([]);
+  });
+});
+
+describe('nearestGridIndex', () => {
+  it('returns the index of an exact hit', () => {
+    expect(nearestGridIndex(QUARTERS, 300)).toBe(2);
+  });
+
+  it('rounds to the closer of two neighbours', () => {
+    expect(nearestGridIndex(QUARTERS, 220)).toBe(1);
+    expect(nearestGridIndex(QUARTERS, 280)).toBe(2);
+  });
+
+  it('resolves an exact midpoint forward', () => {
+    expect(nearestGridIndex(QUARTERS, 250)).toBe(2);
+  });
+
+  it('clamps to the first point below the start of the score', () => {
+    expect(nearestGridIndex(QUARTERS, -500)).toBe(0);
+  });
+
+  it('clamps to the last point beyond the end of the score', () => {
+    expect(nearestGridIndex(QUARTERS, 9999)).toBe(QUARTERS.length - 1);
+  });
+
+  it('picks the right onset in a dense passage', () => {
+    expect(nearestGridIndex(SEMIQUAVERS, 131)).toBe(2);
+    expect(nearestGridIndex(SEMIQUAVERS, 128)).toBe(1);
+  });
+
+  it('survives degenerate grids', () => {
+    expect(nearestGridIndex([], 400)).toBe(0);
+    expect(nearestGridIndex([{ quarters: 0, pxLeft: 100 }], 400)).toBe(0);
+  });
+});
+
+describe('clampLoopIndices', () => {
+  it('leaves a loop that already satisfies the minimum alone', () => {
+    expect(clampLoopIndices({ grid: QUARTERS, aIndex: 1, bIndex: 3, moved: 'b' })).toEqual({
+      aIndex: 1,
+      bIndex: 3,
+    });
+  });
+
+  it('allows the smallest legal loop — exactly one quarter', () => {
+    const { aIndex, bIndex } = clampLoopIndices({
+      grid: QUARTERS,
+      aIndex: 1,
+      bIndex: 2,
+      moved: 'b',
+    });
+    expect(QUARTERS[bIndex]!.quarters - QUARTERS[aIndex]!.quarters).toBe(LOOP_MIN_QUARTERS);
+  });
+
+  it('pushes B forward when it is dragged onto A', () => {
+    expect(clampLoopIndices({ grid: QUARTERS, aIndex: 2, bIndex: 2, moved: 'b' })).toEqual({
+      aIndex: 2,
+      bIndex: 3,
+    });
+  });
+
+  it('pushes B forward when it is dragged behind A', () => {
+    expect(clampLoopIndices({ grid: QUARTERS, aIndex: 2, bIndex: 0, moved: 'b' })).toEqual({
+      aIndex: 2,
+      bIndex: 3,
+    });
+  });
+
+  it('skips past several onsets in a dense passage to reach the minimum', () => {
+    // A on the downbeat, B dragged onto the second semiquaver: only 0.25 quarters.
+    expect(clampLoopIndices({ grid: SEMIQUAVERS, aIndex: 0, bIndex: 1, moved: 'b' })).toEqual({
+      aIndex: 0,
+      bIndex: 4, // the first onset a full quarter after A
+    });
+  });
+
+  it('pushes A backwards when A is dragged too close to B', () => {
+    expect(clampLoopIndices({ grid: SEMIQUAVERS, aIndex: 3, bIndex: 4, moved: 'a' })).toEqual({
+      aIndex: 0,
+      bIndex: 4,
+    });
+  });
+
+  it('pushes B forward when A is already at the first onset and cannot retreat', () => {
+    expect(clampLoopIndices({ grid: SEMIQUAVERS, aIndex: 0, bIndex: 2, moved: 'a' })).toEqual({
+      aIndex: 0,
+      bIndex: 4,
+    });
+  });
+
+  it('loops the final note alone: A on the last onset, B on the terminal', () => {
+    expect(clampLoopIndices({ grid: QUARTERS, aIndex: 3, bIndex: 4, moved: 'b' })).toEqual({
+      aIndex: 3,
+      bIndex: 4,
+    });
+  });
+
+  it('pushes A backwards when the tail is shorter than the minimum', () => {
+    // Defensive: playback.ts always places the terminal exactly one quarter past the
+    // final onset, so this cannot arise there — but the rule must not depend on that.
+    const shortTail: GridPoint[] = [
+      { quarters: 0, pxLeft: 100 },
+      { quarters: 1, pxLeft: 200 },
+      { quarters: 1.5, pxLeft: 250 },
+      { quarters: 1.75, pxLeft: 275 }, // terminal, less than a quarter past the last onset
+    ];
+    expect(clampLoopIndices({ grid: shortTail, aIndex: 2, bIndex: 3, moved: 'b' })).toEqual({
+      aIndex: 0,
+      bIndex: 3,
+    });
+  });
+
+  it('clamps indices that fall outside the grid', () => {
+    expect(clampLoopIndices({ grid: QUARTERS, aIndex: -5, bIndex: 99, moved: 'b' })).toEqual({
+      aIndex: 0,
+      bIndex: 4,
+    });
+  });
+
+  it('falls back to spanning the whole grid when nothing else is legal', () => {
+    const tiny: GridPoint[] = [
+      { quarters: 0, pxLeft: 100 },
+      { quarters: 0.5, pxLeft: 150 },
+    ];
+    expect(clampLoopIndices({ grid: tiny, aIndex: 0, bIndex: 1, moved: 'b' })).toEqual({
+      aIndex: 0,
+      bIndex: 1,
+    });
+  });
+
+  it('survives degenerate grids', () => {
+    expect(clampLoopIndices({ grid: [], aIndex: 0, bIndex: 0, moved: 'b' })).toEqual({
+      aIndex: 0,
+      bIndex: 0,
+    });
+    expect(
+      clampLoopIndices({ grid: [{ quarters: 0, pxLeft: 100 }], aIndex: 0, bIndex: 0, moved: 'a' }),
+    ).toEqual({ aIndex: 0, bIndex: 0 });
+  });
+});

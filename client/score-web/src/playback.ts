@@ -4,7 +4,13 @@ import { ArpeggioType, ArticulationEnum } from 'opensheetmusicdisplay';
 import type { OutboundMessage } from './types';
 // Pure count-in and loop-geometry math live in the domain layer (screens/score-web → domain).
 import { computeCountIn, loopLeadInBeats } from '../../src/domain/countIn';
-import { LOOP_MIN_GAP_PX, placeLoopAtCursor } from '../../src/domain/loop';
+import { placeLoopAtCursor } from '../../src/domain/loop';
+import {
+  buildSnapGrid,
+  clampLoopIndices,
+  nearestGridIndex,
+  type GridPoint,
+} from '../../src/domain/scoreGrid';
 
 // Matches Tone.js default PPQ; must stay in sync with Tone.Transport.PPQ.
 const TONE_PPQ = 192;
@@ -50,6 +56,10 @@ const EDGE_ZONE = 60;
 // Short ease-out, in the same register as the native toolbar panels' spring.
 const LOOP_UNFURL_MS = 200;
 const LOOP_UNFURL_EASING = 'cubic-bezier(0.22, 0.61, 0.36, 1)';
+// Settling onto the note grid after a pan reuses the unfurl's duration and feel so
+// the two motions read as one vocabulary. LOOP_UNFURL_EASING is easeOutCubic to
+// within rounding, so the JS glide below can use 1-(1-t)³ and look identical.
+const SCORE_GLIDE_MS = LOOP_UNFURL_MS;
 // Momentum scroll: fraction of velocity retained per 16 ms frame (increase toward 1 for longer glide).
 const MOMENTUM_DECELERATION = 0.95;
 // Fermata notes are held 1.75× their written duration.
@@ -81,7 +91,14 @@ interface CursorStep {
   osmdIdx: number; // how many cursor.next() calls from start to reach this OSMD position
 }
 
+// A loop is a half-open range of snap-grid indices: the note at aStep is the first
+// one played, the target at bStep is the first one *not* played. The pixels and
+// ticks are caches derived from those two indices by loopFromSteps — never edited
+// on their own, which is what keeps the handles, the shade and the transport from
+// drifting apart.
 interface LoopRegion {
+  aStep: number;
+  bStep: number;
   aPx: number;
   bPx: number;
   aTicks: number;
@@ -138,6 +155,10 @@ let countingIn = false;
 // silence any that have not yet played.
 let countInNodes: OscillatorNode[] = [];
 let cursorSteps: CursorStep[] = [];
+// cursorSteps plus the terminal target standing for the final barline. Only handle B
+// may land on the terminal — the playhead must never park where there is no note to
+// play, so the pan and handle A snap against cursorSteps directly.
+let snapGrid: GridPoint[] = [];
 let currentCursorStep = -1;
 let totalQuarters = 0;
 let animFrameId: number | null = null;
@@ -148,6 +169,11 @@ let sectionMarksEl: HTMLElement | null = null;
 let handleAEl: HTMLElement | null = null;
 let handleBEl: HTMLElement | null = null;
 let shadeEl: HTMLElement | null = null;
+let previewEl: HTMLElement | null = null;
+// Grid index the preview line is currently painted at, so the per-frame update can
+// skip the style write unless the target actually changed — roughly once per note
+// rather than 60 times a second. -1 means hidden.
+let previewStep = -1;
 let scrollOffsetPx = 0;
 let scoreWidth = 0;
 let viewportWidth = 0;
@@ -159,6 +185,15 @@ let systemTopPx = 0;
 let systemHeightPx = 0;
 let resizeListenerAttached = false;
 let momentumFrameId: number | null = null;
+// Settle glide: eases the score so the marked onset lands under the fixed centre
+// line. The target is held as a *step index* rather than a translate value, because
+// viewportWidth/2 - pxLeft is viewport-dependent and a resize mid-flight would
+// otherwise send the glide to a stale offset.
+let glideFrameId: number | null = null;
+let glideFromOffset = 0;
+let glideTargetStep = -1;
+let glideStartTime = 0;
+let glideOnDone: (() => void) | null = null;
 let touchHandlersAttached = false;
 let loopRegion: LoopRegion | null = null;
 // Pending removal of the create-time CSS transition on the loop overlay (see
@@ -442,6 +477,116 @@ function applyTranslate(px: number): void {
 // system and the horizontal scroll bounds. Intrinsic geometry (systemTopPx/systemHeightPx
 // and the cursor-step positions) is cached at load and unaffected by resize, so this needs
 // no OSMD re-render. Does not move the score — callers apply the translate they want.
+// ─── Snap grid ────────────────────────────────────────────────────────────────
+
+/**
+ * Rebuilds the snap grid from the current cursor steps. Must run after both
+ * `buildTimelines` (which fills cursorSteps and totalQuarters) and the assignment
+ * of `scoreWidth` — on a fresh load scoreWidth still holds the previous score's
+ * value until then.
+ *
+ * The terminal's pixel position is clamped into the reachable span. The score can
+ * only scroll until the last *onset* sits at the centre line, so anything further
+ * right than half a viewport past that onset can never be dragged to, and a handle
+ * parked there could not be dragged back.
+ */
+function rebuildSnapGrid(): void {
+  const lastOnsetPx = cursorSteps[cursorSteps.length - 1]?.pxLeft ?? scoreWidth;
+  const reachablePx = lastOnsetPx + viewportWidth / 2 - HANDLE_WIDTH;
+  snapGrid = buildSnapGrid({
+    onsets: cursorSteps,
+    terminalQuarters: totalQuarters,
+    terminalPxLeft: Math.min(scoreWidth, reachablePx),
+  });
+}
+
+// ─── Snap preview line ────────────────────────────────────────────────────────
+
+function showSnapPreview(px: number, step: number): void {
+  if (!previewEl || step === previewStep) return;
+  previewStep = step;
+  previewEl.style.left = `${px}px`;
+  previewEl.style.display = 'block';
+}
+
+function hideSnapPreview(): void {
+  previewStep = -1;
+  if (previewEl) previewEl.style.display = 'none';
+}
+
+/** Paints the preview at the onset nearest the fixed centre line. */
+function previewNearestToCenter(): void {
+  const step = nearestGridIndex(cursorSteps, viewportWidth / 2 - scrollOffsetPx);
+  const point = cursorSteps[step];
+  if (point) showSnapPreview(point.pxLeft, step);
+}
+
+// ─── Settle glide ─────────────────────────────────────────────────────────────
+
+function glideTargetOffset(): number {
+  return clampTranslate(viewportWidth / 2 - (cursorSteps[glideTargetStep]?.pxLeft ?? 0));
+}
+
+function finishGlide(): void {
+  glideFrameId = null;
+  glideTargetStep = -1;
+  const done = glideOnDone;
+  glideOnDone = null;
+  done?.();
+}
+
+/**
+ * Ends a glide early. `commit` jumps straight to the final position and runs the
+ * completion callback; otherwise the glide is abandoned where it stands, which is
+ * what a fresh touch wants — the finger is about to drive the score itself.
+ */
+function cancelScoreGlide(commit: boolean): void {
+  if (glideFrameId === null) return;
+  cancelAnimationFrame(glideFrameId);
+  if (!commit) {
+    glideFrameId = null;
+    glideTargetStep = -1;
+    glideOnDone = null;
+    return;
+  }
+  applyTranslate(glideTargetOffset());
+  finishGlide();
+}
+
+function glideFrame(now: number): void {
+  const t = Math.min(1, (now - glideStartTime) / SCORE_GLIDE_MS);
+  // easeOutCubic — visually identical to LOOP_UNFURL_EASING, so the settle and the
+  // loop unfurl share one motion feel without needing a bezier solver here.
+  const eased = 1 - Math.pow(1 - t, 3);
+  // Re-read every frame so a viewport resize mid-glide retargets instead of flying
+  // to an offset computed for the old width.
+  const to = glideTargetOffset();
+  applyTranslate(glideFromOffset + (to - glideFromOffset) * eased);
+  if (t < 1) {
+    glideFrameId = requestAnimationFrame(glideFrame);
+    return;
+  }
+  applyTranslate(to);
+  finishGlide();
+}
+
+function startScoreGlide(step: number, onDone: () => void): void {
+  cancelScoreGlide(false);
+  glideTargetStep = step;
+  glideFromOffset = scrollOffsetPx;
+  glideStartTime = performance.now();
+  glideOnDone = onDone;
+  const to = glideTargetOffset();
+  // Already there (the common case when the score was barely nudged): skip the
+  // animation rather than burn a frame on a sub-pixel move.
+  if (Math.abs(to - glideFromOffset) < 0.5) {
+    applyTranslate(to);
+    finishGlide();
+    return;
+  }
+  glideFrameId = requestAnimationFrame(glideFrame);
+}
+
 function recomputeViewportMetrics(): void {
   if (!osmdEl) return;
   viewportWidth = window.innerWidth;
@@ -450,6 +595,10 @@ function recomputeViewportMetrics(): void {
   const centeredTop = Math.round((viewportHeight - systemHeightPx) / 2);
   osmdEl.style.top = `${centeredTop - systemTopPx}px`;
 
+  // Bounds are the first and last *onsets*, deliberately not the snap grid's
+  // terminal: the centre line must always sit over a note. Widening scrollMinPx to
+  // reach the terminal would let the playhead park past the final note, where there
+  // is nothing to play and nothing to snap to.
   const px0 = cursorSteps[0]?.pxLeft ?? 0;
   const pxLast = cursorSteps[cursorSteps.length - 1]?.pxLeft ?? scoreWidth;
   scrollMaxPx = viewportWidth / 2 - px0;
@@ -465,7 +614,18 @@ function onViewportResize(): void {
   if (!osmdEl) return;
   const prevViewportWidth = viewportWidth;
   const centeredScoreX = prevViewportWidth > 0 ? prevViewportWidth / 2 - scrollOffsetPx : 0;
+  const wasGliding = glideFrameId !== null;
   recomputeViewportMetrics();
+  // The terminal target's reachable pixel depends on the viewport width, so the grid
+  // has to follow a resize or handle B could end up outside the scrollable span.
+  rebuildSnapGrid();
+  if (wasGliding) {
+    // Land the settle against the new bounds rather than animating toward a target
+    // computed for the old ones. The logical position was committed before the glide
+    // started, so this is purely visual.
+    cancelScoreGlide(true);
+    return;
+  }
   const target = prevViewportWidth > 0 ? viewportWidth / 2 - centeredScoreX : scrollMaxPx;
   applyTranslate(clampTranslate(target));
 }
@@ -512,16 +672,9 @@ function advanceCursorTo(targetStep: number): void {
 
 // ─── Binary search helpers ────────────────────────────────────────────────────
 
-function nearestStepToPx(px: number): number {
-  let lo = 0, hi = cursorSteps.length - 1, best = 0;
-  while (lo <= hi) {
-    const mid = (lo + hi) >> 1;
-    const step = cursorSteps[mid];
-    if (step !== undefined && step.pxLeft <= px) { best = mid; lo = mid + 1; }
-    else hi = mid - 1;
-  }
-  return best;
-}
+// Pixel→step lookups all go through nearestGridIndex in domain/scoreGrid.ts, which
+// rounds to the closest onset rather than flooring. Flooring is what used to leave
+// the playhead one note behind the score after a pan.
 
 function ticksToStep(ticks: number): number {
   const q = ticks / TONE_PPQ;
@@ -541,41 +694,48 @@ function ticksToStep(ticks: number): number {
  * the visible cursor disagree, so every seek goes through here.
  */
 function seekToTicks(ticks: number): void {
-  Tone.Transport.ticks = ticks;
-  const targetStep = ticksToStep(ticks);
-  advanceCursorTo(targetStep);
-  const px = cursorSteps[targetStep]?.pxLeft ?? 0;
+  seekToStep(ticksToStep(ticks), ticks);
+}
+
+/**
+ * Seeks by step index rather than by ticks.
+ *
+ * Preferred wherever the caller already knows the step: `ticksToStep` floors over
+ * `quarters`, and `Math.round(quarters * TONE_PPQ)` can round *up*, so the
+ * round-trip lands on the previous step for positions that are not exact multiples
+ * of a tick — tuplets, mostly. Passing the index avoids the trip entirely.
+ */
+function seekToStep(step: number, ticks?: number): void {
+  const point = cursorSteps[step];
+  Tone.Transport.ticks = ticks ?? Math.round((point?.quarters ?? 0) * TONE_PPQ);
+  advanceCursorTo(step);
+  const px = point?.pxLeft ?? 0;
   const el = cursorEl();
   if (el) el.style.left = `${px}px`;
   applyTranslate(viewportWidth / 2 - px);
 }
 
-// First step whose pxLeft ≥ px (ceiling). Used to find the first note inside the loop start.
-function ceilStepToPx(px: number): number {
-  let lo = 0, hi = cursorSteps.length - 1, best = cursorSteps.length - 1;
-  while (lo <= hi) {
-    const mid = (lo + hi) >> 1;
-    const step = cursorSteps[mid];
-    if (step !== undefined && step.pxLeft >= px) { best = mid; hi = mid - 1; }
-    else lo = mid + 1;
-  }
-  return best;
-}
-
-// Loop start snaps to the first note at or after aPx, so notes just before the
-// handle are excluded.
-function pxToLoopStartTicks(px: number): number {
-  return Math.round((cursorSteps[ceilStepToPx(px)]?.quarters ?? 0) * TONE_PPQ);
-}
-
-// Loop end is set to the step AFTER the last included note so that note has time
-// to play before the transport wraps. Falls back to totalQuarters when the last
-// included note is the final note in the piece.
-function pxToLoopEndTicks(px: number): number {
-  const floorIdx = nearestStepToPx(px);
-  const nextStep = cursorSteps[floorIdx + 1];
-  if (nextStep !== undefined) return Math.round(nextStep.quarters * TONE_PPQ);
-  return Math.round(totalQuarters * TONE_PPQ);
+/**
+ * Derives a loop's pixels and ticks from its half-open grid indices — the single
+ * place the two representations meet.
+ *
+ * The half-open reading reproduces the old tick rules exactly: `aTicks` is an
+ * onset's own ticks (what the old ceiling search was reaching for, since A *is* a
+ * note), and `bTicks` is the ticks of the first excluded target, which is the old
+ * "step after the last included note" rule — including its end-of-piece fallback,
+ * now just the terminal's `totalQuarters`.
+ */
+function loopFromSteps(aStep: number, bStep: number): LoopRegion {
+  const a = snapGrid[aStep];
+  const b = snapGrid[bStep];
+  return {
+    aStep,
+    bStep,
+    aPx: a?.pxLeft ?? 0,
+    bPx: b?.pxLeft ?? 0,
+    aTicks: Math.round((a?.quarters ?? 0) * TONE_PPQ),
+    bTicks: Math.round((b?.quarters ?? 0) * TONE_PPQ),
+  };
 }
 
 // ─── RAF animation loop ───────────────────────────────────────────────────────
@@ -665,10 +825,13 @@ function _stopInternal(): void {
     cancelAnimationFrame(animFrameId);
     animFrameId = null;
   }
-  if (momentumFrameId !== null) {
-    cancelAnimationFrame(momentumFrameId);
-    momentumFrameId = null;
-  }
+  // No settle: this function rewinds to the start, so any position a coast was
+  // heading for is about to be irrelevant.
+  stopMomentum();
+  // Abandon, not commit: this function rewinds to the start, so a settle's target
+  // is about to be irrelevant and committing it would fight the applyTranslate below.
+  cancelScoreGlide(false);
+  hideSnapPreview();
   // Reset OSMD cursor and score to position 0.
   if (osmdRef) {
     osmdRef.cursor.reset();
@@ -690,23 +853,71 @@ function _stopInternal(): void {
 
 // ─── Touch: manual score pan ──────────────────────────────────────────────────
 
-function syncCursorToCenter(): void {
+/**
+ * Resolves the pan onto the note grid: the onset nearest the centre line wins, and
+ * the score glides until that onset sits exactly under the fixed cursor.
+ *
+ * The logical position — transport ticks, current step, the cursor element, the
+ * section label — is committed *before* the glide starts; only pixels are animated.
+ * That ordering is the whole fix. Previously the transport was snapped while the
+ * score kept the finger's arbitrary offset, so the first frame of playback yanked
+ * the score to the snapped note and read as the cursor jumping backwards. Now the
+ * two can never disagree at rest, and pressing play mid-glide is safe: the glide is
+ * cancelled, the transport is already right, and the playback loop's own
+ * `applyTranslate` lands exactly where the glide was heading.
+ */
+function settleToNearestStep(animate: boolean): void {
   const centerInScore = viewportWidth / 2 - scrollOffsetPx;
-  const step = nearestStepToPx(centerInScore);
+  const step = nearestGridIndex(cursorSteps, centerInScore);
+  const target = cursorSteps[step];
+  if (!target) return;
+
   currentCursorStep = step;
-  Tone.Transport.ticks = Math.round((cursorSteps[step]?.quarters ?? 0) * TONE_PPQ);
+  Tone.Transport.ticks = Math.round(target.quarters * TONE_PPQ);
   const el = cursorEl();
-  if (el) el.style.left = `${cursorSteps[step]?.pxLeft ?? 0}px`;
+  if (el) el.style.left = `${target.pxLeft}px`;
   // The frame loop is not running while paused, so a manual pan is the other way
   // the playhead can cross a section junction.
   emitSectionIfChanged(Tone.Transport.ticks);
+
+  if (!animate) {
+    applyTranslate(clampTranslate(viewportWidth / 2 - target.pxLeft));
+    hideSnapPreview();
+    return;
+  }
+  // Keep the preview up for the ride so it converges with the centre line rather
+  // than vanishing the instant the finger lifts.
+  showSnapPreview(target.pxLeft, step);
+  startScoreGlide(step, hideSnapPreview);
+}
+
+function stopMomentum(): void {
+  if (momentumFrameId === null) return;
+  cancelAnimationFrame(momentumFrameId);
+  momentumFrameId = null;
+}
+
+/**
+ * Ends a coast *and* resolves the position onto the grid.
+ *
+ * Anything that acts on the playhead while momentum is still running must come
+ * through here. A coast moves pixels only — the transport, `currentCursorStep` and
+ * the cursor element are not committed until a settle runs — so simply cancelling
+ * the RAF leaves the score parked between two onsets with a stale logical position.
+ * That is how creating a loop mid-coast used to place its handles perfectly on the
+ * grid while the cursor stayed behind, off-grid.
+ *
+ * `animate` is false for callers that are about to drive the translate themselves
+ * (playback, a hand switch); a glide would only fight them for the same property.
+ */
+function settleFromCoast(animate: boolean): void {
+  if (momentumFrameId === null) return;
+  stopMomentum();
+  settleToNearestStep(animate);
 }
 
 function startMomentum(initialVelocity: number): void {
-  if (momentumFrameId !== null) {
-    cancelAnimationFrame(momentumFrameId);
-    momentumFrameId = null;
-  }
+  stopMomentum();
   let velocity = initialVelocity;
   let lastTime = performance.now();
 
@@ -716,16 +927,17 @@ function startMomentum(initialVelocity: number): void {
     velocity *= Math.pow(MOMENTUM_DECELERATION, dt / 16);
     if (Math.abs(velocity) < 0.05) {
       momentumFrameId = null;
-      syncCursorToCenter();
+      settleToNearestStep(true);
       return;
     }
     const next = scrollOffsetPx + velocity * dt;
     const clamped = clampTranslate(next);
     applyTranslate(clamped);
     emitSectionAtScrollOffset();
+    previewNearestToCenter();
     if (clamped !== next) {
       momentumFrameId = null;
-      syncCursorToCenter();
+      settleToNearestStep(true);
       return;
     }
     momentumFrameId = requestAnimationFrame(step);
@@ -755,10 +967,13 @@ function initTouchHandlers(): void {
 
   wrapper.addEventListener('touchstart', (e) => {
     if ((e.target as Element).closest('.loop-handle')) return;
-    if (momentumFrameId !== null) {
-      cancelAnimationFrame(momentumFrameId);
-      momentumFrameId = null;
-    }
+    // No settle: the finger is taking the score over, so resolving the coast's
+    // position would only be undone by the drag that is about to start.
+    stopMomentum();
+    // Abandon a settle in flight rather than committing it: the finger is about to
+    // drive the score itself, and the logical position was already committed when
+    // the glide started.
+    cancelScoreGlide(false);
     dragging = true;
     wasPlayingOnTouch = Tone.Transport.state === 'started';
     hasMoved = false;
@@ -789,6 +1004,8 @@ function initTouchHandlers(): void {
     lastMoveX = clientX;
     applyTranslate(clampTranslate(startOffset + (clientX - startX)));
     emitSectionAtScrollOffset();
+    // Gated on hasMoved so a tap never flashes a line for one frame.
+    if (hasMoved) previewNearestToCenter();
   }, { passive: true });
 
   wrapper.addEventListener('touchend', () => {
@@ -799,6 +1016,10 @@ function initTouchHandlers(): void {
       if (Tone.Transport.state === 'started') {
         pausePlayback();
       } else {
+        // Settle first, without animating: a tap that caught a coast mid-flight left
+        // the score at an arbitrary offset, and playing from there would resume at
+        // whatever tick the previous settle wrote. Usually a no-op.
+        settleToNearestStep(false);
         void startPlayback();
       }
       return;
@@ -806,7 +1027,7 @@ function initTouchHandlers(): void {
     if (Math.abs(velocityPx) > 0.05) {
       startMomentum(velocityPx);
     } else {
-      syncCursorToCenter();
+      settleToNearestStep(true);
     }
   }, { passive: true });
 }
@@ -815,8 +1036,13 @@ function initTouchHandlers(): void {
 
 
 // The single mapping from a loop's score-pixel bounds to the three overlay
-// elements' CSS geometry. Both the drag path (updateLoopOverlay) and the create
-// path (unfurlLoopFromCursor) go through here so they cannot drift apart.
+// elements' CSS geometry. The drag, the settle glide and the create-time unfurl all
+// go through here so they cannot drift apart.
+//
+// Under half-open [A, B) the shade spans from the first played note up to the first
+// *excluded* one, so it covers the last included note plus the gap after it. Both
+// handle bodies sit over excluded material — A's to the left of its note, B's on the
+// note it excludes — which is what makes the pair read as a bracket around the loop.
 function loopOverlayGeometry(
   aPx: number,
   bPx: number,
@@ -829,15 +1055,25 @@ function loopOverlayGeometry(
   };
 }
 
-function updateLoopOverlay(): void {
-  if (!loopRegion) return;
-  const geom = loopOverlayGeometry(loopRegion.aPx, loopRegion.bPx);
+/**
+ * Paints the overlay at arbitrary geometry. The drag path uses this to follow the
+ * finger continuously, which is not where the loop actually is — the snapped truth
+ * lives in `loopRegion` and the preview line shows where the handle will land.
+ */
+function paintLoopOverlay(aPx: number, bPx: number): void {
+  const geom = loopOverlayGeometry(aPx, bPx);
   if (handleAEl) handleAEl.style.left = `${geom.handleA}px`;
   if (handleBEl) handleBEl.style.left = `${geom.handleB}px`;
   if (shadeEl) {
     shadeEl.style.left = `${geom.shade.left}px`;
     shadeEl.style.width = `${geom.shade.width}px`;
   }
+}
+
+/** Paints the overlay from the committed, snapped loop. */
+function updateLoopOverlay(): void {
+  if (!loopRegion) return;
+  paintLoopOverlay(loopRegion.aPx, loopRegion.bPx);
 }
 
 // Hides the loop overlay and tells the native toolbar no loop is active.
@@ -848,9 +1084,11 @@ function hideLoopOverlay(): void {
   postToNative({ type: 'LOOP_STATE', payload: false });
 }
 
-// Drops the create-time CSS transition. Dragging rewrites `left` every frame, so
-// a lingering transition would make the handle lag behind the finger.
-function endLoopUnfurl(): void {
+// Drops whichever overlay transition is running — the create-time unfurl or the
+// snap glide after a handle is released. Dragging rewrites `left` every frame, so a
+// lingering transition would make the handle lag behind the finger. Both animations
+// share loopUnfurlTimeoutId so one teardown kills either.
+function endLoopOverlayTransition(): void {
   if (loopUnfurlTimeoutId !== null) {
     window.clearTimeout(loopUnfurlTimeoutId);
     loopUnfurlTimeoutId = null;
@@ -860,8 +1098,8 @@ function endLoopUnfurl(): void {
   }
 }
 
-// One overlay element's slide from its collapsed-at-cursor geometry to its final
-// geometry. `fromW`/`toW` are only used by the shade, which grows in width too.
+// One overlay element's slide from a start geometry to its final geometry.
+// `fromW`/`toW` are only used by the shade, which changes width too.
 interface UnfurlStep {
   el: HTMLElement;
   fromLeft: number;
@@ -870,14 +1108,16 @@ interface UnfurlStep {
   toW?: number;
 }
 
-// Animates the freshly created loop out of the cursor: each overlay element
-// starts collapsed at the cursor line and slides to its final geometry, so the
-// region visually unfurls from the cursor instead of popping into existence.
-// An element already at its final position — handle A whenever the loop starts
-// at the cursor — is placed directly and does not animate.
-function unfurlLoopFromCursor(cursorPx: number): void {
-  if (!loopRegion) return;
-  endLoopUnfurl();
+type OverlayGeometry = ReturnType<typeof loopOverlayGeometry>;
+
+// Slides the three overlay elements from one geometry to another. An element
+// already at its destination is placed directly and does not animate.
+//
+// Used by both overlay animations: the create-time unfurl out of the cursor, and
+// the settle after a handle is released, which travels from wherever the finger
+// left it to the snapped grid position.
+function animateLoopOverlay(from: OverlayGeometry, to: OverlayGeometry): void {
+  endLoopOverlayTransition();
 
   const steps: UnfurlStep[] = [];
   const add = (
@@ -901,10 +1141,6 @@ function unfurlLoopFromCursor(cursorPx: number): void {
     steps.push({ el, fromLeft, toLeft, fromW, toW });
   };
 
-  // Collapsed start state is the same mapping evaluated at a zero-width loop
-  // sitting on the cursor.
-  const from = loopOverlayGeometry(cursorPx, cursorPx);
-  const to = loopOverlayGeometry(loopRegion.aPx, loopRegion.bPx);
   add(handleAEl, from.handleA, to.handleA);
   add(handleBEl, from.handleB, to.handleB);
   add(shadeEl, from.shade.left, to.shade.left, from.shade.width, to.shade.width);
@@ -921,7 +1157,29 @@ function unfurlLoopFromCursor(cursorPx: number): void {
     s.el.style.left = `${s.toLeft}px`;
     if (s.toW !== undefined) s.el.style.width = `${s.toW}px`;
   }
-  loopUnfurlTimeoutId = window.setTimeout(endLoopUnfurl, LOOP_UNFURL_MS + 50);
+  loopUnfurlTimeoutId = window.setTimeout(endLoopOverlayTransition, LOOP_UNFURL_MS + 50);
+}
+
+// Animates the freshly created loop out of the cursor: every element starts
+// collapsed on the cursor line, so the region visually unfurls instead of popping
+// into existence. A handle already at its final position — A whenever the loop
+// starts at the cursor — is placed directly and does not animate.
+function unfurlLoopFromCursor(cursorPx: number): void {
+  if (!loopRegion) return;
+  animateLoopOverlay(
+    loopOverlayGeometry(cursorPx, cursorPx),
+    loopOverlayGeometry(loopRegion.aPx, loopRegion.bPx),
+  );
+}
+
+// Settles a released handle from where the finger left it onto the snapped grid
+// position the preview line has been marking.
+function glideLoopOverlay(continuousA: number, continuousB: number): void {
+  if (!loopRegion) return;
+  animateLoopOverlay(
+    loopOverlayGeometry(continuousA, continuousB),
+    loopOverlayGeometry(loopRegion.aPx, loopRegion.bPx),
+  );
 }
 
 function initLoopHandles(): void {
@@ -933,6 +1191,9 @@ function initLoopHandles(): void {
     let startScrollOffset = 0;
     let currentClientX = 0;
     let dragRafId: number | null = null;
+    // Where the finger currently has the handle, before snapping. The handle body
+    // is painted here so it tracks the finger; the loop itself lives on the grid.
+    let continuousPx = 0;
 
     function dragFrame(): void {
       if (!loopRegion) return;
@@ -951,35 +1212,78 @@ function initLoopHandles(): void {
       // Using current scrollOffsetPx (possibly just updated above) keeps the handle
       // locked to the finger even while the score scrolls under it.
       const initialOffset = startPx + startScrollOffset - startTouchX;
-      let newPx = currentClientX + initialOffset - scrollOffsetPx;
-      const scorePxMin = cursorSteps[0]?.pxLeft ?? 0;
-      const scorePxMax = cursorSteps[cursorSteps.length - 1]?.pxLeft ?? scoreWidth;
+      const rawPx = currentClientX + initialOffset - scrollOffsetPx;
 
-      if (which === 'a') {
-        newPx = Math.max(scorePxMin, Math.min(loopRegion.bPx - LOOP_MIN_GAP_PX, newPx));
-        loopRegion.aPx = newPx;
-        loopRegion.aTicks = pxToLoopStartTicks(newPx);
+      // Clamp only to the span the handle can physically occupy. Legality of the
+      // pair — B after A, at least a quarter note apart — is decided on the grid
+      // below, in musical time, not in pixels.
+      const firstPx = snapGrid[0]?.pxLeft ?? 0;
+      const lastOnsetPx = cursorSteps[cursorSteps.length - 1]?.pxLeft ?? scoreWidth;
+      // Handle A must land on a real note; only B may reach the terminal target.
+      const terminalPx = snapGrid[snapGrid.length - 1]?.pxLeft ?? scoreWidth;
+      const reachMaxPx = which === 'a' ? lastOnsetPx : terminalPx;
+      continuousPx = Math.max(firstPx, Math.min(reachMaxPx, rawPx));
+
+      const freeStep = nearestGridIndex(which === 'a' ? cursorSteps : snapGrid, continuousPx);
+      const desired = clampLoopIndices({
+        grid: snapGrid,
+        aIndex: which === 'a' ? freeStep : loopRegion.aStep,
+        bIndex: which === 'b' ? freeStep : loopRegion.bStep,
+        moved: which,
+      });
+
+      // The snapped index differs from the free one only when the minimum-length
+      // rule refused the drag. Park the handle body on that limit instead of letting
+      // it sail past the preview and cross the other handle — a slider that stops at
+      // its bound reads as a bound; one that keeps moving reads as a broken drag.
+      const snappedStep = which === 'a' ? desired.aIndex : desired.bIndex;
+      if (snappedStep !== freeStep) {
+        continuousPx = snapGrid[snappedStep]?.pxLeft ?? continuousPx;
+      }
+
+      // Only touch the transport when the snapped pair actually changes — once per
+      // note crossed rather than sixty times a second, and the audio bounds can
+      // never disagree with the line the user is looking at.
+      if (desired.aIndex !== loopRegion.aStep || desired.bIndex !== loopRegion.bStep) {
+        loopRegion = loopFromSteps(desired.aIndex, desired.bIndex);
         Tone.Transport.loopStart = `${loopRegion.aTicks}i`;
-      } else {
-        newPx = Math.max(loopRegion.aPx + LOOP_MIN_GAP_PX, Math.min(scorePxMax, newPx));
-        loopRegion.bPx = newPx;
-        loopRegion.bTicks = pxToLoopEndTicks(newPx);
         Tone.Transport.loopEnd = `${loopRegion.bTicks}i`;
       }
 
-      updateLoopOverlay();
+      // The dragged side follows the finger; the other is painted from the snapped
+      // loop, so a handle pushed by the minimum-length rule moves immediately
+      // instead of lagging until the finger lifts.
+      paintLoopOverlay(
+        which === 'a' ? continuousPx : loopRegion.aPx,
+        which === 'b' ? continuousPx : loopRegion.bPx,
+      );
+      const previewPoint = snapGrid[which === 'a' ? loopRegion.aStep : loopRegion.bStep];
+      if (previewPoint) {
+        showSnapPreview(previewPoint.pxLeft, which === 'a' ? loopRegion.aStep : loopRegion.bStep);
+      }
       dragRafId = requestAnimationFrame(dragFrame);
     }
 
     el.addEventListener('touchstart', (e) => {
       e.stopPropagation();
       if (Tone.Transport.state === 'started') pausePlayback();
-      // Grabbing a handle mid-unfurl snaps the overlay out of its transition so
+      // stopPropagation keeps the wrapper's touchstart from running, and the wrapper
+      // handler bails on .loop-handle targets anyway — so nothing else stops a coast
+      // or a settle. Without these two the score would keep moving under a held
+      // finger while the projection below silently compensated, leaving the handle
+      // looking correct and the score drifting.
+      // Stopped but not settled: a settle would slide the score under a finger that
+      // is holding a handle still. The playhead's position does not matter here —
+      // editing a handle sets loopModified, so the next play seeks to A regardless.
+      stopMomentum();
+      cancelScoreGlide(true);
+      // Grabbing a handle mid-animation snaps the overlay out of its transition so
       // the drag tracks the finger exactly.
-      endLoopUnfurl();
+      endLoopOverlayTransition();
       currentClientX = e.touches[0]?.clientX ?? 0;
       startTouchX = currentClientX;
       startPx = which === 'a' ? (loopRegion?.aPx ?? 0) : (loopRegion?.bPx ?? 0);
+      continuousPx = startPx;
       startScrollOffset = scrollOffsetPx;
       if (dragRafId !== null) cancelAnimationFrame(dragRafId);
       dragRafId = requestAnimationFrame(dragFrame);
@@ -995,6 +1299,15 @@ function initLoopHandles(): void {
         cancelAnimationFrame(dragRafId);
         dragRafId = null;
       }
+      hideSnapPreview();
+      // The transport was already moved in step with the preview, so lifting is
+      // purely cosmetic: slide the handle from the finger onto the marked onset.
+      if (loopRegion) {
+        glideLoopOverlay(
+          which === 'a' ? continuousPx : loopRegion.aPx,
+          which === 'b' ? continuousPx : loopRegion.bPx,
+        );
+      }
       loopModified = true;
     }, { passive: true });
   }
@@ -1006,7 +1319,7 @@ function initLoopHandles(): void {
 // ─── Loop create / clear ──────────────────────────────────────────────────────
 
 function setOverlayBounds(top: number, height: number): void {
-  for (const el of [handleAEl, handleBEl, shadeEl, sectionMarksEl]) {
+  for (const el of [handleAEl, handleBEl, shadeEl, sectionMarksEl, previewEl]) {
     if (!el) continue;
     el.style.top = `${top}px`;
     el.style.height = `${height}px`;
@@ -1014,33 +1327,44 @@ function setOverlayBounds(top: number, height: number): void {
 }
 
 function createLoop(): void {
-  // Stop momentum so the overlay is stationary from the moment it appears.
-  if (momentumFrameId !== null) {
-    cancelAnimationFrame(momentumFrameId);
-    momentumFrameId = null;
-  }
-  // currentCursorStep is only synced when momentum ends; compute the actual
-  // current center from scrollOffsetPx, which is up-to-date every RAF frame.
+  // A settle in flight would move the score out from under the loop as it appears.
+  cancelScoreGlide(true);
+  // Creating a loop mid-coast stops the score wherever the coast happened to be.
+  // The handles below are placed from the snapped step and so land on the grid, but
+  // without settling, the cursor would stay parked between two onsets just behind
+  // handle A. Settling with a glide sends it onto the grid, and because the loop
+  // unfurls from that same on-grid cursor position, the two animations agree.
+  // (Near the end of the piece placeLoopAtCursor derives A backwards, so the cursor
+  // glides to its own onset, which is deliberately ahead of A.)
+  settleFromCoast(true);
+  // Derived from scrollOffsetPx rather than currentCursorStep: it is up to date on
+  // every frame, and it is the same input settleFromCoast just snapped, so the loop
+  // and the cursor cannot disagree about which onset they mean.
   const centerInScore = viewportWidth / 2 - scrollOffsetPx;
-  const stepIdx = nearestStepToPx(centerInScore);
-  const step = cursorSteps[stepIdx < 0 ? 0 : stepIdx];
+  const step = cursorSteps[nearestGridIndex(cursorSteps, centerInScore)];
   if (!step) return;
   const scorePxMin = cursorSteps[0]?.pxLeft ?? 0;
-  const scorePxMax = cursorSteps[cursorSteps.length - 1]?.pxLeft ?? scoreWidth;
-  // The cursor's own note position, not the raw viewport centre: the loop must
-  // include the note the cursor sits on, and pxToLoopStartTicks snaps A forward
-  // to the first note at or after it.
+  // The terminal, not the last onset: a loop placed at the end of the piece has to
+  // be able to reach past the final note so that note is inside it.
+  const scorePxMax = snapGrid[snapGrid.length - 1]?.pxLeft ?? scoreWidth;
+  // The cursor's own note position, not the raw viewport centre — the loop must
+  // include the note the cursor sits on.
   const cursorPx = step.pxLeft;
   // Start at the cursor and extend LOOP_DEFAULT_PX forward; near the end of the
   // piece the loop is shifted back so it still fits (A then lands before the
   // cursor). See domain/loop.ts.
   const { aPx, bPx } = placeLoopAtCursor({ cursorPx, scorePxMin, scorePxMax });
-  const aTicks = pxToLoopStartTicks(aPx);
-  const bTicks = pxToLoopEndTicks(bPx);
-  loopRegion = { aPx, bPx, aTicks, bTicks };
+  // Placement is in pixels; the grid decides where that actually lands.
+  const { aIndex, bIndex } = clampLoopIndices({
+    grid: snapGrid,
+    aIndex: nearestGridIndex(cursorSteps, aPx),
+    bIndex: nearestGridIndex(snapGrid, bPx),
+    moved: 'b',
+  });
+  loopRegion = loopFromSteps(aIndex, bIndex);
   Tone.Transport.loop = true;
-  Tone.Transport.loopStart = `${aTicks}i`;
-  Tone.Transport.loopEnd = `${bTicks}i`;
+  Tone.Transport.loopStart = `${loopRegion.aTicks}i`;
+  Tone.Transport.loopEnd = `${loopRegion.bTicks}i`;
   if (handleAEl) handleAEl.style.display = 'flex';
   if (handleBEl) handleBEl.style.display = 'flex';
   if (shadeEl) shadeEl.style.display = 'block';
@@ -1052,7 +1376,8 @@ function createLoop(): void {
 
 function clearLoop(): void {
   loopRegion = null;
-  endLoopUnfurl();
+  endLoopOverlayTransition();
+  hideSnapPreview();
   Tone.Transport.loop = false;
   hideLoopOverlay();
   if (Tone.Transport.state === 'started') pausePlayback();
@@ -1316,7 +1641,9 @@ export function setSections(startMeasureIndices: number[], colors: string[]): vo
  */
 function emitSectionAtScrollOffset(): void {
   if (sectionStartTicks.length === 0) return;
-  const step = nearestStepToPx(viewportWidth / 2 - scrollOffsetPx);
+  // Nearest, matching the preview line and the settle. Flooring instead would let
+  // the label flip only after the glide had already landed, reading as a lag.
+  const step = nearestGridIndex(cursorSteps, viewportWidth / 2 - scrollOffsetPx);
   emitSectionIfChanged(Math.round((cursorSteps[step]?.quarters ?? 0) * TONE_PPQ));
 }
 
@@ -1324,6 +1651,12 @@ function emitSectionAtScrollOffset(): void {
 export function seekSection(direction: number): void {
   const current = sectionIndexAtTicks(Tone.Transport.ticks);
   if (current === null) return;
+  // A section jump can span the whole piece, so it stays an instant seek — but a
+  // coast or a settle in flight has to stop fighting it for the translate. Neither
+  // is settled first: the position they were heading for is about to be replaced.
+  stopMomentum();
+  cancelScoreGlide(false);
+  hideSnapPreview();
 
   const targetTicks = sectionStartTicks[current + (direction < 0 ? -1 : 1)];
   if (targetTicks === undefined) return; // already at the first or last section
@@ -1346,8 +1679,12 @@ export function initPlayback(
   handleBEl = document.getElementById('loop-handle-b');
   shadeEl = document.getElementById('loop-shade');
   sectionMarksEl = document.getElementById('section-marks');
+  previewEl = document.getElementById('snap-preview');
   scoreWidth = osmdEl?.scrollWidth ?? 0;
   viewportWidth = window.innerWidth;
+  // Needs both buildTimelines (cursorSteps, totalQuarters) and scoreWidth, which
+  // until the line above still held the previous score's value.
+  rebuildSnapGrid();
 
   // Re-center on orientation/viewport changes (autoResize is off). Attached once.
   if (!resizeListenerAttached) {
@@ -1449,10 +1786,16 @@ export function initPlayback(
 
 export async function startPlayback(): Promise<void> {
   if (!sampler || !part) return;
-  if (momentumFrameId !== null) {
-    cancelAnimationFrame(momentumFrameId);
-    momentumFrameId = null;
-  }
+  // Settle before reading the position below. Pressing play from the toolbar while
+  // the score is still coasting would otherwise start from whatever tick the *last*
+  // settle wrote, and the first RAF frame would drag the score back there.
+  // Not animated: the playback loop is about to drive the translate itself.
+  settleFromCoast(false);
+  // Land the settle before reading the position: the transport tick was committed
+  // when the glide started, so committing the pixels here means the RAF loop's first
+  // applyTranslate agrees with where the score already is and nothing jumps.
+  cancelScoreGlide(true);
+  hideSnapPreview();
 
   // Read position before any BPM manipulation — setting bpm.value can cause Tone.js to
   // recompute the paused tick position via the clock integral, producing a stale value
@@ -1478,7 +1821,9 @@ export async function startPlayback(): Promise<void> {
     if (loopModified || posTicks < loopRegion.aTicks || posTicks >= loopRegion.bTicks) {
       loopModified = false;
       didLoopSeek = true;
-      seekToTicks(loopRegion.aTicks);
+      // By step, not by ticks: the tick round-trip floors and would start the loop
+      // one note early wherever A's position is not an exact tick multiple.
+      seekToStep(loopRegion.aStep, loopRegion.aTicks);
     }
   }
 
@@ -1594,10 +1939,8 @@ export function disposePlayback(): void {
     cancelAnimationFrame(animFrameId);
     animFrameId = null;
   }
-  if (momentumFrameId !== null) {
-    cancelAnimationFrame(momentumFrameId);
-    momentumFrameId = null;
-  }
+  stopMomentum();
+  cancelScoreGlide(false);
   if (Tone.Transport.state !== 'stopped') Tone.Transport.stop();
   Tone.Transport.bpm.cancelScheduledValues(0);
   for (const id of tempoScheduleEventIds) Tone.Transport.clear(id);
@@ -1626,11 +1969,17 @@ export function disposePlayback(): void {
   // coordinates over the next score, exactly like the loop handles below.
   if (sectionMarksEl) sectionMarksEl.textContent = '';
   cursorSteps = [];
+  snapGrid = [];
   currentCursorStep = -1;
   osmdActualIdx = -1;
   totalQuarters = 0;
   loopRegion = null;
-  endLoopUnfurl();
+  endLoopOverlayTransition();
+  // Same reason as the marks and the handles: the preview holds a score-pixel
+  // position, so it has to be hidden AND reset or it reappears at a stale
+  // coordinate over the next score.
+  hideSnapPreview();
+  if (previewEl) previewEl.style.left = '0px';
   // Without this a second __rn_load_xml would leave the handles painted at stale
   // score-pixel positions over the new score, with the toolbar still showing ×.
   hideLoopOverlay();
@@ -1645,6 +1994,13 @@ export function setActiveHand(hand: ActiveHand): void {
   activeHand = hand;
   if (!osmdRef || !sampler) return;
 
+  // Land any coast or settle before capturing the scroll offset below, or the
+  // position restored at the end of this function is one the score was still moving
+  // away from. Not animated — this function ends by applying a translate itself.
+  settleFromCoast(false);
+  cancelScoreGlide(true);
+  hideSnapPreview();
+
   // Capture position before stopPlayback resets it to 0.
   const savedTicks = Tone.Transport.ticks;
   const savedStep = currentCursorStep; // -1 if never played
@@ -1655,6 +2011,14 @@ export function setActiveHand(hand: ActiveHand): void {
   // Rebuild note events with new hand filter.
   // buildTimelines resets the OSMD cursor to 0 and sets cursorSteps (same positions as before).
   const { noteEvents } = buildTimelines(osmdRef);
+  // Only noteEvents is hand-filtered — the cursor walk pushes every step regardless —
+  // so the grid comes back identical and the loop's indices stay valid. Rebuilt
+  // anyway so the loop's dependence on the grid is explicit rather than accidental.
+  rebuildSnapGrid();
+  if (loopRegion) {
+    loopRegion = loopFromSteps(loopRegion.aStep, loopRegion.bStep);
+    updateLoopOverlay();
+  }
 
   // Replace Part only — keep sampler and tempo schedule intact.
   part?.dispose();
