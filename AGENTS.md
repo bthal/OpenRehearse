@@ -138,8 +138,14 @@ The `/commit` command runs a guided pass over all of this: assess scope → read
 
 - **MusicXML**: **`.xml`** (uncompressed) and **`.mxl`** (compressed); both **2.x–4.x**; reject other formats clearly.
 - **Scores**: **local device only** in MVP — **do not** upload MusicXML to any server.
-- **Loops**: **one** active loop; handles **continuously draggable**; **immediate jump** at wrap.
-- **Cursor**: **OSMD standard cursor**, **smooth continuous movement** — prefer OSMD APIs over custom overlays.
+- **Loops**: **one** active loop; handles **continuously draggable** but **discretised to the note
+  grid** (bounds are half-open `[A, B)`, minimum one quarter note); **immediate jump** at wrap.
+- **Cursor**: **OSMD standard cursor**, **smooth continuous movement** — prefer OSMD APIs over custom
+  overlays. Manual positioning is continuous but resolves to a **note onset**, previewed by a guide
+  line and settled with a glide — so playback never has to correct the position.
+- **Note grid**: a measure's first onset is anchored to its **barline**, and that one pixel is shared
+  by snapping, the overlays, the section seams *and* the playback interpolation. Never split it into
+  separate render/playback values — see `compound-docs/tone-playback.md`.
 - **Tempo**: user-adjustable **from the first PlayView slice** that includes playback.
 - **State**: **Zustand** (not TanStack Query) unless specs are formally amended.
 - **Orientation**: PlayView → **landscape**; Dashboard → **portrait**. `app.json` uses `"default"`; each screen locks via `<Stack.Screen options>` (react-native-screens, no extra package).

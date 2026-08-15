@@ -151,17 +151,75 @@ Use `visibility: hidden` (not `display: none`) so layout and position reads are 
 
 ## Loop overlay: CSS transitions need a style flush and must be torn down
 
-**LANDMINE:** The loop overlay animates out of the cursor on creation (`unfurlLoopFromCursor`
-in `playback.ts`) by setting the collapsed geometry, then the final geometry, with a CSS
-`transition` in between. Two traps:
+**LANDMINE:** The loop overlay runs two CSS transitions through one helper,
+`animateLoopOverlay(from, to)` in `playback.ts`: the create-time unfurl out of the cursor
+(`unfurlLoopFromCursor`) and the settle onto the note grid after a handle is released
+(`glideLoopOverlay`). Both set a start geometry, then the final geometry, with a CSS `transition` in
+between. Both share `loopUnfurlTimeoutId` so a single `endLoopOverlayTransition()` kills either one.
+Two traps:
 
-1. The handles go from `display: none` to `display: flex` in the same task. Without a forced
-   style flush the browser coalesces the collapsed and final writes into one recalculation, so
-   no transition runs and the loop pops into place. Read a layout property between the two
+1. On creation the handles go from `display: none` to `display: flex` in the same task. Without a
+   forced style flush the browser coalesces the collapsed and final writes into one recalculation,
+   so no transition runs and the loop pops into place. Read a layout property between the two
    writes: `void el.offsetWidth;` (it survives esbuild minification — verified in the bundle).
+   Keep it unconditional even though the release settle starts from already-visible elements: it is
+   free, and the failure mode — no animation at all — is silent.
 2. Handle dragging rewrites `style.left` every RAF frame. A transition left on the element
-   makes the handle lag behind the finger, so it must be cleared (`endLoopUnfurl`) when the
-   animation ends, when a drag starts, and on clear/dispose.
+   makes the handle lag behind the finger, so it must be cleared (`endLoopOverlayTransition`) when
+   the animation ends, when a drag starts, and on clear/dispose. A handle grabbed *during* its own
+   release settle is exactly this case.
+
+## LANDMINE: do NOT copy the cursor's `- 1.5` when converting OSMD geometry
+
+OSMD lays out in abstract units. The drawn position of anything is `10 * units * zoom` — verified
+directly against VexFlow: for any measure that expression equals its `stave.getX()`.
+
+OSMD's `Cursor.updateWidthAndStyle` looks like it disagrees:
+
+```
+left = 10 * (x - 1.5) * zoom      // default cursor type
+```
+
+**It does not.** The cursor element is an `<img>` **30 px wide**, and 1.5 units is half of it, so the
+offset centres the image on the note. `cursorElement.style.left` is the left edge of a box, not a
+point. The note grid reads it as a point deliberately — that is what puts the playhead just left of
+a notehead instead of through it.
+
+So a barline, which is drawn geometry and already a point, must use `10 * units * zoom` with **no**
+offset. Copying the cursor's `- 1.5` onto it renders every seam, handle and settled cursor exactly
+15 px left of the barline at zoom 1 — subtle enough to look like a layout quirk rather than a bug,
+and this repo shipped it once for exactly that reason.
+
+Two further traps in the same area:
+
+- **`GraphicalMeasure.PositionAndShape.AbsolutePosition.x` is the barline**, measured *before*
+  `beginInstructionsWidth`. Adding that width instead gives you the position after the clef, key and
+  time signature — a different thing, and not what "start of measure" means.
+- **`MeasureList` is keyed by the printed measure index**, which is what the iterator reports as
+  `CurrentMeasureIndex`. Pick the staff row entry the way OSMD itself does in
+  `Cursor.findVisibleGraphicalMeasure` — first entry whose `ParentStaff.isVisible()` — or a score
+  with a hidden staff resolves to geometry that is never drawn.
+
+Measured on Bach BWV 846 at zoom 1: VexFlow's own note-start inset is `stave.getNoteStartX() -
+stave.getX()` = **5 px**, and a measure's first grid pixel ends up a median **6.9 px** right of its
+barline (max 22.8 where accidentals widen the entry). None of that is an engraving margin — sweeping
+`EngravingRules.MeasureLeftMargin` from 2.0 to 0.0 does not move it by a single pixel. It is
+VexFlow's inset inside the stave and it cannot be configured away, which is why the note grid
+anchors measure starts explicitly instead.
+
+## Score-pixel overlays must be hidden **and** reset on dispose
+
+`#loop-handle-a`, `#loop-handle-b`, `#loop-shade`, `#section-marks` and `#snap-preview` are all
+children of `#osmd`, positioned in score pixels. That is what makes them scroll with the score for
+free — `applyTranslate` transforms their parent — but it also means they survive `__rn_load_xml`
+and would paint at stale coordinates over the next score. `disposePlayback` therefore clears the
+marks' children, hides the handles and shade, and hides the preview *and* resets its `left`.
+
+`#snap-preview` uses `transform: translateX(-50%)`, mirroring `#cursor-line`'s own centring, so the
+target line and the playhead coincide exactly when the score is settled instead of resting a pixel
+apart. `#osmd` has `will-change: transform` and so forms a stacking context: the preview's
+`z-index: 9` orders it against the shade and handles inside `#osmd`, while `#cursor-line` — a
+sibling of `#osmd-wrapper` — always paints above regardless, which is the order you want.
 
 ## WebView bridge message protocol
 

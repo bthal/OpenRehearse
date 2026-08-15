@@ -574,6 +574,11 @@ this value, so any `touchmove` event — even a zero-delta tap — clamped the o
 snapped the score to the left edge. The corrected `scrollMaxPx` bound is always ≥ the initial
 translateX, so no snap occurs.
 
+**Do not widen these bounds to the snap grid's terminal target.** The terminal exists so handle B
+can reach past the final note; the *playhead* must never park there, because there is nothing to
+play and nothing to snap to. `recomputeViewportMetrics` deliberately reads `cursorSteps` extremes,
+not `snapGrid` extremes, and carries a comment saying so.
+
 ## Fermata: expand the tick timeline, don't just extend the note duration
 
 **LANDMINE:** Extending `durQ` for a fermata note makes it sound longer, but the next note
@@ -624,45 +629,159 @@ function step(now: number): void {
   const dt = Math.min(now - lastTime, 64); // cap: avoid jump after tab hide/show
   lastTime = now;
   velocity *= Math.pow(MOMENTUM_DECELERATION, dt / 16);
-  if (Math.abs(velocity) < 0.05) { syncCursorToCenter(); return; }
+  if (Math.abs(velocity) < 0.05) { settleToNearestStep(true); return; }
   const next    = scrollOffsetPx + velocity * dt;
   const clamped = clampTranslate(next);
   applyTranslate(clamped);
-  if (clamped !== next) { syncCursorToCenter(); return; } // boundary hit
+  if (clamped !== next) { settleToNearestStep(true); return; } // boundary hit
   momentumFrameId = requestAnimationFrame(step);
 }
 ```
 
-Cancel `momentumFrameId` on: new `touchstart` (user grabs again), `startPlayback` (RAF
-conflict), `_stopInternal`, and `disposePlayback`. Call `syncCursorToCenter()` whenever
-momentum stops — naturally, at boundary, or on cancel — to keep `currentCursorStep` and
-`Tone.Transport.ticks` in sync with the resting scroll position.
+The coast is unchanged by the snap work — it still runs free, and the preview line simply tracks the
+nearest onset through it. Call `settleToNearestStep(true)` whenever momentum stops (naturally, at a
+boundary, or on cancel); see the next entry for what that does and why the ordering matters.
 
-## Loop boundary tick semantics: ceiling for start, next-step for end
+## PATTERN: commit the logical position, animate only the pixels
 
-**PATTERN:** Loop A (`loopStart`) and loop B (`loopEnd`) are set via `Tone.Transport.loopStart`
-/ `loopEnd`. Choosing the wrong tick for each boundary causes notes to be skipped (A) or the
-last note to not sound before the wrap (B).
+**This is the fix for "the cursor jumps backwards when I press play after scrolling."**
 
-**`pxToLoopStartTicks` — ceiling search:**
-`aTicks` should be the first note AT OR AFTER the handle-A pixel position. Use a binary ceiling
-search over `cursorSteps` (first step whose `pxLeft >= aPx`). A floor search would include notes
-just before A that the user intended to exclude.
+The old `syncCursorToCenter` wrote `Tone.Transport.ticks`, `currentCursorStep` and the cursor
+element's `style.left` to the snapped step — but never called `applyTranslate`. The score kept
+whatever arbitrary offset the finger produced while the playhead had already been rounded back to
+the previous note, and the first frame of `animateCursorLoop` yanked the score onto the snapped note.
+The rounding was always backwards (`nearestStepToPx` was a floor search despite its name), so the
+error only ever went one way.
 
-**`pxToLoopEndTicks` — next-step ticks:**
-`bTicks` should be set to the ticks of the step AFTER the last included note, not the last included
-note's own ticks. If set to the last note's ticks, Tone fires the wrap at the same moment the last
-note is scheduled, so the note never sounds before the loop restarts. Use:
+`settleToNearestStep(animate)` commits the logical position **synchronously**, then animates only
+`translateX`:
+
 ```typescript
-function pxToLoopEndTicks(px: number): number {
-  const floorIdx = nearestStepToPx(px); // last step whose pxLeft ≤ bPx
-  const nextStep = cursorSteps[floorIdx + 1];
-  if (nextStep !== undefined) return Math.round(nextStep.quarters * TONE_PPQ);
-  return Math.round(totalQuarters * TONE_PPQ); // B is at the final note
-}
+const step = nearestGridIndex(cursorSteps, viewportWidth / 2 - scrollOffsetPx);
+currentCursorStep = step;                       // 1. logical position, immediately
+Tone.Transport.ticks = Math.round(target.quarters * TONE_PPQ);
+if (el) el.style.left = `${target.pxLeft}px`;
+emitSectionIfChanged(Tone.Transport.ticks);
+startScoreGlide(step, hideSnapPreview);          // 2. pixels only
 ```
-When B lands on the final note, there is no next step, so fall back to `totalQuarters * TONE_PPQ`
-(one quarter past the last note's onset).
+
+Two consequences worth keeping:
+
+- Transport and translate can never disagree at rest, so the whole class of bug is structurally gone.
+- **Pressing play mid-glide is safe.** `startPlayback` calls `cancelScoreGlide(true)`, the transport
+  is already correct, and the RAF loop's first `applyTranslate` lands exactly where the glide was
+  heading. Nothing jumps in either path.
+
+The glide holds its target as a **step index**, not a translate value, and re-derives
+`viewportWidth / 2 - pxLeft` every frame — a resize mid-flight would otherwise fly to an offset
+computed for the old viewport.
+
+**LANDMINE: the RAF cancellation matrix.** Four RAF loops now exist and three of them write
+`scrollOffsetPx`, so they must be mutually exclusive:
+
+| Loop | Variable | Writes translate |
+|---|---|---|
+| Playback cursor | `animFrameId` | yes |
+| Momentum coast | `momentumFrameId` | yes |
+| Settle glide | `glideFrameId` | yes |
+| Handle drag | `dragRafId` (per handle) | yes, via edge-scroll |
+
+`cancelScoreGlide(commit)` must run from `initTouchHandlers`' `touchstart` (abandon — the finger is
+about to drive the score), both handles' `touchstart` (**commit**), `startPlayback` (commit),
+`createLoop` (commit), `setActiveHand` (commit), `onViewportResize` (commit, *after*
+`recomputeViewportMetrics`), `seekSection`, `_stopInternal` and `disposePlayback` (abandon).
+
+**LANDMINE: cancelling a coast is not the same as resolving it.** Momentum moves *pixels only* —
+the transport, `currentCursorStep` and the cursor element are not written until a settle runs. So
+anything that acts on the playhead while momentum is live must call `settleFromCoast(animate)`, not
+just `stopMomentum()`. Creating a loop mid-coast is the case that exposed this: `createLoop` snaps
+its handles from the grid and so places them perfectly, while the score stayed parked between two
+onsets and the cursor sat visibly behind handle A. `startPlayback` had the same shape — play from the
+toolbar during a coast started from whatever tick the *previous* settle wrote, and the first RAF
+frame dragged the score back there.
+
+Which of the two to use:
+
+| Caller | Call | Why |
+|---|---|---|
+| `createLoop` | `settleFromCoast(true)` | Cursor glides onto the grid while the loop unfurls from that same on-grid position |
+| `startPlayback`, `setActiveHand` | `settleFromCoast(false)` | Both drive the translate themselves immediately after; a glide would just fight them |
+| wrapper `touchstart` | `stopMomentum()` | The finger is taking over — resolving would be undone by the drag about to start |
+| handle `touchstart` | `stopMomentum()` | A settle would slide the score under a finger holding a handle still, and editing a handle sets `loopModified` so the next play seeks to A anyway |
+| `seekSection`, `_stopInternal`, `disposePlayback` | `stopMomentum()` | The position the coast was heading for is about to be replaced or rewound |
+
+The nastiest of these is the **handle `touchstart`**: it calls `stopPropagation`, and the wrapper's
+own handler bails on `.loop-handle` targets anyway, so nothing there cancels momentum or the glide.
+Before this was added, grabbing a handle during a coast let the score keep sliding under a held
+finger — and because `dragFrame` re-projects the finger through the *current* `scrollOffsetPx`, the
+handle looked correct while the score drifted, which is very hard to read as a bug.
+
+## Loop boundary ticks come from half-open grid indices
+
+**PATTERN:** A loop is a half-open range of snap-grid indices — `aStep` is the first note played,
+`bStep` the first target *not* played — and `loopFromSteps` derives pixels and ticks from that pair.
+`loopRegion.aPx/bPx/aTicks/bTicks` are caches, never edited on their own.
+
+That reading reproduces the tick rules the old pixel-based helpers were reaching for, without any of
+their special cases:
+
+- `aTicks` is an onset's own ticks. The deleted `pxToLoopStartTicks` used a *ceiling* search to get
+  there, because a floor would have included notes just before A that the user meant to exclude.
+  A now **is** a note, so there is nothing to round.
+- `bTicks` is the ticks of the first excluded target — literally the deleted `pxToLoopEndTicks`'s
+  "step AFTER the last included note" rule. Setting `loopEnd` to the last *included* note's ticks
+  makes Tone fire the wrap at the moment that note is scheduled, so it never sounds.
+- The old end-of-piece fallback (`totalQuarters * TONE_PPQ` when B was on the final note) is now the
+  terminal target's own `quarters`. `buildSnapGrid` normalises it to at least
+  `lastOnset + LOOP_MIN_QUARTERS`, which is what makes `clampLoopIndices` total: dragging B to the
+  end always yields a legal loop, so the final note is always loopable.
+
+`ceilStepToPx`, `pxToLoopStartTicks`, `pxToLoopEndTicks` and `nearestStepToPx` are all gone.
+`ticksToStep` stays a floor search — the RAF interpolation depends on it.
+
+**LANDMINE: never round-trip a step through ticks.** `ticksToStep(Math.round(q * TONE_PPQ))` floors
+over `quarters`, and the `round` can go *up*, so the trip lands on the **previous** step wherever a
+position is not an exact tick multiple — tuplets, mostly. `seekToStep(step, ticks?)` exists for this:
+wherever the caller already knows the index, pass the index. `startPlayback`'s seek to loop A goes
+through it, otherwise a loop starting on a triplet would begin one note early.
+
+## A measure's first onset is anchored to its barline — one pixel, shared by everything
+
+**PATTERN:** `buildTimelines` records each measure-opening step's barline (`measureBoundsPx`) and
+`anchorToBarlines` (`domain/scoreGrid.ts`) writes the result straight into `CursorStep.pxLeft`.
+There is exactly **one** pixel per grid point, read by the snap search, the preview line, the loop
+overlay, `pxAtTicks` for section seams, the scroll clamp and the playback interpolation alike.
+
+That single value is the whole point. The obvious alternative — a "notehead pixel" for playback and
+a "barline pixel" for overlays — was designed and rejected: it parks the playhead ~22 px inside the
+loop shade at every loop start and wrap, which is the same defect as the off-grid cursor bug that
+motivated the grid in the first place, only permanent.
+
+**The cost, measured on Bach BWV 846 (28 px per sixteenth as 1.0×; median shift 6.9 px, max 22.8):**
+
+| step | before | after |
+|---|---|---|
+| into the barline (last note of the measure) | 1.50× | **1.25×** |
+| out of the barline (downbeat) | 1.28× | **1.52×** |
+
+The engraving already bulges either side of a barline; anchoring only redistributes the bulge, and
+the result is not noticeable in practice. **Do not "smooth" even that** by reintroducing a second
+pixel per step.
+
+An earlier revision of this note claimed 0.71× / 2.06×. That was measured while `measureBoundsPx`
+still carried the cursor's `- 1.5` offset (see `osmd-webview.md`), which inflated the shift from
+6.9 px to 21.9 px. If you find figures in that range anywhere, the offset bug is back.
+
+Two rules inside `anchorToBarlines` that are not decoration:
+
+- **The opening measure is never anchored.** Its left edge is the edge of the engraving, so the
+  playhead would sit left of the clef, and `scrollMaxPx` (which reads `cursorSteps[0].pxLeft`) would
+  follow it there.
+- **An anchor never reaches back past the previous onset**, except across a repeat's back-jump,
+  where the pixel sequence descends and the previous step says nothing about how far left this one
+  may go. That guard is what preserves the ascending-pixel invariant `nearestGridIndex`
+  binary-searches on. On the prelude it never has to fire (34 anchored steps, 0 clamped), but a
+  measure whose first entry carries accidentals has a 37.8 px inset against ~28 px steps, so it can.
 
 ## LANDMINE: `Iterator.EndReached` fires while cursor is still AT the final note
 
@@ -671,7 +790,8 @@ positioned AT the final note — not past it. The standard `while (!EndReached)`
 pushing that position, so the final note is never captured in `cursorSteps`. Effects:
 - Handle B cannot reach the last note's pixel position (it clamps to the second-to-last note).
 - The cursor never visually reaches the final note during playback.
-- `pxToLoopEndTicks` returns wrong ticks for B set to the final note.
+- The snap grid's terminal target is derived from the final onset, so a missing final step puts the
+  end of the piece in the wrong place and the last note cannot be looped.
 
 **Fix:** After the while-loop, check whether the cursor element's current `style.left` is strictly
 beyond the last captured step's `pxLeft`. If so, capture it as an extra step:
@@ -950,10 +1070,12 @@ There are **two** position sources, because the playhead moves in two different 
 
 - **Playing** — `animateCursorLoop` passes the transport position (loop-aware `effectiveQE`).
 - **Panning** — the transport has not moved, only the score has, so `emitSectionAtScrollOffset`
-  derives the position from `scrollOffsetPx` via `nearestStepToPx(viewportWidth / 2 - offset)`.
-  It is called on every `touchmove` and every momentum frame. Relying on `syncCursorToCenter`
-  alone (which runs on lift and when momentum settles) makes the label lag the score visibly —
-  the name only flips once the scroll stops, long after the centre line crossed the junction.
+  derives the position from `scrollOffsetPx` via `nearestGridIndex(cursorSteps, viewportWidth / 2 -
+  offset)`. It is called on every `touchmove` and every momentum frame. Relying on
+  `settleToNearestStep` alone (which runs on lift and when momentum settles) makes the label lag the
+  score visibly — the name only flips once the scroll stops, long after the centre line crossed the
+  junction. It uses *nearest*, matching the preview line and the settle; flooring instead would let
+  the label flip only after the glide had already landed, which reads as a different kind of lag.
 
 `_stopInternal` also emits at tick 0: `Transport.stop()` rewinds, and without it a piece that plays
 to the end leaves the label showing the final section while the cursor sits at the start.

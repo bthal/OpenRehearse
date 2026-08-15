@@ -28,7 +28,8 @@ Phases are **sequential**; within a phase, items can be parallelized when they d
 
 ## Phase 4 — Single active loop
 
-- [x] Loop start/end handles are **continuously draggable** along the score timeline.
+- [x] Loop start/end handles are **continuously draggable** along the score timeline, and
+      **discretised to the note grid** on release (see `specs/features/playview.md`).
 - [x] **Immediate jump** on loop wrap; only **one** active loop at a time.
 - [x] UI to set/adjust/clear loop; visual indication of loop region per OSMD capabilities.
 
