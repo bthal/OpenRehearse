@@ -105,8 +105,10 @@ let part: Tone.Part<NoteEvent> | null = null;
 let metronomeEventId: number | null = null;
 let metronomeEnabled = false;
 let downbeatTicks: Set<number> = new Set();
-// Per-measure time signature + start tick, in score order. Lets the count-in
-// read the meter at the piece start or at a loop's start measure.
+// Per-measure time signature + start tick, in *playback* order: the cursor follows
+// repeats, so a repeated measure appears here once per pass. Lets the count-in read
+// the meter at the piece start or at a loop's start measure, both of which are
+// looked up by tick rather than by index.
 interface MeasureMeta {
   startTicks: number;
   num: number; // time-signature numerator (beats per measure)
@@ -114,17 +116,14 @@ interface MeasureMeta {
   implicit: boolean; // true for a pickup/anacrusis measure
 }
 let measureMeta: MeasureMeta[] = [];
-// Sounding span of every note in the score, in transport ticks.
+// Tick each measure of the *printed* score first sounds at, indexed by its position
+// in the score's measure list.
 //
-// Deliberately NOT derived from noteEvents: that array is filtered by activeHand and
-// rebuilt on every setActiveHand, so section junctions computed from it would shift
-// when the user practises one hand. This one ignores the hand filter entirely.
-interface NoteSpan {
-  start: number;
-  end: number;
-}
-let noteSpans: NoteSpan[] = [];
-// Section start positions in ticks, ascending, already offset for anacrusis pickups.
+// Kept separate from measureMeta because the two orders diverge at the first repeat
+// back-jump: measureMeta is the unrolled timeline, this is the page. Sections arrive
+// from the domain as printed-score indices, so they must resolve through this one.
+let firstTicksBySourceIndex: (number | undefined)[] = [];
+// Section start positions in ticks, ascending. Always a measure downbeat.
 let sectionStartTicks: number[] = [];
 // Palette color of each section, index-for-index with sectionStartTicks. Supplied by
 // native, which owns the theme; the web side only paints with it.
@@ -241,7 +240,6 @@ function buildTimelines(osmd: OpenSheetMusicDisplay): {
   const noteEvents: NoteEvent[] = [];
   const steps: CursorStep[] = [];
   const tempoChanges: TempoChange[] = [];
-  const spans: NoteSpan[] = [];
 
   osmd.cursor.reset();
   osmd.cursor.show();
@@ -262,6 +260,7 @@ function buildTimelines(osmd: OpenSheetMusicDisplay): {
   let lastBpm = scoreBpm;
   downbeatTicks = new Set();
   measureMeta = [];
+  firstTicksBySourceIndex = [];
 
   while (!osmd.cursor.Iterator.EndReached) {
     const quarters = osmd.cursor.Iterator.CurrentEnrolledTimestamp.RealValue * WHOLE_TO_QUARTER;
@@ -287,6 +286,14 @@ function buildTimelines(osmd: OpenSheetMusicDisplay): {
         den: den && den > 0 ? den : 4,
         implicit: sm.ImplicitMeasure === true,
       });
+      // CurrentMeasureIndex indexes Sheet.SourceMeasures — the printed score — and is
+      // rewound by the iterator on a repeat's back-jump. Keeping only the first visit
+      // maps a printed measure to the tick it first sounds at, which is where a
+      // section starting there begins.
+      const sourceIndex = osmd.cursor.Iterator.CurrentMeasureIndex;
+      if (sourceIndex >= 0 && firstTicksBySourceIndex[sourceIndex] === undefined) {
+        firstTicksBySourceIndex[sourceIndex] = startTicks;
+      }
     }
     // Use style.left (exact value OSMD sets) rather than offsetLeft (integer, may round).
     const pxLeft = parseFloat(el?.style.left ?? '0');
@@ -310,11 +317,6 @@ function buildTimelines(osmd: OpenSheetMusicDisplay): {
         // OSMD halfTone is semitones from C0; standard MIDI is semitones from C-1,
         // so add 12 to align octaves. Valid piano range: A0 (9) to C8 (96).
         if (note.halfTone < 9 || note.halfTone > 115) continue;
-        // Recorded before the hand filter — see the noteSpans declaration.
-        const spanQ = note.Length.RealValue * WHOLE_TO_QUARTER;
-        if (spanQ > 0) {
-          spans.push({ start: baseTicks, end: baseTicks + Math.round(spanQ * TONE_PPQ) });
-        }
         if (activeHand !== 'both') {
           const si = note.ParentStaff?.idInMusicSheet ?? 0;
           if (activeHand === 'right' && si !== 0) continue;
@@ -418,7 +420,6 @@ function buildTimelines(osmd: OpenSheetMusicDisplay): {
 
   totalQuarters = lastExpandedQuarters + 1;
   cursorSteps = steps;
-  noteSpans = spans.sort((a, b) => a.start - b.start);
   osmd.cursor.reset();
 
   return { noteEvents, scoreBpm, tempoChanges };
@@ -1156,57 +1157,26 @@ function cancelCountIn(): boolean {
 
 // ─── Sections ─────────────────────────────────────────────────────────────────
 
-// Tick comparisons at a section seam need slack: note ends are rounded to whole
-// ticks, so a strict test would read a note stopping exactly on the seam as
-// sustaining across it.
+// Tick comparisons at a section seam need slack: tick positions are rounded to whole
+// ticks, so a strict test would read the playhead sitting exactly on a junction as
+// still belonging to the previous section.
 const SEAM_EPSILON_TICKS = 1;
 
 /**
- * Length of the piece's anacrusis in ticks, or 0 when it begins on a downbeat.
+ * Resolves a section's start measure — a printed-score index — to its tick.
  *
- * With a pickup every notated barline sits this far after the musical phrase start,
- * which is what section junctions may have to be shifted back by.
- */
-function anacrusisTicks(): number {
-  if (measureMeta[0]?.implicit !== true) return 0;
-  return measureMeta[1]?.startTicks ?? 0;
-}
-
-/**
- * Resolves a section's start measure to the tick it musically begins on.
+ * Sections always begin on a barline. Pickups are deliberately not compensated for:
+ * an opening anacrusis is simply part of the first section, and where an interior
+ * section is led into by an upbeat, that upbeat falls in the preceding section.
  *
- * A section notated at a barline often begins on the upbeat leading into it. That
- * offset is applied only when the upbeat is real: there must be note onsets inside
- * the window before the barline AND nothing sustaining across the window's start.
- * That is exactly how an internal anacrusis is engraved — the previous phrase
- * closes, a rest separates it, then the upbeat.
- *
- * Testing merely for "notes in the window" would not discriminate: a section
- * normally ends with a full measure, so there is material on the last beat whether
- * or not it leads anywhere. Material flowing across the seam means the previous
- * section is still playing, so the junction stays on the barline.
+ * The alternative was shifting junctions back off the barline by the anacrusis
+ * length, but nothing in the notation says whether a piece's opening pickup implies
+ * one at every later section, so that offset was as often wrong as right. Landing on
+ * the barline is at least predictable, and it keeps the label, the swipe target and
+ * the junction mark agreeing with the engraving the user is looking at.
  */
 function sectionStartTickFor(measureIndex: number): number | null {
-  const bar = measureMeta[measureIndex]?.startTicks;
-  if (bar === undefined) return null;
-
-  const offset = anacrusisTicks();
-  const windowStart = bar - offset;
-  if (offset <= 0 || windowStart <= 0) return bar;
-
-  let earliestUpbeat: number | null = null;
-  // noteSpans is sorted by start, so spans before the window come first and the
-  // first span inside it is the earliest upbeat.
-  for (const span of noteSpans) {
-    if (span.start >= bar - SEAM_EPSILON_TICKS) break;
-    if (span.start >= windowStart - SEAM_EPSILON_TICKS) {
-      if (earliestUpbeat === null) earliestUpbeat = span.start;
-    } else if (span.end > windowStart + SEAM_EPSILON_TICKS) {
-      return bar;
-    }
-  }
-
-  return earliestUpbeat ?? bar;
+  return firstTicksBySourceIndex[measureIndex] ?? null;
 }
 
 /** The section containing `ticks`, or null when the piece has no sections. */
@@ -1303,15 +1273,16 @@ function renderSectionMarks(): void {
 }
 
 /**
- * Installs the piece's sections, given as 0-based start measure indices with the
- * palette color each one draws.
+ * Installs the piece's sections, given as 0-based start measure indices into the
+ * printed score, with the palette color each one draws.
  *
- * Must be called after initPlayback: measure metadata and note spans only exist
- * once the score has been walked.
+ * Must be called after initPlayback: the measure-to-tick table only exists once the
+ * score has been walked.
  */
 export function setSections(startMeasureIndices: number[], colors: string[]): void {
-  // Two sections can resolve to the same tick (adjacent measures with a pickup
-  // absorbed between them). Dedupe on the resolved tick, keeping colors aligned.
+  // Distinct measures resolve to distinct ticks, so this dedupe should never fire.
+  // It is kept because a measure the cursor never reaches resolves to null and is
+  // dropped, and a malformed list is better collapsed than drawn twice over itself.
   const seen = new Set<number>();
   const resolved: { ticks: number; color: string }[] = [];
   for (let i = 0; i < startMeasureIndices.length; i++) {
@@ -1647,7 +1618,7 @@ export function disposePlayback(): void {
   cancelCountIn();
   downbeatTicks = new Set();
   measureMeta = [];
-  noteSpans = [];
+  firstTicksBySourceIndex = [];
   sectionStartTicks = [];
   sectionColors = [];
   currentSectionIndex = null;

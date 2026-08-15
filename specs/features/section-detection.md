@@ -164,9 +164,8 @@ the right, and the two meet at a crisp two-pixel seam carrying one pixel of each
   opening of the piece is not marked.
 - The fade reaches roughly **half a measure** to each side, measured from the engraving rather than
   assumed, and is held at low opacity so it never competes with the notes or with a loop's shade.
-- Marks sit at the same resolved junction the label and the swipe use, **including** the anacrusis
-  offset below — so at a junction that absorbs an upbeat the mark sits mid-measure, before the
-  barline, and all three agree about where the section begins.
+- Marks sit at the same resolved junction the label and the swipe use — always a barline, per the
+  pickup policy below — so all three agree about where a section begins.
 
 ### Colors
 
@@ -212,30 +211,30 @@ silently undone when the transport snaps back to the loop's A handle.
 Because a swipe is the only pointer affordance, the label also exposes the same two moves as
 increment/decrement **accessibility actions**.
 
-### Junction offset for anacrusis pickups
+### Pickups are not compensated for
 
-Sections are always a whole number of measures long, but with a pickup their junctions do **not**
-sit on the barlines. In a 4/4 piece with a one-beat anacrusis, a section covering four measures ends
-after beat 3 of the fourth and the next section starts on beat 4 — the upbeat leading into it.
+**Sections always start on a barline.** Junctions are never shifted to absorb an upbeat.
 
-The offset is the anacrusis length, read from OSMD's measure data
-(`measureMeta[0].implicit ? measureMeta[1].startTicks : 0`). It is applied at a junction **only when
-the pickup is real**:
+- A **pickup at the start of the piece** is simply part of the first section — it is measure index
+  0, which is where the first section begins anyway.
+- An **upbeat leading into an interior section** is left in the section *before* the one it
+  musically belongs to. This is a known inaccuracy, accepted for now.
 
-```
-window   = [barline - anacrusis, barline)
-apply if   there are note onsets inside the window
-      AND  nothing is sounding across the window's start
-```
+The reason is that the offset cannot be inferred. An earlier implementation measured the opening
+anacrusis and shifted every junction back by it whenever the bar before a junction looked like a
+real upbeat (onsets in the window, nothing sustaining across it). But nothing in the notation says
+whether a piece's opening pickup implies one at every later section, or whether an interior upbeat
+is the same length as the opening one, so the offset was as often wrong as right — and being wrong
+put the junction mid-measure, where it visibly disagreed with the engraving. Landing on the barline
+is at least predictable and always matches something the user can see.
 
-Testing merely for "notes in the window" would not discriminate — a section normally ends with a
-full measure, so there is material on its last beat whether or not it leads anywhere. The
-rest-separated test matches how an internal anacrusis is actually engraved: the previous phrase
-closes, a rest separates it, then the upbeat. Material flowing across the seam means the previous
-section is still playing, so the junction stays on the barline.
+Consequently the WebView needs no note-duration analysis for sections: a section's tick is the tick
+of its measure, and the domain module only ever emits 0-based measure indices.
 
-This resolution lives in the WebView, which owns note durations; the domain module only ever emits
-0-based measure indices.
+**Resolution is against the printed score, not the playback timeline.** The two differ: OSMD's
+cursor follows repeats, so a repeated measure occurs more than once on the timeline. A section's
+index refers to the page, and resolves to the tick that measure **first** sounds at. See
+`compound-docs/tone-playback.md`.
 
 ## Persistence and scope
 
@@ -255,7 +254,10 @@ This resolution lives in the WebView, which owns note durations; the domain modu
 - [x] Swiping the label jumps to the previous/next section start, one section per swipe.
 - [x] The swipe rubber-bands and springs back at the first and last section.
 - [x] The swipe is inert while playing and while a loop is active.
-- [x] Section junctions absorb a real, rest-separated upbeat and otherwise land on the barline.
+- [x] Every section junction lands on a barline; an upbeat leading into a section stays in the
+      section before it.
+- [x] A junction after a repeat resolves to its printed measure, not to a later pass over an
+      earlier one.
 - [x] Junctions do not move when the active hand changes.
 - [x] The label's ground fades out to the left and right.
 - [x] Names travel with the finger and the two sections' colors crossfade during a swipe.

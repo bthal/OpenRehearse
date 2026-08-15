@@ -303,6 +303,31 @@ OSMD's cursor iterator follows repeats by default (`EngravingRules.CursorIgnoreR
 resulting linear timeline offset so `Tone.Part` events and cursor steps are both sequenced
 correctly.
 
+## LANDMINE: anything built by walking the cursor is in playback order, not score order
+
+The same back-jumps mean **a repeated measure is visited more than once**. Any array appended to
+inside the `while (!EndReached)` walk therefore holds one entry per *pass*, not per printed measure:
+`measureMeta` in `playback.ts` is the unrolled timeline, not the page.
+
+Indexing such an array with a printed-score measure number is silently correct up to the first
+repeat and wrong after it — the failure is invisible on a score without repeats, which is exactly
+what a first test file tends to be. Section boundaries hit this: they arrive from `domain/sections.ts`
+as 0-based indices into the MusicXML measure list, and a boundary past a repeat resolved to the
+second pass of an earlier measure.
+
+Two safe ways to consume the walk:
+
+- **Look up by tick, not by index** — `measureAtTicks()` scans for the last measure starting at or
+  before a tick, so the duplicates are harmless.
+- **Key by printed index while walking** — `Iterator.CurrentMeasureIndex` indexes
+  `Sheet.SourceMeasures` (the printed score) and is rewound by the iterator on a back-jump, so
+  recording only the first visit per index gives a printed-measure → tick table. This is what
+  `firstTicksBySourceIndex` is.
+
+Do not reach for `SourceMeasure.measureListIndex` instead: it is a graphical-layer field, whereas
+`CurrentMeasureIndex` is literally the index the iterator uses to fetch `CurrentMeasure`
+(`currentMeasure = musicSheet.SourceMeasures[currentMeasureIndex]`).
+
 ## LANDMINE: backward OSMD cursor seek inside RAF loop causes visual stall proportional to piece length
 
 **LANDMINE:** OSMD has no random-access seek. Moving the cursor backward requires `cursor.reset()`
