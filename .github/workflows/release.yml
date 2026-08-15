@@ -51,6 +51,27 @@ jobs:
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
 
+      # GitHub does NOT create a git tag for a draft release — the ref only appears when
+      # a human publishes it. Without the tag two things break: build-apk cannot check
+      # out `ref: <tag>`, and release-please loses the anchor it uses to find "commits
+      # since the last release", so its next run proposes a version with the entire
+      # project history as the changelog. Create the tag ourselves, at the commit the
+      # release targets. Publishing the draft later just reuses this tag.
+      - name: Create the release tag
+        if: steps.release.outputs['client--release_created'] == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.release.outputs['client--tag_name'] }}
+        run: |
+          set -euo pipefail
+          if gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/${TAG}" >/dev/null 2>&1; then
+            echo "Tag ${TAG} already exists; nothing to do."
+          else
+            gh api "repos/${GITHUB_REPOSITORY}/git/refs" \
+              -f "ref=refs/tags/${TAG}" -f "sha=${GITHUB_SHA}"
+            echo "Created ${TAG} at ${GITHUB_SHA}"
+          fi
+
   build-apk:
     name: Build APK and attach to draft release
     needs: release-please
