@@ -20,8 +20,6 @@ import { HeatmapColors } from '@theme/colors';
 const WEEK_STARTS_ON = 1;
 const CELL_SIZE = 12;
 const CELL_GAP = 3;
-/** The library indents the grid by 8px when the weekday sidebar is hidden. */
-const GRID_INSET = 8;
 /** Dashboard content padding (`px-6`) plus the max content width it centres in. */
 const CONTENT_PADDING = 24 * 2;
 const MAX_CONTENT_WIDTH = 720;
@@ -35,10 +33,15 @@ const MAX_WEEKS = 53;
  */
 const LEVEL_MINUTES = [1, 10, 25, 45] as const;
 
-/** How many trailing weeks of grid fit in `availableWidth`. */
+/**
+ * How many trailing weeks of grid fit in `availableWidth`.
+ *
+ * Each week column occupies a cell plus the gap that follows it, except the
+ * last: the library draws the grid one gap narrower than it reserves, so `n`
+ * weeks paint `n * (CELL_SIZE + CELL_GAP) - CELL_GAP` wide.
+ */
 export function weeksThatFit(availableWidth: number): number {
-  const usable = availableWidth - GRID_INSET;
-  const weeks = Math.floor(usable / (CELL_SIZE + CELL_GAP));
+  const weeks = Math.floor((availableWidth + CELL_GAP) / (CELL_SIZE + CELL_GAP));
   return Math.min(MAX_WEEKS, Math.max(MIN_WEEKS, weeks));
 }
 
@@ -105,28 +108,40 @@ export function PracticeHeatmap() {
       <Text className="text-[22px] font-bold text-ash-grey-950">{t('dashboard.practice')}</Text>
       <Text className="mb-3 mt-1.5 text-xs text-ash-grey-400">{t('dashboard.practiceNote')}</Text>
 
-      <WeeklyHeatMap
-        data={data}
-        startDate={startDate}
-        endDate={endDate}
-        weekStartsOn={WEEK_STARTS_ON}
-        cellSize={CELL_SIZE}
-        cellGap={CELL_GAP}
-        cellRadius={3}
-        scrollable={false}
-        theme={{
-          // Light mode only (see the non-negotiables) — pin the scheme so a
-          // device in dark mode still gets the app's own palette.
-          scheme: 'light',
-          cellDefaultColor: HeatmapColors.empty,
-          cellColor,
-          headerTextColor: HeatmapColors.headerText,
-        }}
-        headerTextFontSize={10}
-      />
+      {/*
+        `items-start` stops the library's own container — a centring flex row —
+        from stretching to the section width and floating the grid in the
+        leftover space; it hugs the grid instead, so the cells start at the
+        section's left edge like the heading above them.
+      */}
+      <View className="items-start">
+        <WeeklyHeatMap
+          data={data}
+          startDate={startDate}
+          endDate={endDate}
+          weekStartsOn={WEEK_STARTS_ON}
+          cellSize={CELL_SIZE}
+          cellGap={CELL_GAP}
+          cellRadius={3}
+          scrollable={false}
+          // The library insets its content by 8px but caps the surrounding
+          // viewport at the bare grid width, so that inset overflows and — with
+          // scrolling off — clips the trailing week. Drop it.
+          scrollStyle={{ paddingLeft: 0 }}
+          theme={{
+            // Light mode only (see the non-negotiables) — pin the scheme so a
+            // device in dark mode still gets the app's own palette.
+            scheme: 'light',
+            cellDefaultColor: HeatmapColors.empty,
+            cellColor,
+            headerTextColor: HeatmapColors.headerText,
+          }}
+          headerTextFontSize={10}
+        />
+      </View>
 
       {/* Legend: same ramp, least → most practice. */}
-      <View className="mt-2 flex-row items-center gap-1.5 pl-2">
+      <View className="mt-2 flex-row items-center gap-1.5">
         <Text className="text-[10px] text-ash-grey-400">{t('dashboard.practiceLess')}</Text>
         <View
           className="rounded-[3px]"

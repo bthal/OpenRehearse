@@ -101,6 +101,31 @@ matches no key and falls back to `cellDefaultColor`. Pin `theme.scheme: 'light'`
 otherwise follows `Appearance.getColorScheme()` and would pick its dark palette on a dark-mode
 device, which the app does not support.
 
+## The 8px content inset overflows the library's own viewport — the last week gets clipped
+
+**LANDMINE:** `HorizontalHeatMap` puts its 8px left inset on the scroll view's *contentContainer*
+but caps that scroll view at `maxWidth: <bare grid width>` — a value that excludes the inset. The
+content is therefore always `8 - cellGap` px wider than the viewport holding it, and because the
+grid renders with `scrollable={false}`, those pixels are **clipped, not scrollable**: the trailing
+week loses its right edge. The library's container is also a centring flex row
+(`justifyContent: 'center'`), which floats the whole grid a few more pixels right of the heading.
+
+**Failed approach:** reserving the inset by subtracting it from the available width in
+`weeksThatFit()`. It cannot work — dropping a week shrinks the content *and* the viewport cap by
+the same `CELL_SIZE + CELL_GAP`, so the overflow is invariant. Measured across six screen widths
+(320–1024), the clip stayed exactly 5px at every one. The clipping happens inside the library's
+own scroll view, so no choice of week count can reach it.
+
+**Fix:** pass `scrollStyle={{ paddingLeft: 0 }}` — a public prop the library merges **last** into
+its content container style — and wrap the grid in an `items-start` view so the centring row hugs
+its content instead of stretching. `weeksThatFit()` then models the painted width: `n` weeks paint
+`n * (CELL_SIZE + CELL_GAP) - CELL_GAP` wide, because the library draws the grid one gap narrower
+than it reserves.
+
+Layout regressions here are invisible to colour-based tests, so the geometry is asserted directly
+in `components/__tests__/PracticeHeatmap.test.tsx`: content width must fit inside the scroll
+view's `maxWidth`, and the left inset must be 0.
+
 ## The package is ESM-only — Jest needs it in `transformIgnorePatterns`
 
 **LANDMINE:** `@symbiot.dev/react-native-heatmap` ships only `index.esm.js` (`"type": "module"`).
