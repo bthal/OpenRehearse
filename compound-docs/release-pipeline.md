@@ -68,6 +68,23 @@ tag — silently never builds anything.
 **Fix:** chain the build as a second job in the *same* workflow with
 `needs: release-please` and `if: needs.release-please.outputs.release_created == 'true'`.
 
+## Draft releases do not create a git tag
+
+**LANDMINE:** GitHub materialises the tag ref only when a release is **published**. A draft
+release carries a `tag_name` but no `refs/tags/<tag>`. This bit twice on the 1.1.0 release:
+
+- `build-apk` uses `actions/checkout` with `ref: <tag>`; it retried the fetch three times and
+  failed with `The process '/usr/bin/git' failed with exit code 1`. No EAS build ran at all.
+- release-please anchors "commits since the last release" on the tag. With no `v1.1.0` tag it
+  walked back to the root commit and opened a **1.2.0** PR whose changelog was the entire project
+  history. That PR must be closed, never merged.
+
+**Fix:** `release.yml` creates the tag itself, immediately after release-please, at `GITHUB_SHA`.
+Publishing the draft later reuses the existing tag. The step is idempotent so re-runs are safe.
+
+Do not "fix" this by dropping `draft: true` — the draft is the human smoke-test gate, and nothing
+in CI exercises OSMD and Tone.js in a real WebView.
+
 ## release-please manifest mode prefixes its outputs with the package path
 
 **LANDMINE:** with a `packages` entry at path `client`, the outputs are `client--tag_name`,
