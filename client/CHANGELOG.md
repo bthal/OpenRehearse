@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.2.0](https://github.com/bthal/OpenRehearse/compare/v1.1.0...v1.2.0) (2026-08-15)
+
+
+### Features
+
+* **sections:** align section junctions to barlines and resolve them in score order ([#5](https://github.com/bthal/OpenRehearse/issues/5)) ([4d44558](https://github.com/bthal/OpenRehearse/commit/4d44558a81922770e89d668f09b006bcb5dd40dc))
+
 ## [1.1.0](https://github.com/bthal/OpenRehearse/compare/v1.0.0...v1.1.0) (2026-08-15)
 
 
