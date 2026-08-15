@@ -1,6 +1,6 @@
 {
   "name": "openrehearse",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "main": "expo-router/entry",
   "dependencies": {
     "@mdi/js": "^7.4.47",
@@ -51,6 +51,8 @@
   "scripts": {
     "build": "npx eas-cli build --platform android --profile preview",
     "build:score-web": "cd score-web && npm ci && node build.mjs",
+    "postinstall": "npm run build:score-web",
+    "eas-build-post-install": "npm run build:score-web",
     "start": "expo start",
     "android": "expo start --android",
     "clear": "expo start --android -- --clear",

@@ -34,6 +34,9 @@ Phases are **sequential**; within a phase, items can be parallelized when they d
 
 ## Phase 5 — Hardening & Android release prep
 
+- [x] **Release pipeline**: CI gate on every PR (lint/format/typecheck/test, version sync, PR-title
+      lint); release-please version + changelog PR; signed APK built on EAS and attached to a draft
+      GitHub Release for manual smoke-testing. See `README.md` § Releasing.
 - [ ] Offline regression pass (airplane mode).
 - [ ] Large-score performance smoke tests; memory caps / friendly failure.
 

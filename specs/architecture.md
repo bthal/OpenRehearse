@@ -11,6 +11,27 @@
 - **Auth & cloud**: **Non-goal for MVP.** No Supabase, no login flow, no server-side user rows. Scores stay on-device.
 - **Tooling**: **TypeScript (strict)**, **ESLint** + **Prettier**; tests for pure domain logic (Jest).
 
+## Build, CI, and distribution
+
+- **Distribution**: a **signed APK attached to a GitHub Release**, installed by sideloading. **No
+  Play Store in MVP** — no store account, no review latency, no staged rollout, and no Data Safety
+  declarations. The trade-off is that users must enable unknown-source installs and there is no
+  automatic update channel.
+- **Signing**: the Android keystore lives with **EAS**, not in CI. Because releases are sideloaded,
+  that key is the app's permanent identity — an install can only be upgraded in place by an APK
+  signed with the same key.
+- **Builds**: run on **EAS cloud** (`preview` profile → APK). CI never holds signing material. The
+  free tier allows 15 Android builds per month, so builds are spent on releases only.
+- **Version source of truth**: `client/package.json` `version`. `app.json`'s `expo.version` and the
+  integer `android.versionCode` are **derived** from it, never hand-edited.
+- **Release gate**: releases are cut by merging a release-please pull request, and published by a
+  human after sideloading and smoke-testing the APK. Merging a feature PR ships nothing on its own.
+- **Generated code**: `client/src/score-web/html.ts` (the bundled OSMD + Tone.js surface) is built
+  at install time and is **not** in version control.
+
+See [`../README.md`](../README.md#releasing) for the operator's view and
+[`../compound-docs/release-pipeline.md`](../compound-docs/release-pipeline.md) for the traps.
+
 ## Why WebView + OSMD
 
 - OSMD is the most practical path for **MusicXML 2.x–4.x** rendering and **standard cursor** support in a RN app without maintaining native engraving.
