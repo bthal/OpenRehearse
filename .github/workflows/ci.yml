@@ -1,0 +1,75 @@
+name: CI
+
+# The real quality gate. The husky pre-commit hook runs the same `npm run ci`, but hooks
+# are bypassable with --no-verify, so this is the enforcement point. Make these checks
+# required in branch protection on main.
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+# Least privilege: no job here writes anything. Jobs that need more raise it themselves.
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  # Matches the dev machines; README documents Node 20+ as the floor.
+  NODE_VERSION: '24'
+
+jobs:
+  quality:
+    name: lint / format / typecheck / test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: |
+            client/package-lock.json
+            client/score-web/package-lock.json
+      # `npm ci` triggers postinstall, which bundles score-web into
+      # client/src/score-web/html.ts. That file is imported by three screens, so if the
+      # bundle failed to generate, typecheck and test below fail loudly — there is no
+      # separate drift check to keep honest.
+      - run: npm ci
+        working-directory: client
+      - run: npm run ci
+        working-directory: client
+
+  version-sync:
+    name: app.json version matches package.json
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - run: node scripts/sync-app-version.mjs --check
+
+  pr-title:
+    name: PR title is a Conventional Commit
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    # The repo squash-merges, so the PR title becomes the commit message on main and is
+    # what release-please reads to build the changelog. Linting it with the repo's own
+    # commitlint config keeps one list of allowed types instead of two.
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: package-lock.json
+      - run: npm ci
+      - name: Lint title
+        # Passed via env, never interpolated into the shell: a PR title is attacker-
+        # controlled text and `${{ ... }}` inside `run:` is a script-injection sink.
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+        run: printf '%s' "$PR_TITLE" | npx --no -- commitlint

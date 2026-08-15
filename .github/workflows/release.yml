@@ -1,0 +1,111 @@
+name: Release
+
+# Two jobs, one workflow, on purpose: a tag pushed by release-please does NOT start a
+# separate `on: push: tags` workflow run, so the build has to be chained with `needs:`
+# rather than triggered by the tag.
+#
+# `workflow_dispatch` exists to re-attach an APK to an EXISTING tag when an EAS build
+# fails — recovery, not a way to mint extra builds against the 15/month free-tier cap.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Existing tag to (re)build and attach an APK to, e.g. v1.1.0'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release
+  # Never cancel: an in-flight run may already be holding an EAS build slot.
+  cancel-in-progress: false
+
+env:
+  NODE_VERSION: '24'
+
+jobs:
+  release-please:
+    name: Maintain release PR
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
+    outputs:
+      # Manifest mode prefixes per-package outputs with the package path.
+      release_created: ${{ steps.release.outputs['client--release_created'] }}
+      tag_name: ${{ steps.release.outputs['client--tag_name'] }}
+    steps:
+      - uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0
+        id: release
+        with:
+          # A PAT, not GITHUB_TOKEN: pull requests opened with GITHUB_TOKEN do not
+          # trigger workflow runs, which would leave the release PR with no CI and
+          # no version sync.
+          token: ${{ secrets.RELEASE_PLEASE_TOKEN }}
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
+
+  build-apk:
+    name: Build APK and attach to draft release
+    needs: release-please
+    # `always()` is required so this still runs on workflow_dispatch, where the
+    # release-please job is skipped rather than successful.
+    if: >-
+      always() &&
+      (needs.release-please.outputs.release_created == 'true' ||
+       github.event_name == 'workflow_dispatch')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # uploading assets to the release
+    env:
+      TAG: ${{ github.event.inputs.tag || needs.release-please.outputs.tag_name }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.inputs.tag || needs.release-please.outputs.tag_name }}
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: |
+            client/package-lock.json
+            client/score-web/package-lock.json
+
+      - uses: expo/expo-github-action@eab7a230208c952974db8c3245cfd78402c7b385 # 9.0.0
+        with:
+          eas-version: latest
+          packager: npm
+          token: ${{ secrets.EXPO_TOKEN }}
+
+      - run: npm ci
+        working-directory: client
+
+      - name: Build on EAS and wait
+        working-directory: client
+        # The `preview` profile produces an APK (eas.json). Signing happens on EAS with
+        # the managed keystore — no signing material is ever present on this runner.
+        run: eas build --platform android --profile preview --non-interactive --wait --json > "$RUNNER_TEMP/eas-build.json"
+
+      - name: Download the APK and checksum it
+        run: |
+          set -euo pipefail
+          version="${TAG#v}"
+          url="$(jq -er '.[0].artifacts.buildUrl // .[0].artifacts.applicationArchiveUrl' "$RUNNER_TEMP/eas-build.json")"
+          apk="openrehearse-${version}.apk"
+          curl -fSL "$url" -o "$apk"
+          sha256sum "$apk" > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+
+      - name: Attach assets to the draft release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        # The release is a draft (see release-please-config.json). A human sideloads the
+        # APK, confirms a score imports and plays, and only then publishes it.
+        run: gh release upload "$TAG" openrehearse-*.apk SHA256SUMS.txt --clobber

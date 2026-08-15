@@ -1,3 +1,10 @@
 testfiles/
 .DS_Store
-.claude/
+node_modules/
+
+# Agent config is local-only, EXCEPT the project skills, which are part of the
+# release workflow and must travel with the repo. Note the `/*` form: git will not
+# descend into a fully ignored directory, so the negation below only works because
+# `.claude` itself is not ignored.
+.claude/*
+!.claude/skills/

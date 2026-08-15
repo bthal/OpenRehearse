@@ -1,8 +1,26 @@
 # Agent guide (coding agents)
 
+This is the single agent guide for the repository — Claude Code, Cursor and anything else read
+this file. There is deliberately no `CLAUDE.md`.
+
 This repository uses **`specs/`** as the source of truth for product intent and technical direction. **Read it before large or ambiguous changes.**
 
-**Do not implement from** [`SUDELBUCH.md`](SUDELBUCH.md) — it is an idea scratch pad.
+## What this is
+
+Practice companion for piano students: import MusicXML, render the score via OSMD, synthesize audio
+from the notation, keep the OSMD cursor aligned with playback, and loop one active passage (a
+"bit") for focused repetition. Offline after import. Scores stay on-device — never uploaded.
+
+```
+RN native shell (Expo Router screens, Zustand)
+    └── WebView
+            └── score-web bundle (OSMD + Tone.js, one musical clock)
+                    ↕ postMessage / injected JS
+```
+
+One transport drives both OSMD's cursor and Tone.js playback — there is no second clock to drift
+against. Domain logic (loop bounds, BPM math, MusicXML validation) is pure TypeScript with no
+RN/OSMD/Tone imports. See `specs/architecture.md` for the authoritative version.
 
 ## Required reading (by task)
 
@@ -15,7 +33,7 @@ This repository uses **`specs/`** as the source of truth for product intent and 
 | Practice-time tracking & heatmap | `specs/features/dashboard.md`, `compound-docs/practice-tracking.md` |
 | Settings & count-in | `specs/features/settings.md`, `compound-docs/tone-playback.md` (count-in) |
 | Files & MusicXML | `specs/features/import.md` |
-| Local data & offline | `specs/features/offline-storage.md`, `client/docs/offline-qa.md` |
+| Local data & offline | `specs/features/offline-storage.md` |
 | Audio + cursor sync | `specs/features/playback-synthesis.md`, `specs/features/playview.md` |
 | State & domain | `specs/features/pieces-domain.md` |
 | Warm-up exercises | `specs/features/warmup.md` |
@@ -34,7 +52,6 @@ This repository uses **`specs/`** as the source of truth for product intent and 
 | `client/score-web/` | OSMD surface, playback controller, cursor/loop web UI, Tone.js integration — **web-only** |
 | `client/app/` | Expo Router screens (Dashboard, PlayView route) |
 | `client/components/` | Shared UI (`AppIcon`, toolbars, modals) — NativeWind + MDI icons |
-| `client/docs/` | Manual QA checklists (`offline-qa.md`) |
 
 Dependency flow: **screens → score-web / state → domain**. Domain never imports from score-web or app layers.
 
@@ -44,6 +61,9 @@ All app scripts run from **`client/`** (see [`README.md`](README.md) for full de
 
 | Command | Purpose |
 |---------|---------|
+| `npm ci` (repo root) | Install commitlint + husky; activates the git hooks |
+| `npm run sync-version` (repo root) | Sync `client/app.json` version + versionCode from `client/package.json` |
+| `npm run sync-version:check` (repo root) | Fail if they have drifted (same check CI runs) |
 | `cd client && npm ci` | Install app dependencies |
 | `cd client && npm run android` | Start Metro + launch on Android device/emulator |
 | `cd client && npm run lint` | ESLint |
@@ -52,7 +72,51 @@ All app scripts run from **`client/`** (see [`README.md`](README.md) for full de
 | `cd client && npm run test` | Jest unit tests |
 | `cd client && npm run ci` | lint + format + typecheck + test |
 
-Commit messages: Conventional Commits via commitlint at repo root (`feat:`, `fix:`, `specs:`, …).
+## Commit messages
+
+Conventional Commits, enforced by commitlint at the repo root (`commitlint.config.mjs` wired
+through `.husky/commit-msg`). Run `npm ci` at the root once to activate the hooks.
+
+Allowed types: `wip feat fix chore docs refactor test perf specs build ci`. `revert` and `style`
+are **not** allowed — a `git revert` needs its generated message rewritten as `fix:` or `chore:`.
+
+**Every line must be ≤ 100 characters** — the hook rejects long body lines, not just long headers.
+Use multiple `-m` flags, one short sentence each. Do not amend on hook failure; fix it and make a
+new commit.
+
+```bash
+git commit -m "feat(playview): add BPM stepper" \
+  -m "Wire Zustand tempoBpm slice to the WebView SET_TEMPO_BPM message." \
+  -m "Default 80 BPM; clamp 20–240."
+```
+
+**PRs are squash-merged**, so the PR title becomes the commit on `main`. CI lints it, and
+release-please builds the changelog from it. Only `feat`, `fix` and `perf` produce a release.
+
+The `pre-commit` hook runs the full `cd client && npm run ci`, but only when the commit touches
+`client/`.
+
+## CI and releases
+
+| Workflow | Trigger | What it does |
+|---|---|---|
+| `.github/workflows/ci.yml` | every PR + push to `main` | `client` quality gate, version sync, PR-title lint |
+| `.github/workflows/release.yml` | push to `main`; `workflow_dispatch` for recovery | Maintains the release PR; on merge, tags, builds an APK on EAS and attaches it to a **draft** release |
+| `.github/workflows/release-pr-sync.yml` | release-please PRs | Writes `client/app.json` version + versionCode into the release PR |
+
+Two invariants worth knowing before you touch anything here:
+
+- **`client/src/score-web/html.ts` is generated, gitignored, and must never be committed.** It is
+  1.5 MB of bundled OSMD + Tone.js, rebuilt from `client/score-web/src/` by `postinstall` (and by
+  `eas-build-post-install` on EAS). After editing anything under `client/score-web/src/`, run
+  `cd client && npm run build:score-web` to see your change locally. See
+  [`compound-docs/release-pipeline.md`](compound-docs/release-pipeline.md) for why it works this way.
+- **`client/package.json` `version` is the single source of truth.** release-please edits only that
+  file; `scripts/sync-app-version.mjs` derives `app.json`'s `version` and the integer
+  `android.versionCode` (`major*10000 + minor*100 + patch`) from it. Never hand-edit `app.json`
+  version fields.
+
+Releasing is documented for humans in [`README.md`](README.md#releasing).
 
 ## Documentation update matrix
 
@@ -62,10 +126,10 @@ User-visible behavior or MVP scope | Relevant `specs/features/*.md` (+ acceptanc
 Architecture, stack, or folder boundaries | `specs/architecture.md`, this file's module map
 OSMD/Tone/loop/sync landmines or new traps | `compound-docs/` (create or update relevant doc)
 Setup, scripts, Node version | `README.md`
-Offline / static-export QA steps | `client/docs/offline-qa.md`
+CI, release pipeline, versioning | `README.md` (Releasing), this file's CI section
 Agent routing, non-negotiables, required reading | This file (`AGENTS.md`)
 
-Use the **commit** Cursor command (`.cursor/commands/commit.md`) for a guided pass: assess scope → read files → **propose edits → apply after user approval** → **`cd client && npm run ci`** when `client/` code changed → **git commit** (Conventional Commits + commitlint at repo root).
+The `/commit` command runs a guided pass over all of this: assess scope → read files → **propose edits → apply after user approval** → **`cd client && npm run ci`** when `client/` code changed → **git commit** (Conventional Commits + commitlint at repo root).
 
 ## Non-negotiables from specs
 
@@ -102,7 +166,6 @@ Use the **commit** Cursor command (`.cursor/commands/commit.md`) for a guided pa
 - Uploading or syncing **full scores** to the cloud (forbidden in MVP per specs).
 - **Auth** of any kind (Supabase or otherwise) — non-goal for MVP.
 - **Dark mode**.
-- Anything listed only in **`SUDELBUCH.md`**.
 
 ## Maintaining this file
 

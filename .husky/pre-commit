@@ -1,0 +1,12 @@
+#!/bin/sh
+# Full quality gate before a commit lands. Guarded on purpose: `npm run ci` runs
+# eslint + prettier + tsc + jest, and a commit that only touches specs/ or docs
+# has no reason to pay for that.
+#
+# This is a convenience filter, not the enforcement point — hooks are bypassable
+# with `--no-verify`. GitHub Actions (.github/workflows/ci.yml) is the real gate.
+
+if git diff --cached --name-only --diff-filter=ACMR | grep -q '^client/'; then
+  echo "husky: client/ changed — running full CI gate"
+  cd client && npm run ci
+fi

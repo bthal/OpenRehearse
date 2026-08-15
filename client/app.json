@@ -19,7 +19,7 @@
         "monochromeImage": "./assets/android-icon-monochrome.png"
       },
       "package": "com.openrehearse.app",
-      "versionCode": 1,
+      "versionCode": 10000,
       "predictiveBackGestureEnabled": false
     },
     "web": {
