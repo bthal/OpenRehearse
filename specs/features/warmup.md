@@ -23,6 +23,7 @@ Hanon I, Scales, Arpeggios, Chromatic, and 5-Finger scales share the same contro
 |-----------|---------|
 | Hand | Both / Right / Left |
 | BPM | 40, 50, 60, 70, 80, 100, 120, 140, 160, 180 |
+| Peak Repeats | 1 / 2 / 4 / 8 / 16 (times the peak bar is played; 1 = the plain drill) |
 
 ## Score generation
 
@@ -48,7 +49,14 @@ Hanon I, Scales, Arpeggios, Chromatic, and 5-Finger scales share the same contro
   RH voice 1 (fingers 4+5): C5/B4 alternating eighths. RH voice 2 (fingers 1–3): ascending
   half-note melody C4→A4 then descending G4→C4. LH mirrors in contrary motion. Final measure:
   whole notes, 5-4 eighths stop. Fingering notation on first 5 and first 4 only.
-  The Key and Octave toolbar panels are hidden for this exercise.
+  The Key and Octave toolbar panels are hidden for this exercise; a Peak Repeats panel
+  replaces them.
+  **Peak Repeats** duplicates measure 3 — the peak bar, RH `G4 A4` / LH `F3 E3` — so the
+  melody's hardest spot recurs before it turns around. That bar is where fingers 2 and 3
+  carry the melody with no thumb anchor while 4+5 keep the ostinato going. Each step adds
+  that many measures — ×2 gives a 7-measure drill
+  (RH `C D | E F | G A | G A | G F | E D | C`), ×16 a 21-measure one — leaving the
+  ostinato, the fingering marks, and the whole-note ending untouched.
 - Eighth notes beamed in groups of 4. No tempo marking rendered in score;
   BPM injected via WebView bridge after LOADED.
 
@@ -56,7 +64,8 @@ Hanon I, Scales, Arpeggios, Chromatic, and 5-Finger scales share the same contro
 
 - Dashboard shows a **Warm-ups** section above the piece list.
 - Warm-up view is **landscape**; left toolbar: back, play/pause, metronome, BPM, hand,
-  key, octave. Each picker opens a sliding panel over the score; opening pauses playback.
+  key, octave (peak repeats in place of key/octave for the 4-5 drill). Each picker opens a
+  sliding panel over the score; opening pauses playback.
 - Settings persisted per exercise type to device storage (`warmup-settings.json`).
 
 ## Acceptance criteria
@@ -85,7 +94,7 @@ A **Routine** is an ordered list of exercise blocks (Hanon I, Scales, Arpeggios,
 - Accessible via **New Routine** (no id param) or **Edit** (id param) from the dashboard.
 - Header: back arrow (with unsaved-changes guard) | title "New Routine"/"Edit Routine" | Save button.
 - Body: name TextInput field, then a `FlatList` of blocks with **+ Add Exercise** buttons between/after every block.
-- Each exercise block row: up/down arrow buttons (reorder) | exercise name | delete (with confirm). Below: parameter pills (Key, BPM, Hand, Octaves) that open a centred picker Modal on tap. Key and Octave pills are hidden for drill45 blocks.
+- Each exercise block row: up/down arrow buttons (reorder) | exercise name | delete (with confirm). Below: parameter pills (Key, BPM, Hand, Octaves) that open a centred picker Modal on tap. Key and Octave pills are hidden for drill45 blocks, which show a Peak Repeats pill instead. Blocks saved before Peak Repeats existed have no value and play as ×1.
 - Each pause block row: up/down arrow buttons | "Pause" | delete. Below: a measures pill (1 / 2 / 3 / 4 measures) that opens the same centred picker Modal.
 - **Validation** (enforced before Save is enabled): at least one exercise block; last block is not a pause.
 

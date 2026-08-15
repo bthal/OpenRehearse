@@ -1,4 +1,10 @@
-import type { WarmUpBpm, WarmUpHand, WarmUpOctaves, WarmUpScaleMode } from './warmup';
+import type {
+  WarmUpBpm,
+  WarmUpHand,
+  WarmUpOctaves,
+  WarmUpPeakRepeats,
+  WarmUpScaleMode,
+} from './warmup';
 
 export const PAUSE_MEASURES = [1, 2, 3, 4] as const;
 export type PauseMeasures = (typeof PAUSE_MEASURES)[number];
@@ -10,6 +16,8 @@ export interface ExerciseBlock {
   hand: WarmUpHand;
   bpm: WarmUpBpm;
   octaves: WarmUpOctaves;
+  // drill45 only; absent on blocks saved before this parameter existed (treated as 1).
+  peakRepeats?: WarmUpPeakRepeats;
 }
 
 export interface PauseBlock {
