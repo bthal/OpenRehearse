@@ -44,12 +44,6 @@ const HEADER_BOTTOM_SPACE = 4;
 const HEADER_HEIGHT = HEADER_TEXT_FONT_SIZE + HEADER_BOTTOM_SPACE;
 /** Thickness of the ring drawn around the selected day. */
 const RING_WIDTH = 2;
-/**
- * Slack kept in the width budget. The library indents its grid by 8px, which we
- * override away (see `scrollStyle` below), but the budget keeps the allowance so
- * the ring and the grid's trailing gap always have room.
- */
-const GRID_INSET = 8;
 /** Dashboard content padding (`px-6`) plus the max content width it centres in. */
 const CONTENT_PADDING = 24 * 2;
 const MAX_CONTENT_WIDTH = 720;
@@ -63,10 +57,15 @@ const MAX_WEEKS = 53;
  */
 const LEVEL_MINUTES = [1, 10, 25, 45] as const;
 
-/** How many trailing weeks of grid fit in `availableWidth`. */
+/**
+ * How many trailing weeks of grid fit in `availableWidth`.
+ *
+ * Each week column occupies a cell plus the gap that follows it, except the
+ * last: the library draws the grid one gap narrower than it reserves, so `n`
+ * weeks paint `n * (CELL_SIZE + CELL_GAP) - CELL_GAP` wide.
+ */
 export function weeksThatFit(availableWidth: number): number {
-  const usable = availableWidth - GRID_INSET;
-  const weeks = Math.floor(usable / ADJUSTED_CELL);
+  const weeks = Math.floor((availableWidth + CELL_GAP) / ADJUSTED_CELL);
   return Math.min(MAX_WEEKS, Math.max(MIN_WEEKS, weeks));
 }
 
@@ -204,12 +203,9 @@ export function PracticeHeatmap() {
 
   const lastColumnX =
     differenceInCalendarWeeks(endDate, startDate, { weekStartsOn: WEEK_STARTS_ON }) * ADJUSTED_CELL;
-  // The library's `<Svg>` stops at the last cell: the trailing gap is not drawn.
-  const gridWidth = lastColumnX + CELL_SIZE;
 
-  // Positioned over the selected cell. Sized to the grid exactly so the
-  // library's centring has no slack to distribute — any would shift the ring off
-  // the cell it is meant to mark.
+  // Where to draw the ring, in the coordinates of the `items-start` wrapper —
+  // which shares its origin with the grid, so a cell's offset is also the ring's.
   const ring = useMemo(() => {
     const { x, y } = cellOffset(selectedDay, startDate);
     // A selection can only fall outside the window if the grid shrank under it.
@@ -224,7 +220,15 @@ export function PracticeHeatmap() {
         {practiceDayCaption(t, selectedDay, dailySeconds[selectedDay] ?? 0, todayKey)}
       </Text>
 
-      <View style={{ width: gridWidth }}>
+      {/*
+        `items-start` stops the library's own container — a centring flex row —
+        from stretching to the section width and floating the grid in the
+        leftover space; it hugs the grid instead, so the cells start at the
+        section's left edge like the heading above them. That also fixes the
+        grid's origin, which is what lets the selection ring be positioned
+        against it.
+      */}
+      <View className="items-start">
         <WeeklyHeatMap
           data={data}
           startDate={startDate}
@@ -238,6 +242,10 @@ export function PracticeHeatmap() {
           onCellPress={({ date }) =>
             setPick({ day: practiceDayKey(date.getTime()), asOf: todayKey })
           }
+          // The library insets its content by 8px but caps the surrounding
+          // viewport at the bare grid width, so that inset overflows and — with
+          // scrolling off — clips the trailing week. Drop it.
+          scrollStyle={{ paddingLeft: 0 }}
           theme={{
             // Light mode only (see the non-negotiables) — pin the scheme so a
             // device in dark mode still gets the app's own palette.
@@ -248,9 +256,6 @@ export function PracticeHeatmap() {
           }}
           headerTextFontSize={HEADER_TEXT_FONT_SIZE}
           headerBottomSpace={HEADER_BOTTOM_SPACE}
-          // Drops the library's built-in 8px indent, which would otherwise have
-          // to be added to every ring position. Merged last, so it wins.
-          scrollStyle={{ paddingLeft: 0 }}
         />
 
         {ring && (

@@ -69,6 +69,8 @@ Home surface listing the user's **pieces** and entry points to **import** and **
 - [x] Privacy note and brand header visible at all times on the dashboard.
 - [x] Practice heatmap sits at the very bottom, populated from tracked practice time and coloured
       from the app palette.
+- [x] The heatmap renders every week in full — none clipped at the edge — and the grid, heading,
+      and Less→More legend all share the section's left edge.
 - [x] Play view, routines, and warm-ups all accumulate into the same daily total; pausing stops the
       clock; navigating away mid-play keeps the partial time; concurrent stores do not double-count.
 - [x] Daily practice totals survive an app restart.

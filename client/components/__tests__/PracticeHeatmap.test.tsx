@@ -1,5 +1,5 @@
 import { render, screen } from '@testing-library/react-native';
-import { processColor } from 'react-native';
+import { processColor, StyleSheet, type StyleProp, type ViewStyle } from 'react-native';
 
 import '../../src/i18n';
 import { usePracticeStore } from '@state/practiceStore';
@@ -22,7 +22,12 @@ jest.mock('expo-router', () => ({
  */
 interface RenderedNode {
   type?: string;
-  props?: { fill?: { payload?: unknown } };
+  props?: {
+    fill?: { payload?: unknown };
+    width?: number;
+    style?: unknown;
+    contentContainerStyle?: unknown;
+  };
   children?: (RenderedNode | string)[] | null;
 }
 
@@ -48,6 +53,52 @@ function renderCellFills(): number[] {
 }
 
 const asFill = (color: string): number => processColor(color) as number;
+
+/**
+ * The grid's own geometry, read off the library's internal scroll view.
+ *
+ * `WeeklyHeatMap` paints into a non-scrolling horizontal `ScrollView`: the
+ * viewport is capped at `maxWidth`, the cells live in an `Svg` inside the
+ * content container, and the content container carries the left inset. Anything
+ * wider than the viewport is silently clipped, so these three numbers are what
+ * decide whether the last week is whole.
+ */
+function gridGeometry(): { viewport: number; leftInset: number; content: number } {
+  const tree = render(<PracticeHeatmap />).toJSON() as RenderedNode | null;
+
+  const scroll = onlyNode(tree, 'RCTScrollView');
+  const svg = onlyNode(tree, 'RNSVGSvgView');
+  const viewport = (scroll.props?.style as { maxWidth: number }).maxWidth;
+  const leftInset = StyleSheet.flatten(scroll.props?.contentContainerStyle as StyleProp<ViewStyle>)
+    .paddingLeft as number;
+
+  return { viewport, leftInset, content: leftInset + (svg.props?.width as number) };
+}
+
+/** The single node of `type` in the tree; the grid renders exactly one of each. */
+function onlyNode(tree: RenderedNode | null, type: string): RenderedNode {
+  const [node, ...rest] = findByType(tree, type);
+  if (!node || rest.length)
+    throw new Error(`expected exactly one <${type}>, got ${rest.length + 1}`);
+  return node;
+}
+
+function findByType(
+  node: RenderedNode | RenderedNode[] | null,
+  type: string,
+  acc: RenderedNode[] = [],
+): RenderedNode[] {
+  if (node === null) return acc;
+  if (Array.isArray(node)) {
+    node.forEach((n) => findByType(n, type, acc));
+    return acc;
+  }
+  if (node.type === type) acc.push(node);
+  (node.children ?? [])
+    .filter((child): child is RenderedNode => typeof child === 'object' && child !== null)
+    .forEach((child) => findByType(child, type, acc));
+  return acc;
+}
 
 describe('weeksThatFit', () => {
   it('fits more weeks as the width grows', () => {
@@ -99,5 +150,23 @@ describe('PracticeHeatmap', () => {
 
     expect(fills.length).toBeGreaterThan(0);
     expect(new Set(fills)).toEqual(new Set([asFill(HeatmapColors.empty)]));
+  });
+
+  /**
+   * The grid is not scrollable, so anything the library lays out beyond its own
+   * viewport is lost rather than reachable. Its default 8px content inset sits
+   * outside that viewport cap, which clipped the trailing week and pushed the
+   * grid out of line with the heading above it.
+   */
+  describe('layout', () => {
+    it('fits the whole grid inside the viewport, so no week is clipped', () => {
+      const { content, viewport } = gridGeometry();
+
+      expect(content).toBeLessThanOrEqual(viewport);
+    });
+
+    it('starts the grid flush left, in line with the rest of the section', () => {
+      expect(gridGeometry().leftInset).toBe(0);
+    });
   });
 });
