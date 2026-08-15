@@ -16,10 +16,24 @@ Home surface listing the user's **pieces** and entry points to **import** and **
   - **List** of pieces: title (from MusicXML metadata), optional composer.
   - **Empty state**: simple label when no pieces and not loading.
   - **Skeleton row** appears below the list while an import is in progress.
-- **Practice** section at the **very bottom**: a day-based heatmap (GitHub-contributions style) of
-  practice time, one cell per day, coloured on the app's seagrass ramp from "no practice" to the
-  darkest accent. Weeks run Monday-first; the visible window is as many trailing weeks as fit the
-  screen. See "Practice-time tracking" below.
+- **Stats** section at the **very bottom**, in this order:
+  - **Two streak figures** side by side under the heading — **current streak** and **longest
+    streak**, in days. The numbers are large and in the seagrass accent; their labels sit
+    underneath, small and black. A day counts towards a streak once it holds any practice at all.
+    The current streak runs through yesterday when today has not been started yet, so an unplayed
+    morning does not read as a broken streak.
+  - A day-based **heatmap** (GitHub-contributions style) of practice time, one cell per day,
+    coloured on the app's seagrass ramp from "no practice" to the darkest accent. Weeks run
+    Monday-first; the visible window is as many trailing weeks as fit the screen. See
+    "Practice-time tracking" below.
+  - **One day is always selected**, and a caption on the **right of the legend row**, level with
+    the Less→More scale, names it and gives its total — "Today, 15 Aug · 42 min", or a weekday and
+    date for any other day. Days with nothing recorded read "no practice"; days holding only
+    seconds read "under a minute", since their cell is drawn empty.
+  - **Tapping a cell selects that day.** The selected cell is marked with a dark ring drawn in the
+    gap around it, so the day keeps its own intensity colour.
+  - The selection is **not durable**: it returns to the present day whenever the dashboard is
+    reopened, the app is resumed, or the date rolls over at midnight.
 
 ## Row interactions
 
@@ -67,8 +81,14 @@ Home surface listing the user's **pieces** and entry points to **import** and **
 - [x] Title, composer, and target speed are required; missing fields are marked and Save/Import is disabled until all are valid.
 - [x] Importing a file missing any required field opens a non-dismissable "Input needed" modal that must be completed before the piece is usable.
 - [x] Privacy note and brand header visible at all times on the dashboard.
-- [x] Practice heatmap sits at the very bottom, populated from tracked practice time and coloured
-      from the app palette.
+- [x] Practice heatmap sits at the very bottom of the Stats section, populated from tracked
+      practice time and coloured from the app palette.
+- [x] Current and longest streaks head the Stats section; an unplayed today does not break the
+      current streak, and both read 0 before anything is practised.
+- [x] The heatmap renders every week in full — none clipped at the edge — and the grid, heading,
+      and Less→More legend all share the section's left edge.
+- [x] Tapping a heatmap day names it and its practice total in the caption, and rings that cell;
+      today is selected on arrival and the selection returns to today on re-entry or resume.
 - [x] Play view, routines, and warm-ups all accumulate into the same daily total; pausing stops the
       clock; navigating away mid-play keeps the partial time; concurrent stores do not double-count.
 - [x] Daily practice totals survive an app restart.

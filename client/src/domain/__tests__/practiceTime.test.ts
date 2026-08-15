@@ -2,6 +2,8 @@ import {
   applyPracticeDeltas,
   mergePracticeTotals,
   PracticeClock,
+  practiceDayDuration,
+  practiceStreaks,
   practiceDayKey,
   splitIntervalByDay,
 } from '../practiceTime';
@@ -26,6 +28,77 @@ describe('practiceDayKey', () => {
   it('formats the local calendar day, zero-padded', () => {
     expect(practiceDayKey(at(2026, 3, 7, 23, 59, 59))).toBe('2026-03-07');
     expect(practiceDayKey(at(2026, 12, 31, 0, 0, 0))).toBe('2026-12-31');
+  });
+});
+
+describe('practiceDayDuration', () => {
+  it('separates an untouched day from one with only a few seconds on it', () => {
+    // A sub-minute day rounds to 0 minutes and is left out of the grid, so its
+    // cell looks empty — the caption has to distinguish the two cases.
+    expect(practiceDayDuration(0)).toEqual({ kind: 'none' });
+    expect(practiceDayDuration(20)).toEqual({ kind: 'underMinute' });
+  });
+
+  it('rounds minutes the same way the grid rounds cell counts', () => {
+    expect(practiceDayDuration(29)).toEqual({ kind: 'underMinute' });
+    expect(practiceDayDuration(31)).toEqual({ kind: 'minutes', minutes: 1 });
+    expect(practiceDayDuration(42 * 60)).toEqual({ kind: 'minutes', minutes: 42 });
+  });
+
+  it('splits an hour or more into hours and minutes', () => {
+    expect(practiceDayDuration(60 * 60)).toEqual({ kind: 'hours', hours: 1, minutes: 0 });
+    expect(practiceDayDuration(70 * 60)).toEqual({ kind: 'hours', hours: 1, minutes: 10 });
+    expect(practiceDayDuration(125 * 60)).toEqual({ kind: 'hours', hours: 2, minutes: 5 });
+  });
+
+  it('treats a negative total as no practice rather than throwing', () => {
+    expect(practiceDayDuration(-5)).toEqual({ kind: 'none' });
+  });
+});
+
+describe('practiceStreaks', () => {
+  const MIN = 60;
+
+  it('counts a run that reaches today', () => {
+    const days = { '2026-08-13': MIN, '2026-08-14': MIN, '2026-08-15': MIN };
+    expect(practiceStreaks(days, '2026-08-15')).toEqual({ current: 3, longest: 3 });
+  });
+
+  it('keeps the streak alive on a day that has not been started yet', () => {
+    // Today holds nothing at 9am; the run through yesterday is still current.
+    const days = { '2026-08-13': MIN, '2026-08-14': MIN };
+    expect(practiceStreaks(days, '2026-08-15').current).toBe(2);
+  });
+
+  it('breaks the streak once a whole day has been missed', () => {
+    const days = { '2026-08-12': MIN, '2026-08-13': MIN };
+    expect(practiceStreaks(days, '2026-08-15')).toEqual({ current: 0, longest: 2 });
+  });
+
+  it('reports the longest run even when it is long over', () => {
+    const days = {
+      '2026-07-01': MIN,
+      '2026-07-02': MIN,
+      '2026-07-03': MIN,
+      '2026-07-04': MIN,
+      '2026-08-15': MIN,
+    };
+    expect(practiceStreaks(days, '2026-08-15')).toEqual({ current: 1, longest: 4 });
+  });
+
+  it('counts a day holding only seconds — sitting down is what matters', () => {
+    // The same day is left out of the heatmap for rounding to zero minutes.
+    expect(practiceStreaks({ '2026-08-15': 20 }, '2026-08-15').current).toBe(1);
+  });
+
+  it('ignores days recorded with no time on them', () => {
+    expect(practiceStreaks({ '2026-08-15': 0 }, '2026-08-15')).toEqual({ current: 0, longest: 0 });
+    expect(practiceStreaks({}, '2026-08-15')).toEqual({ current: 0, longest: 0 });
+  });
+
+  it('counts across a month boundary', () => {
+    const days = { '2026-07-31': MIN, '2026-08-01': MIN, '2026-08-02': MIN };
+    expect(practiceStreaks(days, '2026-08-02')).toEqual({ current: 3, longest: 3 });
   });
 });
 
