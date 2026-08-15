@@ -1,0 +1,16 @@
+{
+  "name": "openrehearse-repo",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Repo-root tooling only. The app lives in client/ — see README.md.",
+  "scripts": {
+    "prepare": "husky",
+    "sync-version": "node scripts/sync-app-version.mjs",
+    "sync-version:check": "node scripts/sync-app-version.mjs --check"
+  },
+  "devDependencies": {
+    "@commitlint/cli": "^21.2.2",
+    "@commitlint/config-conventional": "^21.2.2",
+    "husky": "^9.1.7"
+  }
+}
