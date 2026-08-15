@@ -126,6 +126,62 @@ Layout regressions here are invisible to colour-based tests, so the geometry is 
 in `components/__tests__/PracticeHeatmap.test.tsx`: content width must fit inside the scroll
 view's `maxWidth`, and the left inset must be 0.
 
+## There is no selection API — marking a day means reproducing the library's layout maths
+
+**LANDMINE:** `cellColor` is keyed by **count**, not by day, and there is no per-cell stroke, no
+selected state, and no highlight prop. Marking one day is therefore an ordinary `View` positioned
+over the grid, which means duplicating four pieces of the library's internal layout in
+`PracticeHeatmap.tsx`:
+
+```
+x = differenceInCalendarWeeks(date, start, { weekStartsOn }) * (cellSize + cellGap)
+y = date.getDay() * (cellSize + cellGap)     // raw getDay(), Sunday = 0
+headerHeight = headerTextFontSize + headerBottomSpace
+```
+
+Two of those bite:
+
+- **Rows ignore `weekStartsOn`.** Columns are grouped Monday-first as asked, but rows are laid out
+  by raw `getDay()`, so Sunday is the **top** row of a Monday-started week. Row order and column
+  grouping disagree by design.
+- **The ring's origin depends on the grid's origin.** It is positioned against the `items-start`
+  wrapper, which only shares an origin with the grid because that wrapper hugs the grid and the
+  8px inset is overridden away (see the section above). Both fixes are load-bearing for the ring.
+
+`headerBottomSpace` is now passed explicitly rather than left to the library's default of 4, so
+the constant the ring adds is a value we set instead of one we inherit.
+
+The dependency is pinned to an **exact** version (`"1.0.0"`, no caret) because of all this: a
+minor bump could move the grid without any API changing. Two tests guard it —
+`cellOffset` is checked against the library's own hit-testing by firing a press at the coordinate
+it computes and asserting the caption names that day, and the header's `lineHeight`/`marginBottom`
+are asserted to be the numbers `HEADER_HEIGHT` is built from.
+
+## Taps are hit-tested by coordinate, and `onCellPress` does nothing without `pressable`
+
+**LANDMINE:** `onCellPress` is silently inert unless `pressable` is also passed — the handler is
+wired but `useController` gates it. Once enabled, the library hit-tests on a **single `Pressable`
+wrapping the whole SVG**, scanning cells for `x >= cell.x && x <= cell.x + cellSize`. Consequences:
+
+- A tap landing in the gap between cells matches nothing and fires **no** callback — there is no
+  nearest-cell fallback and no `hitSlop`. Cells are 14pt rather than 12 to keep this tolerable;
+  it is still under the ~44pt touch-target guideline, which the grid's density rules out.
+- The handler's `count` is the **rounded minutes** already fed to `data`, and `0` for any day the
+  grid left out. The caption reads `dailySeconds[day]` from the store instead, which is why a day
+  holding 20 seconds can say "under a minute" while its cell is drawn empty.
+- Because the press carries the point, a test can drive the real round trip: fire a press with a
+  synthesized `nativeEvent.locationX/locationY` on a host node inside the `Pressable`. Note that
+  `UNSAFE_getByType(Pressable)` does **not** match it — RN's `Pressable` is memo-wrapped — so
+  press a child (the SVG) and let RNTL walk up to the handler.
+
+## `useFocusEffect` pulls a navigation context into the component tree
+
+The heatmap resets its selected day on focus, so it imports `useFocusEffect` from `expo-router`.
+That makes the component unrenderable without a navigation tree: its test stubs `expo-router`
+rather than standing one up. Without the stub the failure is
+`Couldn't find a navigation object. Is your component inside NavigationContainer?`, and before
+that a transform error from `standard-navigation`, which expo-router pulls in as ESM.
+
 ## The package is ESM-only — Jest needs it in `transformIgnorePatterns`
 
 **LANDMINE:** `@symbiot.dev/react-native-heatmap` ships only `index.esm.js` (`"type": "module"`).

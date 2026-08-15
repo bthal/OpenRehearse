@@ -70,6 +70,23 @@ export function weeksThatFit(availableWidth: number): number {
 }
 
 /**
+ * The span of days the grid covers on a screen `windowWidth` wide: as many
+ * trailing weeks as fit, starting on a week boundary and ending today.
+ */
+export function heatmapWindow(
+  todayKey: string,
+  windowWidth: number,
+): { startDate: Date; endDate: Date } {
+  const weeks = weeksThatFit(Math.min(windowWidth, MAX_CONTENT_WIDTH) - CONTENT_PADDING);
+  // Explicit local midnight — a bare `YYYY-MM-DD` would parse as UTC.
+  const today = new Date(`${todayKey}T00:00:00`);
+  return {
+    startDate: startOfWeek(subDays(today, (weeks - 1) * 7), { weekStartsOn: WEEK_STARTS_ON }),
+    endDate: today,
+  };
+}
+
+/**
  * Where the library draws `day`'s cell, relative to the grid's top-left corner
  * (the header excluded — callers add `HEADER_HEIGHT`).
  *
@@ -150,7 +167,6 @@ export function PracticeHeatmap() {
   const { width } = useWindowDimensions();
   const dailySeconds = usePracticeStore((s) => s.dailySeconds);
 
-  const weeks = weeksThatFit(Math.min(width, MAX_CONTENT_WIDTH) - CONTENT_PADDING);
   const todayKey = useTodayKey();
 
   // A pick is remembered with the day it was made on, which lets the midnight
@@ -176,15 +192,7 @@ export function PracticeHeatmap() {
     return () => subscription.remove();
   }, [selectToday]);
 
-  const { startDate, endDate } = useMemo(() => {
-    // Explicit local midnight — a bare `YYYY-MM-DD` would parse as UTC.
-    const today = new Date(`${todayKey}T00:00:00`);
-    const firstDay = subDays(today, (weeks - 1) * 7);
-    return {
-      startDate: startOfWeek(firstDay, { weekStartsOn: WEEK_STARTS_ON }),
-      endDate: today,
-    };
-  }, [weeks, todayKey]);
+  const { startDate, endDate } = useMemo(() => heatmapWindow(todayKey, width), [todayKey, width]);
 
   // Cell counts are whole minutes: minutes read naturally in the legend and keep
   // the level thresholds meaningful. Keys carry an explicit local midnight —

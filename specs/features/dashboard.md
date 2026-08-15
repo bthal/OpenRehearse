@@ -20,6 +20,14 @@ Home surface listing the user's **pieces** and entry points to **import** and **
   practice time, one cell per day, coloured on the app's seagrass ramp from "no practice" to the
   darkest accent. Weeks run Monday-first; the visible window is as many trailing weeks as fit the
   screen. See "Practice-time tracking" below.
+  - **One day is always selected**, and a caption between the heading and the grid names it and
+    gives its total — "Today, 15 Aug · 42 min", or a weekday and year for any other day. Days with
+    nothing recorded read "no practice"; days holding only seconds read "under a minute", since
+    their cell is drawn empty.
+  - **Tapping a cell selects that day.** The selected cell is marked with a dark ring drawn in the
+    gap around it, so the day keeps its own intensity colour.
+  - The selection is **not durable**: it returns to the present day whenever the dashboard is
+    reopened, the app is resumed, or the date rolls over at midnight.
 
 ## Row interactions
 
@@ -71,6 +79,8 @@ Home surface listing the user's **pieces** and entry points to **import** and **
       from the app palette.
 - [x] The heatmap renders every week in full — none clipped at the edge — and the grid, heading,
       and Less→More legend all share the section's left edge.
+- [x] Tapping a heatmap day names it and its practice total in the caption, and rings that cell;
+      today is selected on arrival and the selection returns to today on re-entry or resume.
 - [x] Play view, routines, and warm-ups all accumulate into the same daily total; pausing stops the
       clock; navigating away mid-play keeps the partial time; concurrent stores do not double-count.
 - [x] Daily practice totals survive an app restart.
