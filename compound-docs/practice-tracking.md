@@ -148,8 +148,18 @@ Two of those bite:
   wrapper, which only shares an origin with the grid because that wrapper hugs the grid and the
   8px inset is overridden away (see the section above). Both fixes are load-bearing for the ring.
 
-`headerBottomSpace` is now passed explicitly rather than left to the library's default of 4, so
-the constant the ring adds is a value we set instead of one we inherit.
+**LANDMINE within the landmine:** the header's height is **not** `headerTextFontSize +
+headerBottomSpace`, even though that is what the library composes it from. Android adds font
+padding around a `Text`'s line box, so the rendered header is a few pixels taller than its line
+height and the ring sat visibly high — the kind of bug that never shows up in a test, because
+react-test-renderer computes no layout at all.
+
+**Fix:** measure it. `onLayout` on the wrapper gives the wrapper's height, and the grid's own
+height is known exactly (`7 * (cellSize + cellGap) - cellGap`, since the library always lays out a
+full Sunday–Saturday week), so the difference is whatever the labels really occupy. The
+`headerTextFontSize + headerBottomSpace` sum survives only as the first-frame estimate.
+`headerBottomSpace` is passed explicitly rather than left to the library's default of 4, so even
+that estimate is built from a value we set.
 
 The dependency is pinned to an **exact** version (`"1.0.0"`, no caret) because of all this: a
 minor bump could move the grid without any API changing. Two tests guard it —
@@ -164,8 +174,10 @@ wired but `useController` gates it. Once enabled, the library hit-tests on a **s
 wrapping the whole SVG**, scanning cells for `x >= cell.x && x <= cell.x + cellSize`. Consequences:
 
 - A tap landing in the gap between cells matches nothing and fires **no** callback — there is no
-  nearest-cell fallback and no `hitSlop`. Cells are 14pt rather than 12 to keep this tolerable;
-  it is still under the ~44pt touch-target guideline, which the grid's density rules out.
+  nearest-cell fallback and no `hitSlop`. Cells started at 12pt, went to 14pt, and are now **21pt**
+  because 14 was still fiddly in the hand; even 21 is under the ~44pt touch-target guideline, which
+  a year-at-a-glance grid rules out. Each bump costs history: 21pt fits roughly 14 weeks on a
+  390pt-wide phone, against 22 weeks at 12pt.
 - The handler's `count` is the **rounded minutes** already fed to `data`, and `0` for any day the
   grid left out. The caption reads `dailySeconds[day]` from the store instead, which is why a day
   holding 20 seconds can say "under a minute" while its cell is drawn empty.

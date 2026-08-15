@@ -21,8 +21,9 @@ import {
  * what focusing a freshly rendered screen does anyway.
  */
 jest.mock('expo-router', () => ({
-  // eslint-disable-next-line @typescript-eslint/no-require-imports -- jest.mock
-  // factories are hoisted above the imports, so React has to be pulled in here.
+  // jest.mock factories are hoisted above the imports, so React cannot be
+  // referenced from module scope and has to be pulled in right here.
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
   useFocusEffect: (callback: () => void) => require('react').useEffect(callback, [callback]),
 }));
 
@@ -149,19 +150,19 @@ describe('practiceDayCaption', () => {
     expect(practiceDayCaption(t, TODAY, 42 * 60, TODAY)).toBe('Today, 15 Aug · 42 min');
   });
 
-  it('spells out weekday and year for any other day', () => {
-    expect(practiceDayCaption(t, EARLIER, 42 * 60, TODAY)).toBe('Sat, 8 Aug 2026 · 42 min');
+  it('spells out the weekday for any other day', () => {
+    expect(practiceDayCaption(t, EARLIER, 42 * 60, TODAY)).toBe('Sat, 8 Aug · 42 min');
   });
 
   it('tells an untouched day apart from one with seconds on it', () => {
     // Both render an empty-looking cell, so only the caption can separate them.
-    expect(practiceDayCaption(t, EARLIER, 0, TODAY)).toBe('Sat, 8 Aug 2026 · no practice');
-    expect(practiceDayCaption(t, EARLIER, 20, TODAY)).toBe('Sat, 8 Aug 2026 · under a minute');
+    expect(practiceDayCaption(t, EARLIER, 0, TODAY)).toBe('Sat, 8 Aug · no practice');
+    expect(practiceDayCaption(t, EARLIER, 20, TODAY)).toBe('Sat, 8 Aug · under a minute');
   });
 
   it('drops the empty minutes from an exact hour', () => {
-    expect(practiceDayCaption(t, EARLIER, 90 * 60, TODAY)).toBe('Sat, 8 Aug 2026 · 1 h 30 min');
-    expect(practiceDayCaption(t, EARLIER, 120 * 60, TODAY)).toBe('Sat, 8 Aug 2026 · 2 h');
+    expect(practiceDayCaption(t, EARLIER, 90 * 60, TODAY)).toBe('Sat, 8 Aug · 1 h 30 min');
+    expect(practiceDayCaption(t, EARLIER, 120 * 60, TODAY)).toBe('Sat, 8 Aug · 2 h');
   });
 });
 
@@ -200,7 +201,7 @@ describe('PracticeHeatmap', () => {
 
     render(<PracticeHeatmap />);
 
-    expect(screen.getByText('Practice')).toBeTruthy();
+    expect(screen.getByText('Stats')).toBeTruthy();
     expect(screen.getByText('Less')).toBeTruthy();
     expect(screen.getByText('More')).toBeTruthy();
   });
@@ -244,10 +245,10 @@ describe('PracticeHeatmap', () => {
       expect(gridGeometry().leftInset).toBe(0);
     });
 
-    it('keeps the month header the height the selection ring assumes', () => {
-      // The ring's vertical origin is the header's text height plus its bottom
-      // space. Nothing else pins those two numbers together, so a library
-      // change to how the header stacks would silently drop the ring a row.
+    it('keeps the month header the height the ring first guesses at', () => {
+      // The ring's vertical origin is measured on layout, but until the first
+      // pass it uses the header's line height plus its bottom space. Keeping
+      // that guess honest is what stops the ring flinching into place.
       const tree = render(<PracticeHeatmap />).toJSON() as RenderedNode | null;
       const header = findByType(tree, 'View').find(
         (node) =>
@@ -263,6 +264,38 @@ describe('PracticeHeatmap', () => {
 
       expect(lineHeight).toBe(10);
       expect(marginBottom).toBe(4);
+    });
+  });
+
+  describe('streaks', () => {
+    it('leads with the current and longest runs', () => {
+      const days = {
+        // A three-day run ending today, and a five-day run back in July.
+        '2026-07-01': 60,
+        '2026-07-02': 60,
+        '2026-07-03': 60,
+        '2026-07-04': 60,
+        '2026-07-05': 60,
+        [practiceDayKey(subDays(new Date(), 2).getTime())]: 60,
+        [practiceDayKey(subDays(new Date(), 1).getTime())]: 60,
+        [todayKey()]: 60,
+      };
+      usePracticeStore.setState({ dailySeconds: days });
+
+      render(<PracticeHeatmap />);
+
+      expect(screen.getByText('Current streak')).toBeTruthy();
+      expect(screen.getByText('Longest streak')).toBeTruthy();
+      expect(screen.getByText('3')).toBeTruthy();
+      expect(screen.getByText('5')).toBeTruthy();
+    });
+
+    it('shows zeroes rather than blanks before anything is practised', () => {
+      usePracticeStore.setState({ dailySeconds: {} });
+
+      render(<PracticeHeatmap />);
+
+      expect(screen.getAllByText('0')).toHaveLength(2);
     });
   });
 

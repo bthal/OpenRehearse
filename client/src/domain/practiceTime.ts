@@ -70,6 +70,61 @@ export function practiceDayKey(ms: number): string {
   return `${d.getFullYear()}-${month}-${day}`;
 }
 
+/** Consecutive-day practice runs, in days. */
+export interface PracticeStreaks {
+  /** The run ending today, or ending yesterday if today has nothing on it yet. */
+  current: number;
+  /** The longest run ever recorded. */
+  longest: number;
+}
+
+/** The same calendar day shifted by `delta` days, staying in local time. */
+function shiftDay(day: string, delta: number): string {
+  const date = new Date(`${day}T00:00:00`);
+  // Going through the date object keeps month ends and DST-shifted days right.
+  date.setDate(date.getDate() + delta);
+  return practiceDayKey(date.getTime());
+}
+
+/**
+ * Current and longest runs of consecutive days with any practice on them.
+ *
+ * A day counts once it holds any time at all, including the few seconds that
+ * round to zero minutes and leave the heatmap cell empty — the streak asks
+ * whether the user sat down, not whether they stayed.
+ *
+ * Today not being started yet must not read as a broken streak, so a run that
+ * reaches yesterday is still the current one; it only breaks once yesterday is
+ * behind us with nothing on it.
+ */
+export function practiceStreaks(
+  dailySeconds: Readonly<Record<string, number>>,
+  todayKey: string,
+): PracticeStreaks {
+  const practised = new Set(
+    Object.entries(dailySeconds)
+      .filter(([, seconds]) => seconds > 0)
+      .map(([day]) => day),
+  );
+  if (practised.size === 0) return { current: 0, longest: 0 };
+
+  let longest = 0;
+  for (const day of practised) {
+    // Count each run once, from its first day: any day whose predecessor also
+    // has practice is in the middle of a run someone else already counted.
+    if (practised.has(shiftDay(day, -1))) continue;
+    let run = 0;
+    for (let cursor = day; practised.has(cursor); cursor = shiftDay(cursor, 1)) run++;
+    longest = Math.max(longest, run);
+  }
+
+  let current = 0;
+  const from = practised.has(todayKey) ? todayKey : shiftDay(todayKey, -1);
+  for (let cursor = from; practised.has(cursor); cursor = shiftDay(cursor, -1)) current++;
+
+  return { current, longest };
+}
+
 /** Local midnight that starts the day containing `ms`. */
 function startOfLocalDay(ms: number): number {
   const d = new Date(ms);

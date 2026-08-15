@@ -9,14 +9,15 @@ import {
 } from 'date-fns';
 import { useFocusEffect } from 'expo-router';
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { AppState, Text, useWindowDimensions, View } from 'react-native';
+import { AppState, type LayoutChangeEvent, Text, useWindowDimensions, View } from 'react-native';
 import { useTranslation } from 'react-i18next';
 
-import { practiceDayDuration, practiceDayKey } from '@domain/practiceTime';
+import { practiceDayDuration, practiceDayKey, practiceStreaks } from '@domain/practiceTime';
 import { usePracticeStore } from '@state/practiceStore';
 import { Colors, HeatmapColors } from '@theme/colors';
 
 /**
+ * The dashboard's Stats section: two streak figures over a
  * GitHub-contributions-style grid of daily practice time, one cell per day.
  *
  * The visible window is sized to the screen so the grid never needs horizontal
@@ -24,26 +25,32 @@ import { Colors, HeatmapColors } from '@theme/colors';
  * weeks as the available width allows and start on a week boundary.
  *
  * One day is always selected — today unless the user taps another — and its date
- * and total are spelled out in the caption above the grid, since a colour band
- * alone can't say which day a cell is or how long it was.
+ * and total are spelled out beside the legend, since a colour band alone can't
+ * say which day a cell is or how long it was.
  */
 
 /** Monday-first weeks, matching how practice weeks are usually planned. */
 const WEEK_STARTS_ON = 1;
-const CELL_SIZE = 14;
+/** Big enough to hit: the library hit-tests by coordinate, with no slop. */
+const CELL_SIZE = 21;
 const CELL_GAP = 3;
 const CELL_RADIUS = 3;
 const ADJUSTED_CELL = CELL_SIZE + CELL_GAP;
+/** Days per column — the library always lays out a full Sunday–Saturday week. */
+const DAYS_PER_WEEK = 7;
 const HEADER_TEXT_FONT_SIZE = 10;
 const HEADER_BOTTOM_SPACE = 4;
 /**
- * The library stacks the month labels above the grid, so every cell sits this
- * far down from the top of its container. Passed explicitly rather than left to
- * the library's default so the selection ring can rely on the number.
+ * Starting guess at how far the month labels push the grid down, used until the
+ * first layout pass measures the real value. It is only a guess because the
+ * label's line box is not its rendered height — Android adds font padding — so
+ * the ring corrects itself once `onLayout` reports the truth.
  */
-const HEADER_HEIGHT = HEADER_TEXT_FONT_SIZE + HEADER_BOTTOM_SPACE;
+const ESTIMATED_HEADER_HEIGHT = HEADER_TEXT_FONT_SIZE + HEADER_BOTTOM_SPACE;
 /** Thickness of the ring drawn around the selected day. */
 const RING_WIDTH = 2;
+/** Legend swatches are their own size: cells are now too big to mirror. */
+const LEGEND_SWATCH = 12;
 /** Dashboard content padding (`px-6`) plus the max content width it centres in. */
 const CONTENT_PADDING = 24 * 2;
 const MAX_CONTENT_WIDTH = 720;
@@ -88,7 +95,7 @@ export function heatmapWindow(
 
 /**
  * Where the library draws `day`'s cell, relative to the grid's top-left corner
- * (the header excluded — callers add `HEADER_HEIGHT`).
+ * — the month labels above it excluded, which callers add separately.
  *
  * This mirrors the library's own layout maths, which it does not expose: there
  * is no selected-cell prop and no per-cell stroke, so the only way to mark a day
@@ -108,15 +115,17 @@ export function cellOffset(day: string, startDate: Date): { x: number; y: number
 /** Minimal shape of `t` for helpers that live outside the component. */
 type TFn = (key: string, opts?: Record<string, unknown>) => string;
 
-/** The caption under the heading: which day is selected, and how long it was. */
+/** The caption beside the legend: which day is selected, and how long it was. */
 export function practiceDayCaption(t: TFn, day: string, seconds: number, todayKey: string): string {
   const date = new Date(`${day}T00:00:00`);
   // Today is the default selection, so naming it beats making the reader parse
-  // a date to work out they are looking at the current day.
+  // a date to work out they are looking at the current day. No year on the
+  // others: the grid never spans more than one, and the caption shares a row
+  // with the legend, where a longer date would wrap.
   const label =
     day === todayKey
       ? t('dashboard.practiceDayToday', { date: format(date, 'd MMM') })
-      : format(date, 'EEE, d MMM yyyy');
+      : format(date, 'EEE, d MMM');
 
   const duration = practiceDayDuration(seconds);
   switch (duration.kind) {
@@ -212,21 +221,50 @@ export function PracticeHeatmap() {
   const lastColumnX =
     differenceInCalendarWeeks(endDate, startDate, { weekStartsOn: WEEK_STARTS_ON }) * ADJUSTED_CELL;
 
-  // Where to draw the ring, in the coordinates of the `items-start` wrapper —
-  // which shares its origin with the grid, so a cell's offset is also the ring's.
+  /**
+   * Where the grid's top-left corner sits inside the wrapper.
+   *
+   * Measured rather than assumed. The horizontal origin is 0 by construction
+   * (the wrapper hugs the grid and the library's indent is overridden away),
+   * but the vertical one is whatever the month labels actually occupy, which
+   * differs by platform: Android's font padding makes the header taller than
+   * its line height, which would leave the ring a couple of pixels high.
+   */
+  const [headerHeight, setHeaderHeight] = useState(ESTIMATED_HEADER_HEIGHT);
+  const measureGridOrigin = useCallback(({ nativeEvent }: LayoutChangeEvent) => {
+    // Everything below the labels is the grid itself, and its height is known.
+    const gridHeight = DAYS_PER_WEEK * ADJUSTED_CELL - CELL_GAP;
+    setHeaderHeight(Math.max(0, nativeEvent.layout.height - gridHeight));
+  }, []);
+
   const ring = useMemo(() => {
     const { x, y } = cellOffset(selectedDay, startDate);
     // A selection can only fall outside the window if the grid shrank under it.
     if (x < 0 || x > lastColumnX) return null;
-    return { left: x - RING_WIDTH, top: HEADER_HEIGHT + y - RING_WIDTH };
-  }, [selectedDay, startDate, lastColumnX]);
+    return { left: x - RING_WIDTH, top: headerHeight + y - RING_WIDTH };
+  }, [selectedDay, startDate, lastColumnX, headerHeight]);
+
+  const streaks = useMemo(() => practiceStreaks(dailySeconds, todayKey), [dailySeconds, todayKey]);
 
   return (
     <View className="mt-8">
-      <Text className="text-[22px] font-bold text-ash-grey-950">{t('dashboard.practice')}</Text>
-      <Text className="mb-3 mt-1.5 text-xs font-medium text-ash-grey-950">
-        {practiceDayCaption(t, selectedDay, dailySeconds[selectedDay] ?? 0, todayKey)}
-      </Text>
+      <Text className="text-[22px] font-bold text-ash-grey-950">{t('dashboard.stats')}</Text>
+
+      {/* Headline numbers: the streaks are the reason to come back to this section. */}
+      <View className="mb-5 mt-3 flex-row gap-10">
+        <View>
+          <Text className="text-[34px] font-bold leading-[38px] text-seagrass-600">
+            {streaks.current}
+          </Text>
+          <Text className="text-xs text-ash-grey-950">{t('dashboard.currentStreak')}</Text>
+        </View>
+        <View>
+          <Text className="text-[34px] font-bold leading-[38px] text-seagrass-600">
+            {streaks.longest}
+          </Text>
+          <Text className="text-xs text-ash-grey-950">{t('dashboard.longestStreak')}</Text>
+        </View>
+      </View>
 
       {/*
         `items-start` stops the library's own container — a centring flex row —
@@ -236,7 +274,7 @@ export function PracticeHeatmap() {
         grid's origin, which is what lets the selection ring be positioned
         against it.
       */}
-      <View className="items-start">
+      <View className="items-start" onLayout={measureGridOrigin}>
         <WeeklyHeatMap
           data={data}
           startDate={startDate}
@@ -289,21 +327,32 @@ export function PracticeHeatmap() {
         )}
       </View>
 
-      {/* Legend: same ramp, least → most practice. */}
-      <View className="mt-2 flex-row items-center gap-1.5">
-        <Text className="text-[10px] text-ash-grey-400">{t('dashboard.practiceLess')}</Text>
-        <View
-          className="rounded-[3px]"
-          style={{ width: CELL_SIZE, height: CELL_SIZE, backgroundColor: HeatmapColors.empty }}
-        />
-        {HeatmapColors.ramp.map((color) => (
+      {/* Legend on the left, the selected day's total on the right. */}
+      <View className="mt-2 flex-row items-center">
+        <View className="flex-row items-center gap-1.5">
+          <Text className="text-[10px] text-ash-grey-400">{t('dashboard.practiceLess')}</Text>
           <View
-            key={color}
             className="rounded-[3px]"
-            style={{ width: CELL_SIZE, height: CELL_SIZE, backgroundColor: color }}
+            style={{
+              width: LEGEND_SWATCH,
+              height: LEGEND_SWATCH,
+              backgroundColor: HeatmapColors.empty,
+            }}
           />
-        ))}
-        <Text className="text-[10px] text-ash-grey-400">{t('dashboard.practiceMore')}</Text>
+          {HeatmapColors.ramp.map((color) => (
+            <View
+              key={color}
+              className="rounded-[3px]"
+              style={{ width: LEGEND_SWATCH, height: LEGEND_SWATCH, backgroundColor: color }}
+            />
+          ))}
+          <Text className="text-[10px] text-ash-grey-400">{t('dashboard.practiceMore')}</Text>
+        </View>
+
+        {/* Takes the rest of the row so a long date can wrap rather than clip. */}
+        <Text className="flex-1 text-right text-sm font-bold text-ash-grey-950">
+          {practiceDayCaption(t, selectedDay, dailySeconds[selectedDay] ?? 0, todayKey)}
+        </Text>
       </View>
     </View>
   );
