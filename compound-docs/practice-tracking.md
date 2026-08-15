@@ -174,10 +174,10 @@ wired but `useController` gates it. Once enabled, the library hit-tests on a **s
 wrapping the whole SVG**, scanning cells for `x >= cell.x && x <= cell.x + cellSize`. Consequences:
 
 - A tap landing in the gap between cells matches nothing and fires **no** callback — there is no
-  nearest-cell fallback and no `hitSlop`. Cells started at 12pt, went to 14pt, and are now **21pt**
-  because 14 was still fiddly in the hand; even 21 is under the ~44pt touch-target guideline, which
-  a year-at-a-glance grid rules out. Each bump costs history: 21pt fits roughly 14 weeks on a
-  390pt-wide phone, against 22 weeks at 12pt.
+  nearest-cell fallback and no `hitSlop`. Cells started at 12pt, went to 14pt, briefly to 21pt, and
+  settled at **16pt** — 14 was still fiddly in the hand, 21 ate too much history. Even 16 is well
+  under the ~44pt touch-target guideline, which a season-at-a-glance grid rules out. Every bump
+  costs weeks: 16pt fits roughly 18 on a 390pt-wide phone, against 23 at 12pt.
 - The handler's `count` is the **rounded minutes** already fed to `data`, and `0` for any day the
   grid left out. The caption reads `dailySeconds[day]` from the store instead, which is why a day
   holding 20 seconds can say "under a minute" while its cell is drawn empty.

@@ -32,7 +32,7 @@ import { Colors, HeatmapColors } from '@theme/colors';
 /** Monday-first weeks, matching how practice weeks are usually planned. */
 const WEEK_STARTS_ON = 1;
 /** Big enough to hit: the library hit-tests by coordinate, with no slop. */
-const CELL_SIZE = 21;
+const CELL_SIZE = 16;
 const CELL_GAP = 3;
 const CELL_RADIUS = 3;
 const ADJUSTED_CELL = CELL_SIZE + CELL_GAP;
@@ -251,15 +251,15 @@ export function PracticeHeatmap() {
       <Text className="text-[22px] font-bold text-ash-grey-950">{t('dashboard.stats')}</Text>
 
       {/* Headline numbers: the streaks are the reason to come back to this section. */}
-      <View className="mb-5 mt-3 flex-row gap-10">
-        <View>
-          <Text className="text-[34px] font-bold leading-[38px] text-seagrass-600">
+      <View className="mb-5 mt-3 flex-row justify-center gap-12">
+        <View className="items-center">
+          <Text className="text-[28px] font-bold leading-[32px] text-seagrass-600">
             {streaks.current}
           </Text>
           <Text className="text-xs text-ash-grey-950">{t('dashboard.currentStreak')}</Text>
         </View>
-        <View>
-          <Text className="text-[34px] font-bold leading-[38px] text-seagrass-600">
+        <View className="items-center">
+          <Text className="text-[28px] font-bold leading-[32px] text-seagrass-600">
             {streaks.longest}
           </Text>
           <Text className="text-xs text-ash-grey-950">{t('dashboard.longestStreak')}</Text>
