@@ -126,10 +126,10 @@ function AddButton({ atIndex, onPress, label }: AddButtonProps) {
   return (
     <Pressable
       onPress={() => onPress(atIndex)}
-      className="my-2 flex-row items-center justify-center gap-2 rounded-xl px-4 py-3.5 active:bg-ash-grey-500/10"
+      className="my-2 flex-row items-center justify-center gap-2 rounded-xl px-4 py-3.5 active:bg-slate-500/10"
     >
       <AppIcon path={mdiPlus} size={20} color={Colors.primary} />
-      <Text className="text-base font-semibold text-seagrass-600">{label}</Text>
+      <Text className="text-base font-semibold text-navy-600">{label}</Text>
     </Pressable>
   );
 }
@@ -143,10 +143,10 @@ function SwapButton({ onPress, label }: SwapButtonProps) {
   return (
     <Pressable
       onPress={onPress}
-      className="my-2 flex-row items-center gap-1.5 rounded-xl px-3 py-3.5 active:bg-ash-grey-500/10"
+      className="my-2 flex-row items-center gap-1.5 rounded-xl px-3 py-3.5 active:bg-slate-500/10"
     >
-      <AppIcon path={mdiSwapVertical} size={20} color="#111827" />
-      <Text className="text-sm font-semibold text-ash-grey-950">{label}</Text>
+      <AppIcon path={mdiSwapVertical} size={20} color={Colors.icon} />
+      <Text className="text-sm font-semibold text-slate-950">{label}</Text>
     </Pressable>
   );
 }
@@ -161,11 +161,9 @@ function Pill({ label, onPress, active }: PillProps) {
   return (
     <Pressable
       onPress={onPress}
-      className={`rounded-lg border px-4 py-2 active:bg-ash-grey-100 ${active ? 'border-seagrass-600 bg-seagrass-50' : 'border-ash-grey-500/35 bg-white'}`}
+      className={`rounded-lg border px-4 py-2 active:bg-slate-100 ${active ? 'border-navy-600 bg-navy-50' : 'border-slate-500/35 bg-white'}`}
     >
-      <Text
-        className={`text-base font-semibold ${active ? 'text-seagrass-600' : 'text-ash-grey-950'}`}
-      >
+      <Text className={`text-base font-semibold ${active ? 'text-navy-600' : 'text-slate-950'}`}>
         {label}
       </Text>
     </Pressable>
@@ -363,21 +361,21 @@ export default function RoutineEditScreen() {
   return (
     <>
       <Stack.Screen options={{ orientation: 'portrait', headerShown: false }} />
-      <SafeAreaView className="flex-1 bg-ash-grey-50">
+      <SafeAreaView className="flex-1 bg-slate-50">
         {/* Header */}
-        <View className="flex-row items-center border-b border-ash-grey-500/35 px-4 py-5">
+        <View className="flex-row items-center border-b border-slate-500/35 px-4 py-5">
           <Pressable onPress={handleBack} hitSlop={12} className="mr-3">
-            <AppIcon path={mdiArrowLeft} size={24} color="#374151" />
+            <AppIcon path={mdiArrowLeft} size={24} color={Colors.icon} />
           </Pressable>
-          <Text className="flex-1 text-lg font-semibold text-ash-grey-950">
+          <Text className="flex-1 text-lg font-semibold text-slate-950">
             {isEditing ? t('routineEdit.editTitle') : t('routineEdit.newTitle')}
           </Text>
           <Pressable
             onPress={handleSave}
             disabled={!canSave}
-            className={`rounded-lg px-4 py-2 ${canSave ? 'bg-seagrass-600' : 'bg-ash-grey-500/12'}`}
+            className={`rounded-lg px-4 py-2 ${canSave ? 'bg-navy-600' : 'bg-slate-500/12'}`}
           >
-            <Text className={`font-semibold ${canSave ? 'text-white' : 'text-ash-grey-400'}`}>
+            <Text className={`font-semibold ${canSave ? 'text-white' : 'text-slate-400'}`}>
               {t('common.save')}
             </Text>
           </Pressable>
@@ -410,10 +408,10 @@ export default function RoutineEditScreen() {
                   />
                 </View>
               )}
-              <View className="mb-1 rounded-xl border border-ash-grey-500/35 bg-white p-4">
+              <View className="mb-1 rounded-xl border border-slate-500/35 bg-white p-4">
                 <View className="flex-row items-stretch">
                   {/* Left: delete button centered vertically */}
-                  <View className="mr-4 items-center justify-center border-r border-ash-grey-500/20 pr-4">
+                  <View className="mr-4 items-center justify-center border-r border-slate-500/20 pr-4">
                     <Pressable onPress={() => deleteBlock(block._key)} hitSlop={8} className="p-1">
                       <AppIcon path={mdiDelete} size={20} color={Colors.destructive} />
                     </Pressable>
@@ -421,7 +419,7 @@ export default function RoutineEditScreen() {
 
                   {/* Right: title (centered) + parameter pills */}
                   <View className="flex-1">
-                    <Text className="text-center text-lg font-semibold text-ash-grey-950">
+                    <Text className="text-center text-lg font-semibold text-slate-950">
                       {block.type === 'pause'
                         ? t('routineEdit.addExercisePause')
                         : t(EXERCISE_LABEL_KEY[block.type])}
@@ -483,7 +481,7 @@ export default function RoutineEditScreen() {
                     setIsDirty(true);
                   }}
                   placeholder=""
-                  className="rounded-lg border border-ash-grey-500/35 bg-ash-grey-50 px-4 py-3 text-xl text-ash-grey-950"
+                  className="rounded-lg border border-slate-500/35 bg-slate-50 px-4 py-3 text-xl text-slate-950"
                   style={{ textAlign: 'center' }}
                 />
                 {!title && (
@@ -491,7 +489,7 @@ export default function RoutineEditScreen() {
                     pointerEvents="none"
                     className="absolute inset-0 items-center justify-center"
                   >
-                    <Text className="text-xl text-ash-grey-400">
+                    <Text className="text-xl text-slate-400">
                       {t('routineEdit.namePlaceholder')}
                     </Text>
                   </View>
@@ -509,7 +507,7 @@ export default function RoutineEditScreen() {
                 />
               </View>
               {validationError && blocks.length > 0 ? (
-                <Text className="mt-2 text-xs text-mauve-shadow-800">
+                <Text className="mt-2 text-xs text-error-800">
                   {validationError === 'pauseAtEnd'
                     ? t('routineEdit.validationNoPause')
                     : t('routineEdit.validationNoBlocks')}
@@ -531,19 +529,19 @@ export default function RoutineEditScreen() {
           onRequestClose={() => setPicker(null)}
         >
           <Pressable
-            className="absolute inset-0 bg-ash-grey-950/[0.4]"
+            className="absolute inset-0 bg-slate-950/[0.4]"
             onPress={() => setPicker(null)}
           />
-          <View className="m-auto max-h-[60%] w-[280px] overflow-hidden rounded-xl border border-ash-grey-500/35 bg-ash-grey-100">
+          <View className="m-auto max-h-[60%] w-[280px] overflow-hidden rounded-xl border border-slate-500/35 bg-slate-100">
             <ScrollView>
               {picker?.options.map((opt) => (
                 <Pressable
                   key={String(opt.value)}
                   onPress={() => applyPicker(opt.value)}
-                  className={`border-b border-ash-grey-500/20 px-5 py-3 active:bg-ash-grey-200 ${opt.value === picker.currentValue ? 'bg-seagrass-50' : ''}`}
+                  className={`border-b border-slate-500/20 px-5 py-3 active:bg-slate-200 ${opt.value === picker.currentValue ? 'bg-navy-50' : ''}`}
                 >
                   <Text
-                    className={`text-base ${opt.value === picker.currentValue ? 'font-semibold text-seagrass-600' : 'text-ash-grey-950'}`}
+                    className={`text-base ${opt.value === picker.currentValue ? 'font-semibold text-navy-600' : 'text-slate-950'}`}
                   >
                     {opt.label}
                   </Text>

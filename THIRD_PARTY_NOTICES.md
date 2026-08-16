@@ -116,6 +116,34 @@ placing it in the public domain.
 
 ---
 
+## App logo — piano icon
+
+The OpenRehearse mark in `client/assets/brand/` and the app icons in
+`client/assets/` are derived from a piano icon by **Pixel Bazaar**
+(<https://www.svgrepo.com/author/pixelbazaar/>), obtained via SVG Repo.
+
+**Licence:** Creative Commons Attribution (CC BY)
+— <https://creativecommons.org/licenses/by/4.0/>
+
+**Modified:** Yes. The artwork was recoloured from black to white and placed on a
+navy (`#000036`) ground, inverting it so the navy reads through where the white keys
+would be. The unmodified source is kept at
+`client/assets/brand/reference-piano.svg` for comparison.
+
+This attribution must accompany the mark wherever it ships, including store listings
+and any marketing surface.
+
+---
+
+## Brand typeface — Outfit
+
+`client/assets/fonts/Outfit-SemiBold.ttf` is **Outfit** by the Outfit Project Authors
+(<https://github.com/Outfitio/Outfit-Fonts>), licensed under the
+**SIL Open Font License 1.1**. The full licence text ships alongside it at
+`client/assets/fonts/OFL.txt`.
+
+---
+
 ## Other Dependencies
 
 All other runtime dependencies (React, React Native, Expo, Zustand, NativeWind,

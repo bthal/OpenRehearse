@@ -31,12 +31,12 @@ import { SectionColorPicker } from './SectionColorPicker';
  */
 export type RowPrompt = 'none' | 'delete';
 
-const INPUT = 'rounded-lg border bg-ash-grey-50 px-2 py-1.5 text-base text-ash-grey-950';
-const BORDER_OK = 'border-ash-grey-500/35';
-const BORDER_ERROR = 'border-mauve-shadow-600';
+const INPUT = 'rounded-lg border bg-slate-50 px-2 py-1.5 text-base text-slate-950';
+const BORDER_OK = 'border-slate-500/35';
+const BORDER_ERROR = 'border-error-600';
 /** Table rows, not cards: a hairline rule between entries, nothing boxed. */
 const ROW = 'py-3';
-const DIVIDER = 'border-b border-ash-grey-500/20';
+const DIVIDER = 'border-b border-slate-500/20';
 
 function MeasureField({
   label,
@@ -59,7 +59,7 @@ function MeasureField({
 }) {
   return (
     <View className="w-[72px] gap-1">
-      <Text className="text-[11px] text-ash-grey-500">{label}</Text>
+      <Text className="text-[11px] text-slate-500">{label}</Text>
       {editable ? (
         <TextInput
           className={`${INPUT} ${error ? BORDER_ERROR : BORDER_OK}`}
@@ -84,7 +84,7 @@ function MeasureField({
           accessible
           accessibilityLabel={accessibilityLabel}
         >
-          <Text className="text-base text-ash-grey-950">{value || '—'}</Text>
+          <Text className="text-base text-slate-950">{value || '—'}</Text>
         </View>
       )}
     </View>
@@ -107,14 +107,13 @@ function ActionButton({
   disabled?: boolean;
   tone: 'plain' | 'destructive' | 'primary';
 }) {
-  const surface =
-    tone === 'primary' ? 'bg-seagrass-600' : 'border border-ash-grey-500/50 bg-ash-grey-50';
+  const surface = tone === 'primary' ? 'bg-navy-600' : 'border border-slate-500/50 bg-slate-50';
   const text =
     tone === 'primary'
-      ? 'text-ash-grey-50'
+      ? 'text-slate-50'
       : tone === 'destructive'
-        ? 'text-mauve-shadow-600'
-        : 'text-ash-grey-950';
+        ? 'text-error-600'
+        : 'text-slate-950';
   return (
     <Pressable
       className={`flex-1 items-center rounded-lg px-2 py-2 ${surface}`}
@@ -182,8 +181,8 @@ export function SectionRow(props: SectionRowProps) {
         {/* Inert here: color is chosen in edit mode, where the picker is always open. */}
         <View style={{ width: 20, height: 20, borderRadius: 10, backgroundColor: color }} />
         <View className="flex-1">
-          <Text className="text-base text-ash-grey-950">{displayName}</Text>
-          <Text className="text-[12px] text-ash-grey-500">{props.rangeLabel}</Text>
+          <Text className="text-base text-slate-950">{displayName}</Text>
+          <Text className="text-[12px] text-slate-500">{props.rangeLabel}</Text>
         </View>
         <Pressable
           onPress={props.onEdit}
@@ -201,7 +200,7 @@ export function SectionRow(props: SectionRowProps) {
     <View className={`${ROW} ${props.showDivider ? DIVIDER : ''} gap-3`}>
       <View className="flex-row items-end gap-2">
         <View className="flex-1 gap-1">
-          <Text className="text-[11px] text-ash-grey-500">{t('pieceEdit.sections.nameLabel')}</Text>
+          <Text className="text-[11px] text-slate-500">{t('pieceEdit.sections.nameLabel')}</Text>
           <TextInput
             className={`${INPUT} ${BORDER_OK}`}
             value={name ?? ''}
@@ -239,15 +238,13 @@ export function SectionRow(props: SectionRowProps) {
         />
       </View>
 
-      {props.message ? (
-        <Text className="text-[12px] text-mauve-shadow-600">{props.message}</Text>
-      ) : null}
+      {props.message ? <Text className="text-[12px] text-error-600">{props.message}</Text> : null}
 
       <SectionColorPicker color={color} onPick={props.onPickColor} />
 
       {prompt === 'delete' ? (
         <View className="gap-2">
-          <Text className="text-[12px] text-ash-grey-500">
+          <Text className="text-[12px] text-slate-500">
             {t('pieceEdit.sections.deletePrompt', { range: props.rangeLabel })}
           </Text>
           <View className="flex-row flex-wrap gap-2">
@@ -255,22 +252,22 @@ export function SectionRow(props: SectionRowProps) {
                 to choose and the single button deletes straight away. */}
             {previousName !== null ? (
               <Pressable
-                className="rounded-lg border border-ash-grey-500/50 px-3 py-2"
+                className="rounded-lg border border-slate-500/50 px-3 py-2"
                 onPress={() => props.onDelete('previous')}
                 accessibilityRole="button"
               >
-                <Text className="text-ash-grey-950">
+                <Text className="text-slate-950">
                   {t('pieceEdit.sections.deleteToPrevious', { name: previousName })}
                 </Text>
               </Pressable>
             ) : null}
             {nextName !== null ? (
               <Pressable
-                className="rounded-lg border border-ash-grey-500/50 px-3 py-2"
+                className="rounded-lg border border-slate-500/50 px-3 py-2"
                 onPress={() => props.onDelete('next')}
                 accessibilityRole="button"
               >
-                <Text className="text-ash-grey-950">
+                <Text className="text-slate-950">
                   {t('pieceEdit.sections.deleteToNext', { name: nextName })}
                 </Text>
               </Pressable>

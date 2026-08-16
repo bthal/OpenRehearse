@@ -22,6 +22,7 @@ import type { WebToNativeMessage } from '@score-web/messageProtocol';
 import { useCountInSync } from '@score-web/useCountInSync';
 import { usePlayViewStore } from '@state/playViewStore';
 import { useRoutinesStore } from '@state/routinesStore';
+import { Colors } from '@theme/colors';
 
 export default function RoutinePlayView() {
   const { t } = useTranslation();
@@ -170,35 +171,35 @@ export default function RoutinePlayView() {
           {/* WebView loading overlay */}
           {!webViewReady && (
             <View className="absolute inset-0 items-center justify-center bg-white">
-              <AppIcon path={mdiMusicNoteOutline} size={48} color="#9CA3AF" />
-              <Text className="mt-3 text-sm text-ash-grey-400">{t('common.preparingScore')}</Text>
+              <AppIcon path={mdiMusicNoteOutline} size={48} color={Colors.iconMuted} />
+              <Text className="mt-3 text-sm text-slate-400">{t('common.preparingScore')}</Text>
             </View>
           )}
 
           {/* Score loading overlay */}
           {webViewReady && isLoadingScore && (
             <View className="absolute inset-0 items-center justify-center bg-white">
-              <ActivityIndicator size="large" color="#4B7A6E" />
-              <Text className="mt-3 text-sm text-ash-grey-400">{t('common.loadingScore')}</Text>
+              <ActivityIndicator size="large" color={Colors.primary} />
+              <Text className="mt-3 text-sm text-slate-400">{t('common.loadingScore')}</Text>
             </View>
           )}
 
           {/* Error overlay */}
           {scoreError ? (
             <View className="absolute inset-0 items-center justify-center bg-white/80 px-8">
-              <AppIcon path={mdiAlertCircleOutline} size={48} color="#9C6B8A" />
-              <Text className="mt-3 text-center text-sm text-ash-grey-950">
+              <AppIcon path={mdiAlertCircleOutline} size={48} color={Colors.error} />
+              <Text className="mt-3 text-center text-sm text-slate-950">
                 {t('common.couldNotRender')}
               </Text>
-              <Text className="mt-1 text-center text-xs text-ash-grey-400">{scoreError}</Text>
+              <Text className="mt-1 text-center text-xs text-slate-400">{scoreError}</Text>
               <TouchableOpacity
                 onPress={() => {
                   reset();
                   setWebViewReady(true);
                 }}
-                className="mt-4 rounded-lg border border-seagrass-600 px-4 py-2"
+                className="mt-4 rounded-lg border border-navy-600 px-4 py-2"
               >
-                <Text className="text-sm font-semibold text-seagrass-600">{t('common.retry')}</Text>
+                <Text className="text-sm font-semibold text-navy-600">{t('common.retry')}</Text>
               </TouchableOpacity>
             </View>
           ) : null}
@@ -226,12 +227,12 @@ export default function RoutinePlayView() {
               >
                 {/* Back */}
                 <TouchableOpacity onPress={() => router.back()} hitSlop={12} className="p-1">
-                  <AppIcon path={mdiArrowLeft} size={24} color="#374151" />
+                  <AppIcon path={mdiArrowLeft} size={24} color={Colors.icon} />
                 </TouchableOpacity>
 
                 {/* Play / Pause */}
                 <TouchableOpacity onPress={handlePlayPause} hitSlop={8} className="p-1">
-                  <AppIcon path={isPlaying ? mdiPause : mdiPlay} size={36} color="#4B7A6E" />
+                  <AppIcon path={isPlaying ? mdiPause : mdiPlay} size={36} color={Colors.primary} />
                 </TouchableOpacity>
 
                 {/* Metronome toggle */}
@@ -239,13 +240,13 @@ export default function RoutinePlayView() {
                   <AppIcon
                     path={metronomeOn ? mdiMetronome : mdiMetronomeTick}
                     size={26}
-                    color={metronomeOn ? '#4B7A6E' : '#374151'}
+                    color={metronomeOn ? Colors.primary : Colors.icon}
                   />
                 </TouchableOpacity>
 
                 {/* Edit routine */}
                 <TouchableOpacity onPress={handleEdit} hitSlop={8} className="p-1">
-                  <AppIcon path={mdiPencilOutline} size={24} color="#374151" />
+                  <AppIcon path={mdiPencilOutline} size={24} color={Colors.icon} />
                 </TouchableOpacity>
               </View>
             </View>
