@@ -4,7 +4,7 @@ import { ArpeggioType, ArticulationEnum } from 'opensheetmusicdisplay';
 import type { OutboundMessage } from './types';
 import { resolveSections } from '../../src/score-web/sectionResolve';
 // Pure count-in and loop-geometry math live in the domain layer (screens/score-web → domain).
-import { computeCountIn, loopLeadInBeats } from '../../src/domain/countIn';
+import { computeCountIn, isFreshStart, loopLeadInBeats } from '../../src/domain/countIn';
 import { placeLoopAtCursor } from '../../src/domain/loop';
 import {
   anchorToBarlines,
@@ -187,6 +187,25 @@ let countingIn = false;
 // Oscillator nodes scheduled for the current count-in, so a pause/stop can
 // silence any that have not yet played.
 let countInNodes: OscillatorNode[] = [];
+// True from the tap until the transport has been scheduled. `startPlayback` awaits
+// the sample load in between, which is seconds on a cold first play — a window where
+// neither the transport nor `countingIn` reports playback yet, though the toolbar has
+// already slid away and the native shell believes it is playing.
+let startPending = false;
+// Bumped by every cancel. A start still waiting on that await compares the token it
+// captured and bails if it has been superseded, so a cancelled play cannot come back
+// to life once the samples arrive.
+let playToken = 0;
+// The transport position the in-flight start was counting into, and whether it
+// resolved a count-in at all. An abort restores the position and, if there was one,
+// re-arms it for the next play.
+let countInOriginTicks = 0;
+let countInArmed = false;
+// Set by an abort: the next start counts in again even though the playhead is sitting
+// exactly where a resumed pause would leave it. Without this, aborting a loop's
+// count-in parks the transport on A, which `resolveCountIn` reads as a mid-loop resume
+// and answers with no pre-roll at all.
+let countInReArmed = false;
 let cursorSteps: CursorStep[] = [];
 // cursorSteps plus the terminal target standing for the final barline. Only handle B
 // may land on the terminal — the playhead must never park where there is no note to
@@ -887,6 +906,7 @@ function animateCursorLoop(): void {
   if (countingIn) {
     countingIn = false;
     countInNodes = [];
+    countInArmed = false;
   }
 
   const quartersElapsed = Tone.Transport.ticks / TONE_PPQ;
@@ -947,8 +967,12 @@ function animateCursorLoop(): void {
 
 function _stopInternal(): void {
   // Abort any pending count-in so its clicks and scheduled start don't outlive
-  // the stop.
+  // the stop, and disown a start still waiting on the sample load so it cannot
+  // resume into a score that has been stopped out from under it.
   cancelCountIn();
+  playToken++;
+  startPending = false;
+  countInArmed = false;
   Tone.Transport.stop();
   if (animFrameId !== null) {
     cancelAnimationFrame(animFrameId);
@@ -1113,7 +1137,7 @@ function initTouchHandlers(): void {
     // the glide started.
     cancelScoreGlide(false);
     dragging = true;
-    wasPlayingOnTouch = Tone.Transport.state === 'started';
+    wasPlayingOnTouch = isPlaybackActive();
     hasMoved = false;
     const clientX = e.touches[0]?.clientX ?? 0;
     startX = clientX;
@@ -1157,7 +1181,7 @@ function initTouchHandlers(): void {
     scoreDragging = false;
     if (!hasMoved) {
       // Tap: toggle play/pause.
-      if (Tone.Transport.state === 'started') {
+      if (isPlaybackActive()) {
         pausePlayback();
       } else {
         // Settle first, without animating: a tap that caught a coast mid-flight left
@@ -1424,7 +1448,7 @@ function initLoopHandles(): void {
       // Set before the cancels below for the same reason the wrapper does it: dragging
       // a handle auto-scrolls the score, so this gesture counts as motion throughout.
       handleDragging = true;
-      if (Tone.Transport.state === 'started') pausePlayback();
+      if (isPlaybackActive()) pausePlayback();
       // stopPropagation keeps the wrapper's touchstart from running, and the wrapper
       // handler bails on .loop-handle targets anyway — so nothing else stops a coast
       // or a settle. Without these two the score would keep moving under a held
@@ -1538,7 +1562,7 @@ function createLoop(): void {
   unfurlLoopFromCursor(cursorPx);
   loopModified = true;
   postToNative({ type: 'LOOP_STATE', payload: true });
-  if (Tone.Transport.state === 'started') pausePlayback();
+  if (isPlaybackActive()) pausePlayback();
 }
 
 function clearLoop(): void {
@@ -1547,7 +1571,7 @@ function clearLoop(): void {
   hideSnapPreview();
   Tone.Transport.loop = false;
   hideLoopOverlay();
-  if (Tone.Transport.state === 'started') pausePlayback();
+  if (isPlaybackActive()) pausePlayback();
 }
 
 export function toggleLoop(): void {
@@ -1643,6 +1667,51 @@ function cancelCountIn(): boolean {
   }
   countInNodes = [];
   return wasCountingIn;
+}
+
+/**
+ * Is playback running, or on its way to running?
+ *
+ * `Tone.Transport.state` alone cannot answer this. A count-in schedules the transport
+ * to start at a *future* audio time so the first note lands exactly on the beat, and
+ * the state getter reports the state at *now* — so throughout the pre-roll it reads
+ * `'stopped'`. Before that there is a second blind window while `startPlayback` awaits
+ * the sample load. In both, the toolbar has already slid away and the play disc is
+ * gone, so the user sees a screen that is playing and taps it to stop; a raw state
+ * check reads that tap as a fresh start and schedules a second count-in over the
+ * first, which is heard as two competing sets of clicks.
+ *
+ * Every "is it playing?" test goes through here for that reason. A raw
+ * `Tone.Transport.state === 'started'` in this file is almost certainly a bug.
+ */
+function isPlaybackActive(): boolean {
+  return Tone.Transport.state === 'started' || countingIn || startPending;
+}
+
+/**
+ * Cancels a start that has not yet produced a note — during the sample-load await or
+ * during the count-in pre-roll.
+ *
+ * Deliberately *not* `_stopInternal`: that rewinds to the top of the piece, which is a
+ * no-op for a count-in at bar 1 but throws the score back from a loop's A handle to the
+ * start of the piece. Nothing needs restoring visually — the frame loop parks itself
+ * during the pre-roll, so the score is still exactly where the start left it. Only the
+ * transport position does, because `Transport.stop()` rewinds it as a side effect of
+ * cancelling the scheduled start.
+ */
+function abortStart(): void {
+  playToken++;
+  startPending = false;
+  cancelCountIn();
+  // Also cancels the count-in's scheduled future start.
+  Tone.Transport.stop();
+  Tone.Transport.ticks = countInOriginTicks;
+  if (animFrameId !== null) {
+    cancelAnimationFrame(animFrameId);
+    animFrameId = null;
+  }
+  countInReArmed = countInArmed;
+  countInArmed = false;
 }
 
 // ─── Public API ───────────────────────────────────────────────────────────────
@@ -1952,6 +2021,12 @@ export function initPlayback(
 
 export async function startPlayback(): Promise<void> {
   if (!sampler || !part) return;
+  // From here until the transport is scheduled, `isPlaybackActive()` has to answer
+  // true on this flag alone — see its docblock. The token is this attempt's claim on
+  // the transport: any cancel bumps the module counter, and the check after the await
+  // below abandons a start that has been superseded.
+  const token = ++playToken;
+  startPending = true;
   // Announced here rather than after Transport.start, at the bottom of this function.
   // Everything below the `await Tone.loaded()` race can take up to eight seconds on a
   // cold first play, and the native shell drives the play/pause transition off this
@@ -2007,6 +2082,13 @@ export async function startPlayback(): Promise<void> {
   // Count in only at a fresh start: the top of a piece/routine, or when a loop
   // (re)starts from its A handle. Resuming a mid-piece/mid-loop pause does not.
   const countIn = resolveCountIn(posTicks, didLoopSeek, Tone.Transport.bpm.value);
+  // Consumed: a re-armed count-in is owed to exactly one start, not to every start
+  // from here on.
+  countInReArmed = false;
+  // Where this start is counting into. The loop seek above has already run, so the
+  // transport is at its final position and an abort can put it back.
+  countInOriginTicks = Tone.Transport.ticks;
+  countInArmed = countIn !== null;
 
   try {
     await Tone.start();
@@ -2014,6 +2096,12 @@ export async function startPlayback(): Promise<void> {
   } catch {
     // non-fatal
   }
+
+  // Superseded while we waited — a tap that pauses during a cold start's sample load,
+  // or a second tap starting over. Without this the abandoned start would come back to
+  // life here and schedule its own count-in on top of whatever replaced it.
+  if (token !== playToken) return;
+  startPending = false;
 
   if (countIn && countIn.clicks.length > 0 && countIn.delaySec > 0) {
     // Sound the pre-roll on the raw audio clock, then defer the transport start
@@ -2038,8 +2126,22 @@ function resolveCountIn(
 ): ReturnType<typeof computeCountIn> | null {
   if (countInMeasures <= 0 || bpm <= 0) return null;
 
+  // The re-arm is honoured only while the playhead is still where the abort left it:
+  // cancel a pre-roll, scroll somewhere else inside the loop and press play, and this
+  // is an ordinary mid-loop resume again.
+  if (
+    !isFreshStart({
+      hasLoop: loopRegion !== null,
+      didLoopSeek,
+      resumingAbortedCountIn: countInReArmed && posTicks === countInOriginTicks,
+      posTicks,
+      firstStepTicks: Math.round((cursorSteps[0]?.quarters ?? 0) * TONE_PPQ),
+    })
+  ) {
+    return null;
+  }
+
   if (loopRegion) {
-    if (!didLoopSeek) return null;
     const measure = measureAtTicks(loopRegion.aTicks);
     const { num, den } = measure;
     const beatUnitTicks = (TONE_PPQ * 4) / den;
@@ -2056,10 +2158,6 @@ function resolveCountIn(
       pickupBeats: loopLeadInBeats(beatOffset, num),
     });
   }
-
-  // Piece/routine: only from the very top (not a resumed mid-piece pause).
-  const firstStepTicks = Math.round((cursorSteps[0]?.quarters ?? 0) * TONE_PPQ);
-  if (posTicks > firstStepTicks) return null;
 
   const first = measureMeta[0];
   const num = first?.num ?? 4;
@@ -2083,10 +2181,11 @@ function resolveCountIn(
 }
 
 export function pausePlayback(): void {
-  // A pause during the count-in aborts it before the piece begins; reset to the
-  // start rather than freezing partway through the pre-roll.
-  if (cancelCountIn()) {
-    _stopInternal();
+  // Nothing has sounded yet — the samples are still loading, or the count-in is
+  // running. There is no position to freeze, so cancel the start instead and leave the
+  // playhead where the pre-roll was counting into. The next play counts in again.
+  if (startPending || countingIn || countInNodes.length > 0) {
+    abortStart();
     postToNative({ type: 'PLAYBACK_STATE', payload: 'paused' });
     return;
   }
@@ -2132,8 +2231,15 @@ export function disposePlayback(): void {
     metronomeEventId = null;
   }
   // Count-in is a user setting, so countInMeasures is preserved across loads;
-  // only the in-flight pre-roll and per-score meter data are cleared here.
+  // only the in-flight pre-roll and per-score meter data are cleared here. The token
+  // bump matters as much as the cancel: a start still waiting on the sample load holds
+  // a reference to the part disposed above and would otherwise wake into it.
   cancelCountIn();
+  playToken++;
+  startPending = false;
+  countInArmed = false;
+  countInReArmed = false;
+  countInOriginTicks = 0;
   downbeatTicks = new Set();
   measureMeta = [];
   firstTicksBySourceIndex = [];
@@ -2183,7 +2289,9 @@ export function setActiveHand(hand: ActiveHand): void {
   const savedStep = currentCursorStep; // -1 if never played
   const savedScrollPx = scrollOffsetPx;
 
-  if (Tone.Transport.state !== 'stopped') stopPlayback();
+  // `!== 'stopped'` alone misses a pre-roll, whose transport still reads 'stopped'
+  // while holding a scheduled start the rebuild below would strand.
+  if (isPlaybackActive() || Tone.Transport.state !== 'stopped') stopPlayback();
 
   // Rebuild note events with new hand filter.
   // buildTimelines resets the OSMD cursor to 0 and sets cursorSteps (same positions as before).

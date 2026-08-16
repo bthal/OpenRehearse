@@ -215,7 +215,8 @@ Slices: `activePieceId`, `webViewReady`, `isLoadingScore`, `scoreError`, `isPlay
 - [x] Dragging a handle auto-scrolls the view to keep the active handle visible. *(Phase 4)*
 - [x] Playback wraps from B to A with immediate jump. *(Phase 4)*
 - [x] Cursor is visually clamped to the loop region [A, B]; never drifts into handle areas.
-- [x] Tapping the score (outside a handle) toggles play/pause.
+- [x] Tapping the score (outside a handle) toggles play/pause — including before the first sound,
+      where it cancels a count-in or a cold start's sample load rather than starting a second one.
 - [x] Creating or editing a loop pauses playback; play after any create/edit always seeks to A first.
 - [x] Handles clamp to the first onset and the final-barline target (not raw SVG width). Loop placed
   near the end of the piece anchors B at the end and derives A backward by `LOOP_DEFAULT_PX`,

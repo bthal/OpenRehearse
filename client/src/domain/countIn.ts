@@ -44,6 +44,43 @@ export interface CountInSchedule {
 
 const EMPTY: CountInSchedule = { clicks: [], delaySec: 0 };
 
+/** What a start needs to know about itself to decide whether it counts in. */
+export interface FreshStartParams {
+  /** True when a loop is armed, so the start point is the loop's A handle. */
+  hasLoop: boolean;
+  /** True when this start moved the transport to the loop's A handle. */
+  didLoopSeek: boolean;
+  /**
+   * True when a previous start's count-in was cancelled before it produced sound,
+   * left the playhead exactly here, and is owed a retry.
+   */
+  resumingAbortedCountIn: boolean;
+  /** Transport position this start begins from, in ticks. */
+  posTicks: number;
+  /** Ticks of the piece's first onset. */
+  firstStepTicks: number;
+}
+
+/**
+ * Does this start deserve a count-in?
+ *
+ * Only a *fresh* start does — the top of a piece or routine, or a loop entering at
+ * its A handle. Resuming a pause partway through either is not fresh: the player
+ * already has the pulse, and counting them in again would be an interruption.
+ *
+ * The loop branch cannot decide this from position alone. A loop that (re)starts at
+ * A and a loop paused *on* A sit at the same tick, so the seek is what distinguishes
+ * them — except after a cancelled count-in, which leaves the playhead on A having
+ * never sounded a note. That case has to be remembered rather than measured, which is
+ * what `resumingAbortedCountIn` carries. The piece branch needs no such term: a
+ * cancelled count-in there leaves the playhead at the first onset, which already
+ * reads as the top.
+ */
+export function isFreshStart(params: FreshStartParams): boolean {
+  if (params.hasLoop) return params.didLoopSeek || params.resumingAbortedCountIn;
+  return params.posTicks <= params.firstStepTicks;
+}
+
 /**
  * Prelude beats to fold in when a loop starts partway through a measure.
  *

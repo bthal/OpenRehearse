@@ -33,8 +33,15 @@ player time to find the pulse.
 - The count-in is a metronome pre-roll regardless of whether the metronome toggle is on; once
   playback starts, the metronome only continues if it is enabled.
 - Count-in fires only on a **fresh start** (top of a piece/routine, or when a loop (re)starts from
-  its A handle) — not when resuming a mid-piece/mid-loop pause. Pausing during the count-in aborts
-  it and returns to the start.
+  its A handle) — not when resuming a mid-piece/mid-loop pause.
+- **Tapping the score during the count-in cancels it.** The clicks stop, the toolbar and play button
+  come back, and the playhead stays exactly where the pre-roll was counting into — the top of the
+  piece, or the loop's A handle. Pressing play again counts in from the beginning; a cancelled
+  count-in is never silently skipped, even though the playhead is sitting where a resumed pause
+  would leave it. Dragging the score or a loop handle cancels it the same way.
+- The same holds for the wait before the first sound on a cold start, while the piano samples load:
+  the screen is already in its playing state, so a tap there cancels rather than starting a second
+  playback on top of the first.
 
 ## Behavior
 
@@ -50,4 +57,6 @@ player time to find the pulse.
 - [ ] Beat count tracks the meter (e.g. 3/4 → 3 clicks per counted measure).
 - [ ] A pickup measure is absorbed into the last counted measure (clicks + prelude = one measure).
 - [ ] Starting a newly created loop counts in the meter's measures before the loop's first note.
-- [ ] Resuming a mid-piece pause does not count in; pausing during the count-in returns to start.
+- [ ] Resuming a mid-piece pause does not count in.
+- [x] Tapping during the count-in cancels it instead of starting a second one; the playhead stays at
+      the piece top or the loop's A handle, and the next play counts in again from the beginning.

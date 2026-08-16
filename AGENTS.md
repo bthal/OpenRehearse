@@ -152,6 +152,10 @@ The `/commit` command runs a guided pass over all of this: assess scope → read
 - **State**: **Zustand** (not TanStack Query) unless specs are formally amended.
 - **Orientation**: PlayView → **landscape**; Dashboard → **portrait**. `app.json` uses `"default"`; each screen locks via `<Stack.Screen options>` (react-native-screens, no extra package).
 - **Styling**: **NativeWind** throughout; **light mode only** — dark mode is a non-goal.
+- **"Is it playing?" is `isPlaybackActive()`, never `Tone.Transport.state === 'started'`.** A
+  count-in schedules the transport to start in the *future*, so the state getter reads `'stopped'`
+  for the whole pre-roll — and again while `startPlayback` awaits the sample load. Both windows look
+  like playback to the user. See `compound-docs/tone-playback.md`.
 - **Animation**: RN core `Animated` with **`useNativeDriver: false`**. Not a preference — a
   native-driven transform falls back to React's last committed value when it completes, which
   flickers on any component that does not re-render mid-animation. `react-native-reanimated` is
