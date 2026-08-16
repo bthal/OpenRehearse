@@ -59,7 +59,7 @@ export function SectionColorPicker({
   return (
     <View className="gap-3 pt-1">
       <View className="gap-1">
-        <Text className="text-[12px] text-ash-grey-500">{t('pieceEdit.sections.presets')}</Text>
+        <Text className="text-[12px] text-slate-500">{t('pieceEdit.sections.presets')}</Text>
         <View className="flex-row flex-wrap gap-2">
           {SectionColors.map((preset) => {
             const selected = preset.toUpperCase() === normalised;
@@ -89,7 +89,7 @@ export function SectionColorPicker({
       </View>
 
       <View className="gap-1">
-        <Text className="text-[12px] text-ash-grey-500">{t('pieceEdit.sections.hueRamp')}</Text>
+        <Text className="text-[12px] text-slate-500">{t('pieceEdit.sections.hueRamp')}</Text>
         <View
           onLayout={onLayout}
           // The View's own responder props rather than PanResponder: these are plain
@@ -102,7 +102,7 @@ export function SectionColorPicker({
           onResponderMove={(e) => emit(e.nativeEvent.locationX)}
           accessibilityRole="adjustable"
           accessibilityLabel={t('pieceEdit.sections.hueRamp')}
-          className="overflow-hidden rounded-lg border border-ash-grey-500/35"
+          className="overflow-hidden rounded-lg border border-slate-500/35"
           style={{ height: RAMP_HEIGHT }}
         >
           <Svg width="100%" height={RAMP_HEIGHT} preserveAspectRatio="none" viewBox="0 0 100 1">

@@ -40,6 +40,7 @@ RN/OSMD/Tone imports. See `specs/architecture.md` for the authoritative version.
 | Warm-up exercises | `specs/features/warmup.md` |
 | Routines (build + playback) | `specs/features/warmup.md` (Routines section) |
 | Adding a persisted setting | `compound-docs/settings-persistence.md` |
+| Colours, typography, logo, icons | `specs/brand.md`, `compound-docs/brand-assets.md` |
 
 ## Module map (where code goes)
 
@@ -55,6 +56,8 @@ RN/OSMD/Tone imports. See `specs/architecture.md` for the authoritative version.
 | `client/src/score-web/` | The native↔WebView seam: message protocol, generated `html.ts`, and pure WebView logic that needs typechecking and tests |
 | `client/app/` | Expo Router screens (Dashboard, PlayView route) |
 | `client/components/` | Shared UI (`AppIcon`, toolbars, modals) — NativeWind + MDI icons |
+| `client/assets/brand/` | Logo marks, lockups, and the unmodified CC BY reference — **generated**, do not hand-edit |
+| `scripts/brand/` | Generators for the brand assets + the palette contrast check |
 
 Dependency flow: **screens → score-web / state → domain**. Domain never imports from score-web or app layers.
 
@@ -130,6 +133,8 @@ User-visible behavior or MVP scope | Relevant `specs/features/*.md` (+ acceptanc
 Architecture, stack, or folder boundaries | `specs/architecture.md`, this file's module map
 OSMD/Tone/loop/sync landmines or new traps | `compound-docs/` (create or update relevant doc)
 Setup, scripts, Node version | `README.md`
+Colours, typography, the logo, or app icons | `specs/brand.md` (+ `compound-docs/brand-assets.md` for new traps), and re-run `scripts/brand/palette.py`
+Bundling a third-party asset or font | `THIRD_PARTY_NOTICES.md` — check the licence's attribution terms
 CI, release pipeline, versioning | `README.md` (Releasing), this file's CI section
 Agent routing, non-negotiables, required reading | This file (`AGENTS.md`)
 

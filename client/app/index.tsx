@@ -14,6 +14,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useTranslation } from 'react-i18next';
 
 import { AppIcon } from '@components/AppIcon';
+import { BrandMark } from '@components/BrandMark';
 import { WARMUP_FEATURES } from '../src/config/warmupFeatures';
 import { PieceEditModal, type PieceEditMode } from '@components/PieceEditModal';
 import { isPieceComplete } from '@domain/piece';
@@ -215,47 +216,54 @@ export default function Dashboard() {
   return (
     <>
       <Stack.Screen options={{ orientation: 'portrait' }} />
-      <SafeAreaView className="flex-1 bg-ash-grey-50">
+      <SafeAreaView className="flex-1 bg-slate-50">
         <ScrollView showsVerticalScrollIndicator={false} contentContainerClassName="px-6 pb-12">
           <View className="w-full max-w-[720px] self-center">
-            {/* Brand header */}
-            <View className="flex-row items-center pt-12 pb-8">
-              <View className="flex-1" />
-              <Text className="font-brand text-4xl font-semibold italic tracking-wide text-mauve-shadow-500">
+            {/* Brand header — the horizontal lockup from specs/brand.md, centred.
+                The 50px mark and 14px gap are that spec's geometry solved for the
+                30px (text-3xl) wordmark: mark = size / 0.60, gap = 0.28 x mark.
+                Change one and the other has to follow.
+
+                30px rather than the 36px this started at, because the lockup has
+                to survive a 360dp phone: at 36px it measures 308px against 312px
+                of content width and clips the final letter. Nothing goes in this
+                row but the lockup, for the same reason. */}
+            <View className="flex-row items-center justify-center pt-12 pb-4">
+              <BrandMark size={50} />
+              <Text className="ml-[14px] font-brand text-3xl tracking-tight text-navy-950">
                 {t('dashboard.title')}
               </Text>
-              <View className="flex-1 items-end">
-                <Pressable
-                  className="p-2 active:opacity-60"
-                  onPress={() => router.push('/about')}
-                  accessibilityLabel={t('about.title')}
-                >
-                  <AppIcon path={mdiInformation} size={22} color="#9c9aab" />
-                </Pressable>
-              </View>
             </View>
 
-            {/* Settings entry — sits just below the brand title on the right */}
-            <View className="-mt-6 mb-2 flex-row justify-end">
+            {/* About + settings share one row so the header above can hold nothing
+                but the centred lockup. No bottom margin: the Pressables' own p-2
+                already supplies the gap to the Warm-ups heading, and stacking a
+                margin on top of it left a visible hole between the two. */}
+            <View className="flex-row justify-end">
+              <Pressable
+                className="p-2 active:opacity-60"
+                onPress={() => router.push('/about')}
+                accessibilityLabel={t('about.title')}
+              >
+                <AppIcon path={mdiInformation} size={22} color={Colors.iconMuted} />
+              </Pressable>
               <Pressable
                 className="p-2 active:opacity-60"
                 onPress={() => setSettingsOpen(true)}
                 accessibilityLabel={t('settings.heading')}
               >
-                <AppIcon path={mdiCogOutline} size={22} color="#9c9aab" />
+                <AppIcon path={mdiCogOutline} size={22} color={Colors.iconMuted} />
               </Pressable>
             </View>
 
             {/* Warm-ups section (includes routines) */}
-            <View className="mb-6 mt-4">
-              <Text className="text-[22px] font-bold text-ash-grey-950">
-                {t('dashboard.warmUps')}
-              </Text>
+            <View className="mb-6">
+              <Text className="text-[22px] font-bold text-slate-950">{t('dashboard.warmUps')}</Text>
 
               {isRoutineSelectionMode ? (
                 <View className="mb-2 mt-1.5 flex-row justify-end gap-2">
                   <Pressable
-                    className="flex-row items-center gap-1.5 rounded-lg border border-mauve-shadow-600 px-3 py-2 active:bg-ash-grey-100"
+                    className="flex-row items-center gap-1.5 rounded-lg border border-error-600 px-3 py-2 active:bg-slate-100"
                     onPress={handleRemoveRoutines}
                     disabled={isDeletingRoutines}
                   >
@@ -264,7 +272,7 @@ export default function Dashboard() {
                     ) : (
                       <>
                         <AppIcon path={mdiDelete} size={14} color={Colors.destructive} />
-                        <Text className="text-sm font-semibold text-mauve-shadow-600">
+                        <Text className="text-sm font-semibold text-error-600">
                           {t('common.remove')}
                         </Text>
                       </>
@@ -272,11 +280,11 @@ export default function Dashboard() {
                   </Pressable>
                   {selectedRoutineIds.length === 1 ? (
                     <Pressable
-                      className="flex-row items-center gap-1.5 rounded-lg border border-seagrass-600 px-3 py-2 active:bg-seagrass-50"
+                      className="flex-row items-center gap-1.5 rounded-lg border border-navy-600 px-3 py-2 active:bg-navy-50"
                       onPress={handleEditRoutine}
                     >
                       <AppIcon path={mdiPencil} size={14} color={Colors.primary} />
-                      <Text className="text-sm font-semibold text-seagrass-600">
+                      <Text className="text-sm font-semibold text-navy-600">
                         {t('common.edit')}
                       </Text>
                     </Pressable>
@@ -284,15 +292,15 @@ export default function Dashboard() {
                 </View>
               ) : (
                 <View className="mb-2 mt-1.5 flex-row items-center gap-3">
-                  <Text className="flex-1 text-xs text-ash-grey-400">
+                  <Text className="flex-1 text-xs text-slate-400">
                     {t('dashboard.warmUpsNote')}
                   </Text>
                   <Pressable
-                    className="flex-row items-center gap-2 rounded-lg border border-seagrass-600 px-4 py-2 active:bg-seagrass-50"
+                    className="flex-row items-center gap-2 rounded-lg border border-navy-600 px-4 py-2 active:bg-navy-50"
                     onPress={() => router.push('/routine/edit')}
                   >
                     <AppIcon path={mdiPlus} size={14} color={Colors.primary} />
-                    <Text className="text-sm font-semibold text-seagrass-600">
+                    <Text className="text-sm font-semibold text-navy-600">
                       {t('dashboard.newRoutine')}
                     </Text>
                   </Pressable>
@@ -353,16 +361,14 @@ export default function Dashboard() {
 
             {/* Pieces header */}
             <View className="mt-2">
-              <Text className="text-[22px] font-bold text-ash-grey-950">
-                {t('dashboard.pieces')}
-              </Text>
+              <Text className="text-[22px] font-bold text-slate-950">{t('dashboard.pieces')}</Text>
             </View>
 
             {/* Privacy note + action buttons on same row */}
             {isPieceSelectionMode ? (
               <View className="mb-3 mt-1.5 flex-row justify-end gap-2">
                 <Pressable
-                  className="flex-row items-center gap-1.5 rounded-lg border border-mauve-shadow-600 px-3 py-2 active:bg-ash-grey-100"
+                  className="flex-row items-center gap-1.5 rounded-lg border border-error-600 px-3 py-2 active:bg-slate-100"
                   onPress={handleRemovePieces}
                   disabled={isDeletingPieces}
                 >
@@ -371,7 +377,7 @@ export default function Dashboard() {
                   ) : (
                     <>
                       <AppIcon path={mdiDelete} size={14} color={Colors.destructive} />
-                      <Text className="text-sm font-semibold text-mauve-shadow-600">
+                      <Text className="text-sm font-semibold text-error-600">
                         {t('common.remove')}
                       </Text>
                     </>
@@ -379,23 +385,19 @@ export default function Dashboard() {
                 </Pressable>
                 {selectedPieceIds.length === 1 ? (
                   <Pressable
-                    className="flex-row items-center gap-1.5 rounded-lg border border-seagrass-600 px-3 py-2 active:bg-seagrass-50"
+                    className="flex-row items-center gap-1.5 rounded-lg border border-navy-600 px-3 py-2 active:bg-navy-50"
                     onPress={handleEditPiece}
                   >
                     <AppIcon path={mdiPencil} size={14} color={Colors.primary} />
-                    <Text className="text-sm font-semibold text-seagrass-600">
-                      {t('common.edit')}
-                    </Text>
+                    <Text className="text-sm font-semibold text-navy-600">{t('common.edit')}</Text>
                   </Pressable>
                 ) : null}
               </View>
             ) : (
               <View className="mb-3 mt-1.5 flex-row items-center gap-3">
-                <Text className="flex-1 text-xs text-ash-grey-400">
-                  {t('dashboard.privacyNote')}
-                </Text>
+                <Text className="flex-1 text-xs text-slate-400">{t('dashboard.privacyNote')}</Text>
                 <Pressable
-                  className="flex-row items-center gap-2 rounded-lg border border-seagrass-600 px-4 py-2 active:bg-seagrass-50"
+                  className="flex-row items-center gap-2 rounded-lg border border-navy-600 px-4 py-2 active:bg-navy-50"
                   onPress={handleImport}
                   disabled={isLoading || isPicking}
                 >
@@ -404,7 +406,7 @@ export default function Dashboard() {
                   ) : (
                     <>
                       <AppIcon path={mdiPlus} size={14} color={Colors.primary} />
-                      <Text className="text-sm font-semibold text-seagrass-600">
+                      <Text className="text-sm font-semibold text-navy-600">
                         {t('dashboard.importMxl')}
                       </Text>
                     </>
@@ -415,7 +417,7 @@ export default function Dashboard() {
 
             {/* Pieces list */}
             {isEmpty && !isLoading && !isPicking ? (
-              <Text className="py-4 text-center text-sm text-ash-grey-400">
+              <Text className="py-4 text-center text-sm text-slate-400">
                 {t('dashboard.emptyTitle')}
               </Text>
             ) : (

@@ -271,12 +271,12 @@ export function SectionsBlock({
     <View className="gap-1">
       <View className="flex-row items-center justify-between">
         <View className="flex-row items-center gap-2">
-          <Text className="text-[13px] font-semibold text-ash-grey-950 opacity-[0.85]">
+          <Text className="text-[13px] font-semibold text-slate-950 opacity-[0.85]">
             {t('pieceEdit.sections.heading')}
           </Text>
           {/* One string, not three children: split text nodes are read out in
               fragments by a screen reader and cannot be matched as a phrase. */}
-          <Text className="text-[13px] text-ash-grey-500">
+          <Text className="text-[13px] text-slate-500">
             {`• ${t('pieceEdit.sections.count', { count: sections.length })}`}
           </Text>
         </View>
@@ -287,10 +287,10 @@ export function SectionsBlock({
             disabled={resetting}
             accessibilityRole="button"
             accessibilityLabel={t('pieceEdit.sections.reset')}
-            className="flex-row items-center gap-1 rounded-lg border border-ash-grey-500/50 bg-ash-grey-50 px-3 py-1.5"
+            className="flex-row items-center gap-1 rounded-lg border border-slate-500/50 bg-slate-50 px-3 py-1.5"
           >
             <AppIcon path={mdiArrowULeftTop} size={15} color={Colors.text} />
-            <Text className="text-[12px] font-semibold text-ash-grey-950">
+            <Text className="text-[12px] font-semibold text-slate-950">
               {t('pieceEdit.sections.reset')}
             </Text>
           </Pressable>
@@ -301,12 +301,12 @@ export function SectionsBlock({
         {mapState.status === 'loading' ? (
           <View className="flex-row items-center gap-2 py-3">
             <ActivityIndicator color={Colors.primary} />
-            <Text className="text-[12px] text-ash-grey-500">{t('pieceEdit.sections.loading')}</Text>
+            <Text className="text-[12px] text-slate-500">{t('pieceEdit.sections.loading')}</Text>
           </View>
         ) : null}
 
         {mapState.status === 'unavailable' ? (
-          <Text className="py-2 text-[12px] text-ash-grey-500">
+          <Text className="py-2 text-[12px] text-slate-500">
             {t('pieceEdit.sections.unreadable')}
           </Text>
         ) : null}

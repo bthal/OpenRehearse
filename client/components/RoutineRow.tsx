@@ -37,7 +37,7 @@ export function RoutineRow({
       onPress={onPress}
       onLongPress={onLongPress}
       delayLongPress={300}
-      className={`flex-row items-center border-b border-ash-grey-500/35 py-3.5 pl-2 pr-1 active:bg-ash-grey-500/12 ${isSelected ? 'bg-seagrass-500/20' : ''}`}
+      className={`flex-row items-center border-b border-slate-500/35 py-3.5 pl-2 pr-1 active:bg-slate-500/12 ${isSelected ? 'bg-navy-500/20' : ''}`}
     >
       {isSelectionMode ? (
         <View className="mr-3">
@@ -50,16 +50,16 @@ export function RoutineRow({
       ) : null}
 
       <View className="flex-1">
-        <Text className="text-lg font-semibold text-ash-grey-950" numberOfLines={1}>
+        <Text className="text-lg font-semibold text-slate-950" numberOfLines={1}>
           {routine.title || t('routineEdit.newTitle')}
         </Text>
-        <Text className="mt-0.5 text-sm opacity-[0.85] text-ash-grey-950" numberOfLines={1}>
+        <Text className="mt-0.5 text-sm opacity-[0.85] text-slate-950" numberOfLines={1}>
           {subtitle}
         </Text>
       </View>
 
       {!isSelectionMode ? (
-        <Text className="pl-3 pr-4 text-[28px] opacity-[0.45] text-ash-grey-950">›</Text>
+        <Text className="pl-3 pr-4 text-[28px] opacity-[0.45] text-slate-950">›</Text>
       ) : null}
     </Pressable>
   );

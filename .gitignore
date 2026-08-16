@@ -8,3 +8,7 @@ node_modules/
 # `.claude` itself is not ignored.
 .claude/*
 !.claude/skills/
+
+# Python bytecode from scripts/brand generators
+__pycache__/
+*.pyc
