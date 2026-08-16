@@ -248,21 +248,21 @@ export function PracticeHeatmap() {
 
   return (
     <View className="mt-8">
-      <Text className="text-[22px] font-bold text-ash-grey-950">{t('dashboard.stats')}</Text>
+      <Text className="text-[22px] font-bold text-slate-950">{t('dashboard.stats')}</Text>
 
       {/* Headline numbers: the streaks are the reason to come back to this section. */}
       <View className="mb-5 mt-3 flex-row justify-center gap-12">
         <View className="items-center">
-          <Text className="text-[20px] font-bold leading-[24px] text-seagrass-600">
+          <Text className="text-[20px] font-bold leading-[24px] text-navy-600">
             {t('dashboard.streakDays', { count: streaks.current })}
           </Text>
-          <Text className="text-xs text-ash-grey-950">{t('dashboard.currentStreak')}</Text>
+          <Text className="text-xs text-slate-950">{t('dashboard.currentStreak')}</Text>
         </View>
         <View className="items-center">
-          <Text className="text-[20px] font-bold leading-[24px] text-seagrass-600">
+          <Text className="text-[20px] font-bold leading-[24px] text-navy-600">
             {t('dashboard.streakDays', { count: streaks.longest })}
           </Text>
-          <Text className="text-xs text-ash-grey-950">{t('dashboard.longestStreak')}</Text>
+          <Text className="text-xs text-slate-950">{t('dashboard.longestStreak')}</Text>
         </View>
       </View>
 
@@ -330,7 +330,7 @@ export function PracticeHeatmap() {
       {/* Legend on the left, the selected day's total on the right. */}
       <View className="mt-2 flex-row items-center">
         <View className="flex-row items-center gap-1.5">
-          <Text className="text-[10px] text-ash-grey-400">{t('dashboard.practiceLess')}</Text>
+          <Text className="text-[10px] text-slate-400">{t('dashboard.practiceLess')}</Text>
           <View
             className="rounded-[3px]"
             style={{
@@ -346,11 +346,11 @@ export function PracticeHeatmap() {
               style={{ width: LEGEND_SWATCH, height: LEGEND_SWATCH, backgroundColor: color }}
             />
           ))}
-          <Text className="text-[10px] text-ash-grey-400">{t('dashboard.practiceMore')}</Text>
+          <Text className="text-[10px] text-slate-400">{t('dashboard.practiceMore')}</Text>
         </View>
 
         {/* Takes the rest of the row so a long date can wrap rather than clip. */}
-        <Text className="flex-1 text-right text-sm font-bold text-ash-grey-950">
+        <Text className="flex-1 text-right text-sm font-bold text-slate-950">
           {practiceDayCaption(t, selectedDay, dailySeconds[selectedDay] ?? 0, todayKey)}
         </Text>
       </View>

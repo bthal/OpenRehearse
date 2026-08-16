@@ -98,6 +98,7 @@ EAS free tier allows **15 Android builds per month**; this pipeline spends one p
 ```
 specs/          Product intent and acceptance criteria (source of truth)
 compound-docs/  Implementation memory — landmines, failed approaches
+scripts/brand/  Generators for the logo, lockups and app icons (+ palette check)
 client/         React Native / Expo app
   app/          Expo Router screens
   src/domain/   Pure TypeScript — loop math, MusicXML validation, tempo
@@ -105,6 +106,8 @@ client/         React Native / Expo app
   src/state/    Zustand stores
   score-web/    OSMD + Tone.js WebView bundle
   components/   Shared UI (NativeWind + MDI icons)
+  assets/brand/ Logo marks and lockups — generated, do not hand-edit
+  assets/fonts/ Bundled Outfit SemiBold (SIL OFL)
 ```
 
 See [`AGENTS.md`](AGENTS.md) for the coding-agent guide (required reading before non-trivial changes).

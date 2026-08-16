@@ -24,7 +24,7 @@ import { SectionLabel } from '@components/SectionLabel';
 import { ToolbarShell } from '@components/ToolbarShell';
 import { pieceRepository } from '@data/index';
 import type { Section } from '@domain/sections';
-import { SectionColors } from '@theme/colors';
+import { Colors, SectionColors } from '@theme/colors';
 import { SCORE_WEB_HTML } from '@score-web/html';
 import type { WebToNativeMessage } from '@score-web/messageProtocol';
 import { useCountInSync } from '@score-web/useCountInSync';
@@ -413,7 +413,7 @@ export default function PlayView() {
             <ToolbarShell ref={toolbarRef} hidden={isPlaying}>
               {/* Back */}
               <TouchableOpacity onPress={() => router.back()} hitSlop={12} className="p-1">
-                <AppIcon path={mdiArrowLeft} size={24} color="#374151" />
+                <AppIcon path={mdiArrowLeft} size={24} color={Colors.icon} />
               </TouchableOpacity>
 
               {/* Loop select / clear */}
@@ -421,7 +421,7 @@ export default function PlayView() {
                 <AppIcon
                   path={loopActive ? mdiClose : mdiRepeat}
                   size={26}
-                  color={loopActive ? '#9C6B8A' : '#374151'}
+                  color={loopActive ? Colors.primary : Colors.icon}
                 />
               </TouchableOpacity>
 
@@ -430,7 +430,7 @@ export default function PlayView() {
                 <AppIcon
                   path={metronomeOn ? mdiMetronome : mdiMetronomeTick}
                   size={26}
-                  color={metronomeOn ? '#4B7A6E' : '#374151'}
+                  color={metronomeOn ? Colors.primary : Colors.icon}
                 />
               </TouchableOpacity>
 
@@ -440,7 +440,7 @@ export default function PlayView() {
                   <AppIcon
                     path={HAND_ICON[activeHand]}
                     size={22}
-                    color={activeHand !== 'both' ? '#4B7A6E' : '#374151'}
+                    color={activeHand !== 'both' ? Colors.primary : Colors.icon}
                   />
                 </TouchableOpacity>
               </View>
@@ -454,7 +454,7 @@ export default function PlayView() {
                 >
                   <View style={{ height: 22, justifyContent: 'center', alignItems: 'center' }}>
                     {speedOpen ? (
-                      <AppIcon path={mdiSpeedometer} size={22} color="#4B7A6E" />
+                      <AppIcon path={mdiSpeedometer} size={22} color={Colors.primary} />
                     ) : (
                       <Text className="text-base font-semibold text-gray-700">
                         {MULTIPLIER_LABEL[tempoMultiplier]}
@@ -548,7 +548,7 @@ export default function PlayView() {
                     style={{
                       fontSize: 14,
                       fontWeight: '600',
-                      color: isActive ? '#4B7A6E' : '#9CA3AF',
+                      color: isActive ? Colors.primary : Colors.iconMuted,
                     }}
                   >
                     {MULTIPLIER_LABEL[m]}
@@ -593,7 +593,7 @@ export default function PlayView() {
                   <AppIcon
                     path={HAND_ICON[hand]}
                     size={22}
-                    color={isActive ? '#4B7A6E' : '#9CA3AF'}
+                    color={isActive ? Colors.primary : Colors.iconMuted}
                   />
                 </TouchableOpacity>
               );
@@ -603,7 +603,7 @@ export default function PlayView() {
           {/* Overlay: WebView not yet loaded */}
           {!webViewReady && !scoreError && (
             <View className="absolute inset-0 items-center justify-center bg-white">
-              <AppIcon path={mdiMusicNoteOutline} size={48} color="#D1D5DB" />
+              <AppIcon path={mdiMusicNoteOutline} size={48} color={Colors.iconDisabled} />
               <Text className="mt-3 text-sm text-gray-400">{t('common.preparingScore')}</Text>
             </View>
           )}
@@ -611,7 +611,7 @@ export default function PlayView() {
           {/* Overlay: XML sent, OSMD rendering */}
           {isLoadingScore && (
             <View className="absolute inset-0 items-center justify-center bg-white">
-              <ActivityIndicator size="large" color="#4B7A6E" />
+              <ActivityIndicator size="large" color={Colors.primary} />
               <Text className="mt-3 text-sm text-gray-500">{t('common.loadingScore')}</Text>
             </View>
           )}
@@ -619,16 +619,16 @@ export default function PlayView() {
           {/* Error state */}
           {scoreError && (
             <View className="absolute inset-0 items-center justify-center bg-white px-8">
-              <AppIcon path={mdiAlertCircleOutline} size={48} color="#9C6B8A" />
+              <AppIcon path={mdiAlertCircleOutline} size={48} color={Colors.error} />
               <Text className="mt-3 text-base font-semibold text-gray-800 text-center">
                 {t('common.couldNotRender')}
               </Text>
               <Text className="mt-1 text-sm text-gray-500 text-center">{scoreError}</Text>
               <TouchableOpacity
-                className="mt-5 px-5 py-2.5 rounded-lg bg-seagrass-600 active:bg-seagrass-700"
+                className="mt-5 px-5 py-2.5 rounded-lg bg-navy-600 active:bg-navy-700"
                 onPress={() => reset()}
               >
-                <Text className="text-sm font-semibold text-ash-grey-50">{t('common.retry')}</Text>
+                <Text className="text-sm font-semibold text-slate-50">{t('common.retry')}</Text>
               </TouchableOpacity>
             </View>
           )}

@@ -48,6 +48,7 @@ import {
   type WarmUpType,
 } from '@domain/warmup';
 import { useWarmUpStore } from '@state/warmupStore';
+import { Colors } from '@theme/colors';
 
 type PanelKey = 'speed' | 'hand' | 'key' | 'octave' | 'peak';
 type OpenPanel = PanelKey | null;
@@ -444,7 +445,7 @@ export default function WarmUpView() {
             <ToolbarShell ref={toolbarRef} hidden={isPlaying}>
               {/* Back */}
               <TouchableOpacity onPress={() => router.back()} hitSlop={12} className="p-1">
-                <AppIcon path={mdiArrowLeft} size={24} color="#374151" />
+                <AppIcon path={mdiArrowLeft} size={24} color={Colors.icon} />
               </TouchableOpacity>
 
               {/* Metronome */}
@@ -452,7 +453,7 @@ export default function WarmUpView() {
                 <AppIcon
                   path={metronomeOn ? mdiMetronome : mdiMetronomeTick}
                   size={26}
-                  color={metronomeOn ? '#4B7A6E' : '#374151'}
+                  color={metronomeOn ? Colors.primary : Colors.icon}
                 />
               </TouchableOpacity>
 
@@ -484,7 +485,7 @@ export default function WarmUpView() {
                   <AppIcon
                     path={HAND_ICON[settings.hand]}
                     size={22}
-                    color={settings.hand !== 'both' ? '#4B7A6E' : '#374151'}
+                    color={settings.hand !== 'both' ? Colors.primary : Colors.icon}
                   />
                 </TouchableOpacity>
               </View>
@@ -499,7 +500,7 @@ export default function WarmUpView() {
                   >
                     <Text
                       className="text-base font-semibold mt-0.5"
-                      style={{ color: openPanel === 'key' ? '#4B7A6E' : '#374151' }}
+                      style={{ color: openPanel === 'key' ? Colors.primary : Colors.icon }}
                     >
                       {currentKeyLabel}
                     </Text>
@@ -518,7 +519,7 @@ export default function WarmUpView() {
                   >
                     <Text
                       className="text-base font-semibold mt-0.5"
-                      style={{ color: openPanel === 'peak' ? '#4B7A6E' : '#374151' }}
+                      style={{ color: openPanel === 'peak' ? Colors.primary : Colors.icon }}
                     >
                       ×{peakRepeats}
                     </Text>
@@ -537,7 +538,7 @@ export default function WarmUpView() {
                   >
                     <Text
                       className="text-base font-semibold mt-0.5"
-                      style={{ color: openPanel === 'octave' ? '#4B7A6E' : '#374151' }}
+                      style={{ color: openPanel === 'octave' ? Colors.primary : Colors.icon }}
                     >
                       {settings.octaves}
                     </Text>
@@ -574,7 +575,7 @@ export default function WarmUpView() {
                     style={{
                       fontSize: 13,
                       fontWeight: '600',
-                      color: settings.bpm === bpm ? '#4B7A6E' : '#9CA3AF',
+                      color: settings.bpm === bpm ? Colors.primary : Colors.iconMuted,
                     }}
                   >
                     {bpm}
@@ -606,7 +607,7 @@ export default function WarmUpView() {
                 <AppIcon
                   path={HAND_ICON[hand]}
                   size={22}
-                  color={settings.hand === hand ? '#4B7A6E' : '#9CA3AF'}
+                  color={settings.hand === hand ? Colors.primary : Colors.iconMuted}
                 />
               </TouchableOpacity>
             ))}
@@ -644,7 +645,7 @@ export default function WarmUpView() {
                         style={{
                           fontSize: 13,
                           fontWeight: '600',
-                          color: isActive ? '#4B7A6E' : '#9CA3AF',
+                          color: isActive ? Colors.primary : Colors.iconMuted,
                         }}
                       >
                         {k.label}
@@ -680,7 +681,7 @@ export default function WarmUpView() {
                     style={{
                       fontSize: 13,
                       fontWeight: '600',
-                      color: peakRepeats === n ? '#4B7A6E' : '#9CA3AF',
+                      color: peakRepeats === n ? Colors.primary : Colors.iconMuted,
                     }}
                   >
                     ×{n}
@@ -714,7 +715,7 @@ export default function WarmUpView() {
                     style={{
                       fontSize: 14,
                       fontWeight: '600',
-                      color: settings.octaves === n ? '#4B7A6E' : '#9CA3AF',
+                      color: settings.octaves === n ? Colors.primary : Colors.iconMuted,
                     }}
                   >
                     {n}
@@ -727,7 +728,7 @@ export default function WarmUpView() {
           {/* Overlay: WebView loading */}
           {!webViewReady && !scoreError && (
             <View className="absolute inset-0 items-center justify-center bg-white">
-              <AppIcon path={mdiMusicNoteOutline} size={48} color="#D1D5DB" />
+              <AppIcon path={mdiMusicNoteOutline} size={48} color={Colors.iconDisabled} />
               <Text className="mt-3 text-sm text-gray-400">{t('common.preparingScore')}</Text>
             </View>
           )}
@@ -735,7 +736,7 @@ export default function WarmUpView() {
           {/* Overlay: score rendering */}
           {isLoadingScore && (
             <View className="absolute inset-0 items-center justify-center bg-white">
-              <ActivityIndicator size="large" color="#4B7A6E" />
+              <ActivityIndicator size="large" color={Colors.primary} />
               <Text className="mt-3 text-sm text-gray-500">{t('common.loadingScore')}</Text>
             </View>
           )}
@@ -743,16 +744,16 @@ export default function WarmUpView() {
           {/* Error state */}
           {scoreError && (
             <View className="absolute inset-0 items-center justify-center bg-white px-8">
-              <AppIcon path={mdiAlertCircleOutline} size={48} color="#9C6B8A" />
+              <AppIcon path={mdiAlertCircleOutline} size={48} color={Colors.error} />
               <Text className="mt-3 text-base font-semibold text-gray-800 text-center">
                 {t('common.couldNotRender')}
               </Text>
               <Text className="mt-1 text-sm text-gray-500 text-center">{scoreError}</Text>
               <TouchableOpacity
-                className="mt-5 px-5 py-2.5 rounded-lg bg-seagrass-600 active:bg-seagrass-700"
+                className="mt-5 px-5 py-2.5 rounded-lg bg-navy-600 active:bg-navy-700"
                 onPress={() => resetPlayback()}
               >
-                <Text className="text-sm font-semibold text-ash-grey-50">{t('common.retry')}</Text>
+                <Text className="text-sm font-semibold text-slate-50">{t('common.retry')}</Text>
               </TouchableOpacity>
             </View>
           )}
