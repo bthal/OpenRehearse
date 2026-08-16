@@ -37,6 +37,8 @@
     "stats": "Stats",
     "currentStreak": "Current streak",
     "longestStreak": "Longest streak",
+    "streakDays_one": "{{count}} day",
+    "streakDays_other": "{{count}} days",
     "practiceDayToday": "Today, {{date}}",
     "practiceDayNone": "{{date}} · no practice",
     "practiceDayUnderMinute": "{{date}} · under a minute",

@@ -1,5 +1,5 @@
 import {
-  contrastWithWhite,
+  contrastWithBlack,
   hexToOklch,
   hueRamp,
   oklchToHex,
@@ -9,8 +9,14 @@ import {
 } from '../oklch';
 import { SectionColors } from '../../theme/colors';
 
-/** The section label draws white text on the section color; below this it stops being readable. */
-const MIN_CONTRAST = 4.5;
+/**
+ * A lightness floor, not a legibility one — the label's white text sits at roughly 2:1
+ * on this palette by choice, so nothing here promises the text is readable. What this
+ * pins is that the colors stay *light*: contrast against black rises with luminance, so
+ * a floor here is a floor on how pale every reachable color is. A regression that
+ * darkened the ramp back toward the old saturated mid-tones would trip it.
+ */
+const MIN_LIGHTNESS_CONTRAST = 6;
 
 describe('oklchToHex', () => {
   it('always produces a 6-digit hex', () => {
@@ -36,23 +42,23 @@ describe('oklchToHex', () => {
   });
 });
 
-describe('the hue ramp holds white text', () => {
+describe('the hue ramp holds one lightness', () => {
   // This is the test the whole module exists for. The picker lets the user land on any
-  // hue, so legibility has to be a property of the ramp rather than something validated
-  // afterwards. If this fails, lower SECTION_HUE_LIGHTNESS — do not relax the threshold.
-  it('clears 4.5:1 against white at every one of 360 hues', () => {
+  // hue, so "every section color weighs the same" has to be a property of the ramp
+  // rather than something checked after the fact.
+  it('stays light at every one of 360 hues', () => {
     const failures: string[] = [];
     for (let h = 0; h < 360; h++) {
       const hex = oklchToHex(SECTION_HUE_LIGHTNESS, SECTION_HUE_CHROMA, h);
-      const ratio = contrastWithWhite(hex);
-      if (ratio < MIN_CONTRAST) failures.push(`h=${h} ${hex} ${ratio.toFixed(2)}`);
+      const ratio = contrastWithBlack(hex);
+      if (ratio < MIN_LIGHTNESS_CONTRAST) failures.push(`h=${h} ${hex} ${ratio.toFixed(2)}`);
     }
     expect(failures).toEqual([]);
   });
 
-  it('keeps contrast in a narrow band, which is the point of fixing lightness', () => {
+  it('keeps luminance in a narrow band, which is the point of fixing lightness', () => {
     const ratios = Array.from({ length: 360 }, (_, h) =>
-      contrastWithWhite(oklchToHex(SECTION_HUE_LIGHTNESS, SECTION_HUE_CHROMA, h)),
+      contrastWithBlack(oklchToHex(SECTION_HUE_LIGHTNESS, SECTION_HUE_CHROMA, h)),
     );
     // Constant OKLCH lightness should keep the spread small. A regression that reverted
     // to constant HSL lightness would blow this out well past 2x.
@@ -60,25 +66,25 @@ describe('the hue ramp holds white text', () => {
   });
 });
 
-describe('contrastWithWhite', () => {
+describe('contrastWithBlack', () => {
   it('reproduces known ratios for the shipped palette', () => {
     // Guards the luminance maths itself, independently of the ramp.
-    expect(contrastWithWhite('#A96404')).toBeCloseTo(4.65, 1); // ochre — the darkest-pressed preset
-    expect(contrastWithWhite('#0B65DA')).toBeCloseTo(5.4, 1); // blue
-    expect(contrastWithWhite('#FFFFFF')).toBeCloseTo(1, 2);
+    expect(contrastWithBlack('#FF8FB6')).toBeCloseTo(9.9, 1); // magenta — the darkest preset
+    expect(contrastWithBlack('#8BB9FF')).toBeCloseTo(10.5, 1); // blue
+    expect(contrastWithBlack('#000000')).toBeCloseTo(1, 2);
   });
 
   it('returns 1 for a malformed color rather than throwing', () => {
-    expect(contrastWithWhite('red')).toBe(1);
-    expect(contrastWithWhite('#fff')).toBe(1);
+    expect(contrastWithBlack('red')).toBe(1);
+    expect(contrastWithBlack('#fff')).toBe(1);
   });
 });
 
 describe('the shipped palette', () => {
-  // theme/colors.ts claims every entry carries white at ~4.5:1. Pin that claim.
-  it('holds white text on every preset', () => {
+  // theme/colors.ts claims every entry is a light tint. Pin that claim.
+  it('is light on every preset', () => {
     for (const hex of SectionColors) {
-      expect(contrastWithWhite(hex)).toBeGreaterThanOrEqual(MIN_CONTRAST);
+      expect(contrastWithBlack(hex)).toBeGreaterThanOrEqual(MIN_LIGHTNESS_CONTRAST);
     }
   });
 

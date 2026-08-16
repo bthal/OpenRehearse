@@ -45,6 +45,11 @@ The entire piece is rendered in a **single horizontal line** — all measures la
 
 ## Rendering
 
+- The screen runs **edge to edge** — deliberately *not* wrapped in a `SafeAreaView`. Insetting the
+  whole surface pads it in that view's own white, which on a landscape phone with a display cutout
+  is a blank band beside the camera where notation could be. The score reaches the physical edges
+  instead, and the two overlays that must clear the cutout apply the insets themselves: the toolbar
+  pads and travels by the left inset, the section label sits below the top inset.
 - **OpenSheetMusicDisplay** inside **WebView** (see `architecture.md`).
 - **OSMD standard cursor**, moving **smoothly** with the playback position — not jumping discretely note-to-note. Use OSMD's documented cursor / playback integration; do not replace with a hand-drawn caret unless OSMD proves insufficient (then ADR required).
 - OSMD title, subtitle, composer, lyricist, and copyright rendering are **suppressed**
@@ -101,14 +106,39 @@ The entire piece is rendered in a **single horizontal line** — all measures la
   - While dragging a handle, the score **scrolls to follow** the handle being dragged so it stays visible.
 - **Playback wrap**: on reaching B, playback **immediately jumps** to A (no fade or ritardando).
 
+## Play button
+
+- The play affordance is a **translucent disc in the middle of the screen**, sitting on the cursor,
+  like a paused video. It is **not in the toolbar**.
+- **Decorative, not a button.** It does not take touches: the tap that starts playback is the
+  score's own tap-to-toggle underneath it. The cursor is also where the score is dragged from, and a
+  real button there would swallow every pan that started at the centre of the screen.
+- **Shown only when the score is at rest** — hidden while a finger is panning it, while momentum is
+  coasting, while the settle glide runs, and while a loop handle is being dragged. Offering to play
+  from a position the user has not chosen yet would be a lie, and a disc sliding over moving
+  notation reads as a bug. The WebView reports this over `SCORE_MOTION`.
+- **Playing hides it entirely.** There is no pause variant; tapping anywhere pauses.
+- **No fade in either direction.** It appears and disappears outright — it is answering a tap, or
+  the instant a glide lands, and a fade would put it visibly behind the thing it responds to.
+
 ## Toolbar
 
 - Positioned **vertically on the left side** of the PlayView screen, **vertically centered**,
   overlaid on the score — no separate header row.
+- **Slides off the left edge while playing** and back on pause. Together with the play button
+  vanishing and the section label rolling up, playback leaves nothing on screen but the notation.
+  The consequence is deliberate: *no* control — back, loop, metronome, hand or speed — is reachable
+  while playing. Tapping the score pauses, and everything comes back, so each is one tap away.
+- The three react **immediately and independently** — no stagger, no shared cascade. Each answers
+  the same moment on its own terms: the button and label are instant, the toolbar slides.
+- The slide travels the card's width **plus the left safe-area inset**, since the screen runs edge
+  to edge (below) and `left: 0` is the physical edge. Without the inset term the card would come to
+  rest in the strip beside a landscape phone's camera — still on screen.
+- The slide uses `useNativeDriver: false` — required for correctness, not speed. See
+  `compound-docs/expo-rn-setup.md` § "Native-driver animations flicker on release".
 - Controls (top to bottom):
   - **Back button** — navigates back to the Dashboard.
   - **Loop button** (icon: loop-icon when inactive; × when active)
-  - **Play / Pause**
   - **Metronome toggle** — when enabled, clicks every quarter note; first beat of each measure
     accented (higher pitch, louder). Works for any time signature.
   - **Hand selector** — collapses to current selection label + hand icon (teal when filtering
@@ -123,16 +153,18 @@ The entire piece is rendered in a **single horizontal line** — all measures la
 
 ## Section label
 
-- A label in the **upper-right** corner names the section the cursor is currently in: bold white
-  text on the section's color, fading out at the left and right ends. Inert (tapping does nothing).
+- A label **centred across the top** of the screen names the section the cursor is currently in:
+  bold white text on the section's color, fading out at the left and right ends. Inert (tapping
+  does nothing).
 - **Playing** rolls it up to a thin strip of that color — same width, no text. **Pausing** unrolls
   it. Only the height animates, so it reads as one object rather than a swap.
-- Pinned in absolute screen space above the WebView, at a fixed width so names slide through a
-  stable frame.
+- Pinned in absolute screen space above the WebView, spanning **50% of the screen width** — one
+  width for every section, so names slide through a stable frame. The end fades scale with it.
 - **Swiped** horizontally to move one section, while **paused** and while **no loop is active**. It
   is a pager: dragging rightward brings the earlier section in from the left, names travel with the
   finger, and the two sections' colors crossfade. One swipe moves exactly one section; at the first
-  and last it rubber-bands and springs back.
+  and last it rubber-bands and springs back. The distance that commits a swipe is **absolute**, not
+  a fraction of the width — the gesture should cost the same effort whatever the label spans.
 - The name follows the score **continuously while panning**, not only once the scroll settles.
 - **Nothing is rendered** when the piece has no detected sections.
 - Every junction between two sections is also marked **in the score**, under the notation: the two
@@ -145,6 +177,7 @@ Slices: `activePieceId`, `webViewReady`, `isLoadingScore`, `scoreError`, `isPlay
 `scoreBpm` (from MusicXML), `tempoMultiplier` (×0.5/×0.75/×1.0), `metronomeOn: boolean`,
 `activeHand: 'both' | 'right' | 'left'` (resets to `'both'` on piece unmount),
 `currentSectionIndex: number | null` (driven by `SECTION_INDEX` from the WebView, which owns position),
+`scoreMoving: boolean` (driven by `SCORE_MOTION` from the WebView, which owns the gesture),
 `loop: { start, end } | null`,
 `displayMode: 'one-line' | 'standard'` (global preference; `'one-line'` in MVP, no UI to change it yet).
 
@@ -167,6 +200,11 @@ Slices: `activePieceId`, `webViewReady`, `isLoadingScore`, `scoreError`, `isPlay
 - [x] A measure's first onset sits on its barline, so the cursor, loop bounds and section junctions
   all align with the engraved barlines; the opening measure is excluded (`domain/scoreGrid.ts`).
 - [x] Toolbar renders vertically on the left. *(Phase 4)*
+- [x] Play/pause is a decorative translucent disc on the cursor at screen centre, not a toolbar
+      button; it is hidden while the score is panning, coasting, gliding or a handle is dragged,
+      and hidden entirely while playing.
+- [x] The toolbar slides off the left edge on play and back on pause, clearing a display cutout;
+      the toolbar, play button and label each react immediately, with no stagger between them.
 - [x] Tapping loop button creates loop at cursor with fixed pixel span (`LOOP_DEFAULT_PX`);
   also pauses playback if running. Tapping again (× icon) removes it. *(Phase 4/5)*
 - [x] Manual scroll has momentum: score decelerates after lift; `MOMENTUM_DECELERATION`
@@ -193,8 +231,8 @@ Slices: `activePieceId`, `webViewReady`, `isLoadingScore`, `scoreError`, `isPlay
   time signature. *(Phase 5)*
 - [x] Hand selector (Both/Right/Left): selected staff plays audio and notes stay black;
   inactive staff notes greyed (`#B0B0B0`); switching hand preserves cursor position.
-- [x] Section label shows the current section in the upper-right corner, and is absent entirely
-      for a piece with no detected sections.
+- [x] Section label shows the current section centred across the top at 50% of the screen width,
+      in white on the section's color, and is absent entirely for a piece with no detected sections.
 - [x] Swiping the label moves exactly one section, and is inert while playing or while a loop
       is armed.
 - [x] The label rolls up to a strip while playing and unrolls on pause, animated in both directions.

@@ -8,20 +8,20 @@ import {
   mdiMetronome,
   mdiMetronomeTick,
   mdiMusicNoteOutline,
-  mdiPause,
-  mdiPlay,
   mdiRepeat,
   mdiSpeedometer,
 } from '@mdi/js';
 import { router, Stack, useLocalSearchParams } from 'expo-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Animated, ActivityIndicator, Text, TouchableOpacity, View } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import WebView, { type WebViewMessageEvent } from 'react-native-webview';
 import { useTranslation } from 'react-i18next';
 
 import { AppIcon } from '@components/AppIcon';
+import { CenterPlayButton } from '@components/CenterPlayButton';
 import { SectionLabel } from '@components/SectionLabel';
+import { ToolbarShell } from '@components/ToolbarShell';
 import { pieceRepository } from '@data/index';
 import type { Section } from '@domain/sections';
 import { SectionColors } from '@theme/colors';
@@ -55,6 +55,7 @@ const HAND_ICON: Record<ActiveHand, string> = {
 
 export default function PlayView() {
   const { t } = useTranslation();
+  const insets = useSafeAreaInsets();
   const { id } = useLocalSearchParams<{ id: string }>();
   const piece = usePiecesStore((s) => (id ? s.piecesById[id] : undefined));
   const touchPiece = usePiecesStore((s) => s.touchPiece);
@@ -69,6 +70,7 @@ export default function PlayView() {
   const metronomeOn = usePlayViewStore((s) => s.metronomeOn);
   const activeHand = usePlayViewStore((s) => s.activeHand);
   const currentSectionIndex = usePlayViewStore((s) => s.currentSectionIndex);
+  const scoreMoving = usePlayViewStore((s) => s.scoreMoving);
 
   const setWebViewReady = usePlayViewStore((s) => s.setWebViewReady);
   const setLoadingScore = usePlayViewStore((s) => s.setLoadingScore);
@@ -80,6 +82,7 @@ export default function PlayView() {
   const setMetronomeOn = usePlayViewStore((s) => s.setMetronomeOn);
   const setActiveHand = usePlayViewStore((s) => s.setActiveHand);
   const setCurrentSectionIndex = usePlayViewStore((s) => s.setCurrentSectionIndex);
+  const setScoreMoving = usePlayViewStore((s) => s.setScoreMoving);
   const reset = usePlayViewStore((s) => s.reset);
 
   const [speedOpen, setSpeedOpen] = useState(false);
@@ -286,6 +289,9 @@ export default function PlayView() {
         case 'SECTION_INDEX':
           setCurrentSectionIndex(msg.payload);
           break;
+        case 'SCORE_MOTION':
+          setScoreMoving(msg.payload);
+          break;
       }
     },
     [
@@ -295,16 +301,9 @@ export default function PlayView() {
       setPlaying,
       setLoopActive,
       setCurrentSectionIndex,
+      setScoreMoving,
     ],
   );
-
-  const handlePlayPause = useCallback(() => {
-    if (isPlaying) {
-      webViewRef.current?.injectJavaScript('window.__rn_pause();void 0;');
-    } else {
-      webViewRef.current?.injectJavaScript('window.__rn_play();void 0;');
-    }
-  }, [isPlaying]);
 
   const handleMultiplierChange = useCallback(
     (m: TempoMultiplier) => {
@@ -381,7 +380,12 @@ export default function PlayView() {
   return (
     <>
       <Stack.Screen options={{ orientation: 'landscape' }} />
-      <SafeAreaView className="flex-1 bg-white">
+      {/* Deliberately not a SafeAreaView: the app runs edge to edge, and insetting here
+        would pad the whole screen in this view's own white — a blank band beside a
+        landscape phone's camera where the notation could be. The score runs to the
+        physical edges instead, and the two overlays that must clear the cutout (the
+        toolbar and the section label) apply the insets themselves. */}
+      <View className="flex-1 bg-white">
         {/* Score area — WebView fills all space, toolbar floats over it */}
         <View ref={scoreAreaRef} className="flex-1">
           {/* baseUrl required on Android for large inline HTML; allowUniversalAccessFromFileURLs
@@ -399,95 +403,75 @@ export default function PlayView() {
             style={{ flex: 1 }}
           />
 
-          {/* Toolbar — vertically centered, left-side overlay */}
+          {/* The play affordance sits on the cursor at screen centre, not in the
+            toolbar. Decorative — the WebView's tap-on-the-score handles the press. */}
+          <CenterPlayButton ready={scoreReady} playing={isPlaying} scoreMoving={scoreMoving} />
+
+          {/* Toolbar — vertically centered, left-side overlay. Slides away while
+            playing, leaving the notation alone; tapping the score brings it back. */}
           {scoreReady && (
-            <View
-              style={{
-                position: 'absolute',
-                left: 0,
-                top: 0,
-                bottom: 0,
-                justifyContent: 'center',
-              }}
-            >
-              <View
-                ref={toolbarRef}
-                className="bg-white rounded-xl py-3 px-2 items-center gap-4"
-                style={{
-                  elevation: 4,
-                  shadowColor: '#000',
-                  shadowOpacity: 0.12,
-                  shadowRadius: 6,
-                  shadowOffset: { width: 2, height: 0 },
-                }}
-              >
-                {/* Back */}
-                <TouchableOpacity onPress={() => router.back()} hitSlop={12} className="p-1">
-                  <AppIcon path={mdiArrowLeft} size={24} color="#374151" />
-                </TouchableOpacity>
+            <ToolbarShell ref={toolbarRef} hidden={isPlaying}>
+              {/* Back */}
+              <TouchableOpacity onPress={() => router.back()} hitSlop={12} className="p-1">
+                <AppIcon path={mdiArrowLeft} size={24} color="#374151" />
+              </TouchableOpacity>
 
-                {/* Loop select / clear */}
-                <TouchableOpacity onPress={handleLoopToggle} hitSlop={8} className="p-1.5">
+              {/* Loop select / clear */}
+              <TouchableOpacity onPress={handleLoopToggle} hitSlop={8} className="p-1.5">
+                <AppIcon
+                  path={loopActive ? mdiClose : mdiRepeat}
+                  size={26}
+                  color={loopActive ? '#9C6B8A' : '#374151'}
+                />
+              </TouchableOpacity>
+
+              {/* Metronome toggle */}
+              <TouchableOpacity onPress={handleMetronomeToggle} hitSlop={8} className="p-1.5">
+                <AppIcon
+                  path={metronomeOn ? mdiMetronome : mdiMetronomeTick}
+                  size={26}
+                  color={metronomeOn ? '#4B7A6E' : '#374151'}
+                />
+              </TouchableOpacity>
+
+              {/* Hand selector trigger */}
+              <View ref={handTriggerRef}>
+                <TouchableOpacity onPress={toggleHand} hitSlop={8} className="p-1.5">
                   <AppIcon
-                    path={loopActive ? mdiClose : mdiRepeat}
-                    size={26}
-                    color={loopActive ? '#9C6B8A' : '#374151'}
+                    path={HAND_ICON[activeHand]}
+                    size={22}
+                    color={activeHand !== 'both' ? '#4B7A6E' : '#374151'}
                   />
                 </TouchableOpacity>
-
-                {/* Play / Pause */}
-                <TouchableOpacity onPress={handlePlayPause} hitSlop={8} className="p-1">
-                  <AppIcon path={isPlaying ? mdiPause : mdiPlay} size={36} color="#4B7A6E" />
-                </TouchableOpacity>
-
-                {/* Metronome toggle */}
-                <TouchableOpacity onPress={handleMetronomeToggle} hitSlop={8} className="p-1.5">
-                  <AppIcon
-                    path={metronomeOn ? mdiMetronome : mdiMetronomeTick}
-                    size={26}
-                    color={metronomeOn ? '#4B7A6E' : '#374151'}
-                  />
-                </TouchableOpacity>
-
-                {/* Hand selector trigger */}
-                <View ref={handTriggerRef}>
-                  <TouchableOpacity onPress={toggleHand} hitSlop={8} className="p-1.5">
-                    <AppIcon
-                      path={HAND_ICON[activeHand]}
-                      size={22}
-                      color={activeHand !== 'both' ? '#4B7A6E' : '#374151'}
-                    />
-                  </TouchableOpacity>
-                </View>
-
-                {/* Speed trigger — icon when open, current speed label when closed */}
-                <View ref={speedTriggerRef}>
-                  <TouchableOpacity
-                    onPress={toggleSpeed}
-                    hitSlop={8}
-                    className="items-center px-2 py-1"
-                  >
-                    <View style={{ height: 22, justifyContent: 'center', alignItems: 'center' }}>
-                      {speedOpen ? (
-                        <AppIcon path={mdiSpeedometer} size={22} color="#4B7A6E" />
-                      ) : (
-                        <Text className="text-base font-semibold text-gray-700">
-                          {MULTIPLIER_LABEL[tempoMultiplier]}
-                        </Text>
-                      )}
-                    </View>
-                    <Text className="text-[9px] text-black mt-0.5">
-                      {effectiveBpm} {t('common.bpm')}
-                    </Text>
-                  </TouchableOpacity>
-                </View>
               </View>
-            </View>
+
+              {/* Speed trigger — icon when open, current speed label when closed */}
+              <View ref={speedTriggerRef}>
+                <TouchableOpacity
+                  onPress={toggleSpeed}
+                  hitSlop={8}
+                  className="items-center px-2 py-1"
+                >
+                  <View style={{ height: 22, justifyContent: 'center', alignItems: 'center' }}>
+                    {speedOpen ? (
+                      <AppIcon path={mdiSpeedometer} size={22} color="#4B7A6E" />
+                    ) : (
+                      <Text className="text-base font-semibold text-gray-700">
+                        {MULTIPLIER_LABEL[tempoMultiplier]}
+                      </Text>
+                    )}
+                  </View>
+                  <Text className="text-[9px] text-black mt-0.5">
+                    {effectiveBpm} {t('common.bpm')}
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            </ToolbarShell>
           )}
 
-          {/* Section label — upper-right overlay. Absent when the piece has a single
-            section: every piece has one after normalisation, so a lone section means
-            "no readable form" and there is nothing worth labelling. */}
+          {/* Section label — centred overlay across the top. Absent when the piece has a
+            single section: every piece has one after normalisation, so a lone section
+            means "no readable form" and there is nothing worth labelling. */}
           {scoreReady && activeSection && currentSectionIndex !== null && (
             // Pinned in absolute screen space and lifted above the WebView, like the
             // cursor line: it must not ride on anything the score layout can move.
@@ -495,7 +479,18 @@ export default function PlayView() {
             // a native WebView.
             <View
               pointerEvents="box-none"
-              style={{ position: 'absolute', top: 8, right: 8, zIndex: 30, elevation: 6 }}
+              style={{
+                // Centred on the full width, which is where the cursor line sits too.
+                // Only the top inset applies: the screen draws edge to edge, so without
+                // it the label would sit under the status bar.
+                position: 'absolute',
+                top: insets.top + 8,
+                left: 0,
+                right: 0,
+                alignItems: 'center',
+                zIndex: 30,
+                elevation: 6,
+              }}
             >
               <SectionLabel
                 name={
@@ -638,7 +633,7 @@ export default function PlayView() {
             </View>
           )}
         </View>
-      </SafeAreaView>
+      </View>
     </>
   );
 }

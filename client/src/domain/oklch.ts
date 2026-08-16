@@ -2,45 +2,49 @@
  * OKLCH ↔ sRGB, and the constant-lightness hue ramp behind the section color picker.
  * Pure: no React, no theme import.
  *
- * Why a perceptual space at all. The section label always draws white text, so every
- * section color has to hold white at roughly 4.5:1. Lightness in HSL does not predict
- * that: at `hsl(H 80% 45%)` a blue clears 4.5:1 comfortably while a yellow-green is
- * nowhere near, because HSL lightness ignores how much luminance a hue actually
- * carries. Sweeping hue at a fixed HSL lightness therefore produces a ramp that is
- * legible over part of the circle and illegible over the rest.
+ * Why a perceptual space at all. Every section color has to be equally *light*: they
+ * are read side by side, and one hue that lands visibly heavier than its neighbours
+ * reads as emphasis the app never meant. HSL cannot deliver that. At `hsl(H 80% 70%)`
+ * a yellow-green carries far more luminance than a blue, because HSL lightness ignores
+ * how much light a hue actually reflects — so sweeping hue at fixed HSL lightness
+ * produces a ramp that is pale over part of the circle and dark over the rest.
  *
- * OKLCH lightness does predict it. Holding L fixed and letting hue vary keeps
- * contrast against white inside a narrow band all the way round the circle, so the
- * user cannot pick an illegible color — the constraint is enforced by the geometry of
- * the ramp rather than by validation after the fact.
+ * OKLCH lightness does deliver it. Holding L fixed and letting hue vary keeps measured
+ * luminance inside a narrow band all the way round, so the picker cannot land the user
+ * on a color that clashes in weight with the presets — the property is enforced by the
+ * geometry of the ramp rather than by validation after the fact.
  *
- * This is also what `theme/colors.ts` already does by hand. The eight shipped presets
- * measure L 0.513–0.575 (mean 0.542), and that file's note that "a bright yellow-green
- * cannot hold white type" is exactly this constraint, found by tuning. The ramp
- * generalises it rather than replacing it: the presets stay verbatim.
+ * What limits the palette at this lightness is the sRGB gamut, which runs out of chroma
+ * for blue and violet well before it does for green or yellow (see the table in
+ * `SECTION_HUE_CHROMA`). The eight shipped presets in `theme/colors.ts` are generated
+ * from this same L and C, one per hue, so the ramp and the presets cannot drift apart.
+ *
+ * Note what this ramp deliberately does *not* promise: that the label's text is legible
+ * on it. The label draws white at roughly 2:1, under the 3:1 WCAG floor for large text,
+ * as a chosen soft look — the color carries which section is running, and the name is a
+ * glance-level cue rather than something read word by word. Raising the text's contrast
+ * is a decision about the text, not a reason to move this lightness.
  */
 
 /** Hue ramp lightness. See the table in `SECTION_HUE_CHROMA` for why this exact value. */
-export const SECTION_HUE_LIGHTNESS = 0.54;
+export const SECTION_HUE_LIGHTNESS = 0.78;
 
 /**
  * Requested hue ramp chroma, clamped per hue to the sRGB gamut boundary.
  *
- * Measured minimum contrast against white across all 360 integer hues:
+ * Measured across all 360 integer hues at L 0.78, C 0.15:
  *
- *   L     C requested    min contrast
- *   0.54  0.16           4.72  ← chosen
- *   0.54  max in-gamut   4.71        (passes, but chroma swings 0.09–0.29)
- *   0.55  0.16           4.53        (no margin)
- *   0.56  max in-gamut   4.32        (fails)
+ *   luminance spread            1.15× between the lightest and darkest hue
+ *   chroma actually delivered   0.111–0.150, clamping on the blue/violet arc
  *
- * So 0.54 is the ceiling. Requesting 0.16 and clamping — which binds for 196 of the
- * 360 hues, mostly the yellow-green arc where the sRGB cusp sits far above this
- * lightness — gives more uniform saturation than riding the boundary, at no contrast
- * cost. `oklch.test.ts` asserts the 4.5:1 floor over the whole circle, so this pair
- * cannot be changed without the test agreeing.
+ * The gamut is what picks these numbers. Lightness is set where the colors read as
+ * light and friendly rather than as the saturated mid-tones this palette used to carry,
+ * and chroma as high as the blue arc can hold without collapsing to a pastel — request
+ * 0.15 and clamp, rather than riding the boundary, so saturation stays roughly uniform
+ * round the circle. `oklch.test.ts` pins both the uniform lightness and a floor that
+ * keeps the palette light, so this pair cannot be changed without the test agreeing.
  */
-export const SECTION_HUE_CHROMA = 0.16;
+export const SECTION_HUE_CHROMA = 0.15;
 
 export interface Oklch {
   l: number;
@@ -160,19 +164,20 @@ export function hexToOklch(hex: string): Oklch | null {
 }
 
 /**
- * WCAG contrast ratio of `hex` against white.
+ * WCAG contrast ratio of `hex` against black — here a proxy for "how light is this",
+ * since it is a monotonic function of relative luminance and rises as the color does.
  *
- * Exists so the ramp's legibility claim is a test rather than a comment: see
+ * Exists so the ramp's uniform-lightness claim is a test rather than a comment: see
  * `oklch.test.ts`, which walks all 360 hues.
  */
-export function contrastWithWhite(hex: string): number {
+export function contrastWithBlack(hex: string): number {
   if (!/^#[0-9a-fA-F]{6}$/.test(hex)) return 1;
   const [r, g, b] = [1, 3, 5].map((i) => srgbToLinear(parseInt(hex.slice(i, i + 2), 16) / 255)) as [
     number,
     number,
     number,
   ];
-  return 1.05 / (0.2126 * r + 0.7152 * g + 0.0722 * b + 0.05);
+  return (0.2126 * r + 0.7152 * g + 0.0722 * b + 0.05) / 0.05;
 }
 
 /** The hue at ramp position `t` ∈ [0,1]. Exposed so the picker can map a touch to a hue. */

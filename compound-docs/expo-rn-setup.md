@@ -54,6 +54,46 @@ This fails in 9ms (1 module) — the transformer worker itself dies before proce
 npm install react-native-worklets@^0.9.0 --legacy-peer-deps
 ```
 
+## Native-driver animations flicker on release when nothing re-renders
+
+**LANDMINE:** `useNativeDriver: true` drives the view directly only while the animation is
+connected. On completion it releases, and the view falls back to the transform **React last
+committed**. If the component did not re-render during the animation, that commit is the value from
+before it started — so the view snaps back to its old position for a frame, right at the end.
+
+Seen on the PlayView toolbar (`components/ToolbarShell.tsx`), which slides off the left edge on play.
+Instrumented log, one play then one pause:
+
+```
+render #4 hidden=true  jsValue=0.0      ← last commit before leaving
+START to=-106.7 … END finished=true     ← no renders in between
+                                        → flashes back at 0 on release
+render #5 hidden=false jsValue=-106.7   ← last commit before returning
+START to=0 … END finished=true
+                                        → blinks to -106.7 on release
+```
+
+Both flicker values are exactly what React had committed. Note the component re-renders **zero**
+times across the ~190 ms slide, which is what makes the stale commit possible.
+
+Two fixes that do **not** work, both tried:
+
+- `value.addListener(() => {})`. It does keep the value's JS side current — but it never triggers a
+  render, so React's *committed* prop stays stale and the fallback is unchanged. It also made the
+  second direction's flicker visible.
+- Assuming JS-thread contention and reasoning about frame drops. The log shows a healthy 10–12
+  frames over ~190 ms on either driver; nothing was ever being starved.
+
+**Fix:** `useNativeDriver: false` for any transform on a component that does not re-render while it
+animates. A JS-driven value is the same value React reads, so the two cannot disagree on release.
+This is why every `Animated` call in this app passes `false` — the width/height animations *must*,
+and the transforms should.
+
+**Diagnosing this class again:** log the render count with `value.__getValue()` in the render body,
+plus a listener logging each frame. Renders absent between START and END, with a flicker at the last
+committed value, is this bug. Renders *present* mid-animation with stale values would be the
+different (and more commonly described) native-driver race.
+
 ## babel-preset-expo must be an explicit dependency
 
 The blank Expo TypeScript template does not list `babel-preset-expo` in `package.json` — it's a transitive dep of `expo`. After upgrading `expo-router` to `~56.x` the module resolution changes and it can no longer be found transitively, causing Metro to fail on first transform.

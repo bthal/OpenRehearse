@@ -4,7 +4,7 @@ import { useTranslation } from 'react-i18next';
 import Svg, { Rect } from 'react-native-svg';
 
 import { hexToOklch, hueRamp, rampColorAt } from '@domain/oklch';
-import { SectionColors } from '@theme/colors';
+import { Colors, SectionColors } from '@theme/colors';
 
 /**
  * Hue-only color picker for a section.
@@ -14,7 +14,7 @@ import { SectionColors } from '@theme/colors';
  * The ramp below is "I want *that* one", and sweeps the full circle.
  *
  * There is no saturation or lightness control and no alpha, and that is the point. The
- * label draws white text on this color, so lightness is not a free parameter; the ramp
+ * label draws black text on this color, so lightness is not a free parameter; the ramp
  * holds it fixed (see `domain/oklch.ts`), which makes every reachable color legible by
  * construction rather than by validation. Alpha is meaningless against the score's
  * white page, so it is not offered.
@@ -77,9 +77,10 @@ export function SectionColorPicker({
                   borderRadius: SWATCH / 2,
                   backgroundColor: preset,
                   // Selection reads as a ring rather than a border so the swatch does
-                  // not change size and shuffle the row when the choice moves.
+                  // not change size and shuffle the row when the choice moves. Dark, not
+                  // white: the presets are light enough that a white ring vanishes.
                   borderWidth: selected ? 3 : 0,
-                  borderColor: '#FFFFFF',
+                  borderColor: Colors.text,
                   outlineWidth: selected ? 2 : 0,
                 }}
               />

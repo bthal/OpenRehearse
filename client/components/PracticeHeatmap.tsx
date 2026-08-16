@@ -253,14 +253,14 @@ export function PracticeHeatmap() {
       {/* Headline numbers: the streaks are the reason to come back to this section. */}
       <View className="mb-5 mt-3 flex-row justify-center gap-12">
         <View className="items-center">
-          <Text className="text-[28px] font-bold leading-[32px] text-seagrass-600">
-            {streaks.current}
+          <Text className="text-[20px] font-bold leading-[24px] text-seagrass-600">
+            {t('dashboard.streakDays', { count: streaks.current })}
           </Text>
           <Text className="text-xs text-ash-grey-950">{t('dashboard.currentStreak')}</Text>
         </View>
         <View className="items-center">
-          <Text className="text-[28px] font-bold leading-[32px] text-seagrass-600">
-            {streaks.longest}
+          <Text className="text-[20px] font-bold leading-[24px] text-seagrass-600">
+            {t('dashboard.streakDays', { count: streaks.longest })}
           </Text>
           <Text className="text-xs text-ash-grey-950">{t('dashboard.longestStreak')}</Text>
         </View>

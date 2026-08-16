@@ -34,14 +34,14 @@ module.exports = {
         // src/theme/colors.ts, which is the source used at render time (the label
         // paints through an SVG gradient, which needs imperative values).
         section: {
-          blue: '#0B65DA',
-          vermilion: '#D43811',
-          green: '#0E8147',
-          violet: '#8925D0',
-          ochre: '#A96404',
-          magenta: '#C1156B',
-          teal: '#087F91',
-          olive: '#4B7D12',
+          blue: '#8BB9FF',
+          vermilion: '#FF977F',
+          green: '#5DD38A',
+          violet: '#CD9FFF',
+          amber: '#F9A140',
+          magenta: '#FF8FB6',
+          teal: '#00CDEA',
+          olive: '#92CB62',
         },
       },
       fontFamily: {

@@ -87,7 +87,10 @@ const ARPEGGIO_STEP_TICKS = 6;
 // section's color fading away to its left and the incoming section's fading away to
 // its right, meeting at a crisp two-pixel seam — one pixel of each — so the junction
 // stays legible even where two neighbouring sections happen to draw the same hue.
-const SECTION_FADE_ALPHA = 0.35;
+// Held high because the palette is light: at the 0.35 these marks used to run at, the
+// section colors wash out to nearly the white of the page. A light color at high alpha
+// still does not compete with the notation the way a saturated one at low alpha did.
+const SECTION_FADE_ALPHA = 0.8;
 const SECTION_SEAM_PX = 1;
 // The fade reaches roughly half a measure to each side, but engraved measure widths
 // vary wildly (a whole-note bar against a run of semiquavers), so it is clamped.
@@ -227,6 +230,12 @@ let glideFromOffset = 0;
 let glideTargetStep = -1;
 let glideStartTime = 0;
 let glideOnDone: (() => void) | null = null;
+// Mirrors the two drag flags that live inside the touch handlers' closures, so score
+// motion can be answered from module scope. Set alongside them, never independently.
+let scoreDragging = false;
+let handleDragging = false;
+let scoreMotionPosted = false;
+let scoreMotionScheduled = false;
 let touchHandlersAttached = false;
 let loopRegion: LoopRegion | null = null;
 // Pending removal of the create-time CSS transition on the loop overlay (see
@@ -602,6 +611,42 @@ function previewNearestToCenter(): void {
   if (point) showSnapPreview(point.pxLeft, step);
 }
 
+// ─── Score motion ─────────────────────────────────────────────────────────────
+
+/** True while the score is moving under the fixed centre line, for any reason. */
+function scoreIsMoving(): boolean {
+  return scoreDragging || handleDragging || momentumFrameId !== null || glideFrameId !== null;
+}
+
+/**
+ * Tells the native shell whether the score is at rest, so it can hide the centred
+ * play button while it is not.
+ *
+ * Derived rather than tracked: every input already exists, and computing the answer
+ * in one place means a missed clear cannot strand the button. Callers therefore just
+ * announce "something changed" — they never say which way.
+ *
+ * Coalesced to a microtask because one gesture routinely ends one kind of motion and
+ * begins another within the same turn: a coast settling into a glide, a glide
+ * retargeted, a finger lifting straight into momentum. Comparing against the last
+ * *posted* value at the end of the turn is what keeps those hand-offs from emitting a
+ * spurious "stopped" that the button would answer with a visible flash.
+ */
+function syncScoreMotion(): void {
+  if (scoreMotionScheduled) return;
+  scoreMotionScheduled = true;
+  // `Promise.resolve().then` rather than `queueMicrotask`: same scheduling, but it is
+  // available in every WebView this ships to, including ones that have not been
+  // updated in years.
+  void Promise.resolve().then(() => {
+    scoreMotionScheduled = false;
+    const moving = scoreIsMoving();
+    if (moving === scoreMotionPosted) return;
+    scoreMotionPosted = moving;
+    postToNative({ type: 'SCORE_MOTION', payload: moving });
+  });
+}
+
 // ─── Settle glide ─────────────────────────────────────────────────────────────
 
 function glideTargetOffset(): number {
@@ -613,6 +658,7 @@ function finishGlide(): void {
   glideTargetStep = -1;
   const done = glideOnDone;
   glideOnDone = null;
+  syncScoreMotion();
   done?.();
 }
 
@@ -628,6 +674,7 @@ function cancelScoreGlide(commit: boolean): void {
     glideFrameId = null;
     glideTargetStep = -1;
     glideOnDone = null;
+    syncScoreMotion();
     return;
   }
   applyTranslate(glideTargetOffset());
@@ -666,6 +713,7 @@ function startScoreGlide(step: number, onDone: () => void): void {
     return;
   }
   glideFrameId = requestAnimationFrame(glideFrame);
+  syncScoreMotion();
 }
 
 function recomputeViewportMetrics(): void {
@@ -976,6 +1024,7 @@ function stopMomentum(): void {
   if (momentumFrameId === null) return;
   cancelAnimationFrame(momentumFrameId);
   momentumFrameId = null;
+  syncScoreMotion();
 }
 
 /**
@@ -1025,6 +1074,7 @@ function startMomentum(initialVelocity: number): void {
   }
 
   momentumFrameId = requestAnimationFrame(step);
+  syncScoreMotion();
 }
 
 // ─── Touch handling ───────────────────────────────────────────────────────────
@@ -1048,6 +1098,13 @@ function initTouchHandlers(): void {
 
   wrapper.addEventListener('touchstart', (e) => {
     if ((e.target as Element).closest('.loop-handle')) return;
+    // Inherit whatever was already moving, rather than asserting motion outright. A
+    // finger landing on a coasting score has taken it over, not stopped it, so the two
+    // cancels below must not report a stop the button would answer by blinking on. But
+    // a finger landing on a score at rest has not moved anything yet — claiming motion
+    // here would hide the button on touch-*down*, a whole tap ahead of the toolbar and
+    // the label, which do not hear about playback until the finger lifts.
+    scoreDragging = scoreIsMoving();
     // No settle: the finger is taking the score over, so resolving the coast's
     // position would only be undone by the drag that is about to start.
     stopMomentum();
@@ -1064,6 +1121,7 @@ function initTouchHandlers(): void {
     velocityPx = 0;
     lastMoveTime = 0;
     lastMoveX = clientX;
+    syncScoreMotion();
     // Don't pause immediately — wait to see if this is a tap or a drag.
   }, { passive: true });
 
@@ -1074,6 +1132,10 @@ function initTouchHandlers(): void {
     // First significant movement: mark as a drag rather than a tap.
     if (!hasMoved && Math.abs(clientX - startX) > 8) {
       hasMoved = true;
+      // Now it is a drag, not a tap — this is where a touch on a still score starts
+      // counting as motion.
+      scoreDragging = true;
+      syncScoreMotion();
       if (wasPlayingOnTouch) pausePlayback();
     }
     if (lastMoveTime > 0 && now > lastMoveTime) {
@@ -1092,6 +1154,7 @@ function initTouchHandlers(): void {
   wrapper.addEventListener('touchend', () => {
     if (!dragging) return;
     dragging = false;
+    scoreDragging = false;
     if (!hasMoved) {
       // Tap: toggle play/pause.
       if (Tone.Transport.state === 'started') {
@@ -1103,6 +1166,7 @@ function initTouchHandlers(): void {
         settleToNearestStep(false);
         void startPlayback();
       }
+      syncScoreMotion();
       return;
     }
     if (Math.abs(velocityPx) > 0.05) {
@@ -1110,6 +1174,16 @@ function initTouchHandlers(): void {
     } else {
       settleToNearestStep(true);
     }
+    syncScoreMotion();
+  }, { passive: true });
+
+  // The system can take a gesture away — a shade pull, a parent claiming the touch —
+  // and no touchend follows. Only the motion flag is cleared here, deliberately: the
+  // drag state below it recovers on the next touchstart anyway, but a stuck motion
+  // flag would leave the play button hidden on a screen that looks dead.
+  wrapper.addEventListener('touchcancel', () => {
+    scoreDragging = false;
+    syncScoreMotion();
   }, { passive: true });
 }
 
@@ -1347,6 +1421,9 @@ function initLoopHandles(): void {
 
     el.addEventListener('touchstart', (e) => {
       e.stopPropagation();
+      // Set before the cancels below for the same reason the wrapper does it: dragging
+      // a handle auto-scrolls the score, so this gesture counts as motion throughout.
+      handleDragging = true;
       if (Tone.Transport.state === 'started') pausePlayback();
       // stopPropagation keeps the wrapper's touchstart from running, and the wrapper
       // handler bails on .loop-handle targets anyway — so nothing else stops a coast
@@ -1368,6 +1445,7 @@ function initLoopHandles(): void {
       startScrollOffset = scrollOffsetPx;
       if (dragRafId !== null) cancelAnimationFrame(dragRafId);
       dragRafId = requestAnimationFrame(dragFrame);
+      syncScoreMotion();
     }, { passive: false });
 
     el.addEventListener('touchmove', (e) => {
@@ -1390,6 +1468,14 @@ function initLoopHandles(): void {
         );
       }
       loopModified = true;
+      handleDragging = false;
+      syncScoreMotion();
+    }, { passive: true });
+
+    // See the wrapper's touchcancel: same reason, same deliberately narrow cleanup.
+    el.addEventListener('touchcancel', () => {
+      handleDragging = false;
+      syncScoreMotion();
     }, { passive: true });
   }
 
@@ -1866,6 +1952,16 @@ export function initPlayback(
 
 export async function startPlayback(): Promise<void> {
   if (!sampler || !part) return;
+  // Announced here rather than after Transport.start, at the bottom of this function.
+  // Everything below the `await Tone.loaded()` race can take up to eight seconds on a
+  // cold first play, and the native shell drives the play/pause transition off this
+  // message: the toolbar has to leave on the tap, not once the samples arrive. The
+  // guard above is the only way this function fails, and it has already passed.
+  //
+  // The cost is that `practiceTracker` starts its clock here too, so a cold start and
+  // the metronome count-in both count as practice time. Accepted deliberately — see
+  // `client/src/state/practiceTracker.ts`.
+  postToNative({ type: 'PLAYBACK_STATE', payload: 'playing' });
   // Settle before reading the position below. Pressing play from the toolbar while
   // the score is still coasting would otherwise start from whatever tick the *last*
   // settle wrote, and the first RAF frame would drag the score back there.
@@ -1931,7 +2027,6 @@ export async function startPlayback(): Promise<void> {
     Tone.Transport.start();
   }
   animFrameId = requestAnimationFrame(animateCursorLoop);
-  postToNative({ type: 'PLAYBACK_STATE', payload: 'playing' });
 }
 
 // Build the count-in schedule for this start, or null when it should not fire.
