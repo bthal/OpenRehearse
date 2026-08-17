@@ -466,7 +466,7 @@ export default function WarmUpView() {
                 >
                   <View style={{ height: 22, justifyContent: 'center', alignItems: 'center' }}>
                     {openPanel === 'speed' ? (
-                      <AppIcon path={mdiSpeedometer} size={22} color="#4B7A6E" />
+                      <AppIcon path={mdiSpeedometer} size={22} color={Colors.primary} />
                     ) : (
                       <Text className="text-base font-semibold text-gray-700">{settings.bpm}</Text>
                     )}

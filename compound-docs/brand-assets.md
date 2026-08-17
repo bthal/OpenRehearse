@@ -40,17 +40,32 @@ found it.
 
 ## The WebView document cannot reference the token layer
 
-**CONSTRAINT:** `src/score-web/html.ts` is a string handed to the WebView verbatim. It
-has no access to Tailwind or to `Colors`, so its colours are necessarily literal —
-the cursor line, the loop shade, the loop handles, and the grip glyphs.
+**CONSTRAINT:** the HTML handed to the WebView is a plain string with no access to
+Tailwind or to `Colors`, so its colours are necessarily literal — the cursor line, the
+snap preview, the loop shade, the loop handles, and the grip glyphs.
 
 These are the values most likely to be missed in a rebrand, because they look like
 library internals. They are not. The minified OSMD bundle on the same line *is*
 library internals — leave those alone.
 
+**LANDMINE: edit `score-web/build.mjs`, never `src/score-web/html.ts`.** The second is
+generated from the first and is gitignored, so an edit there is real on your machine,
+survives your own testing, and disappears at the next `npm ci` — `postinstall` rebuilds
+it. Nothing errors and no test notices; the app simply reverts.
+
+The navy migration was written into the generated file and lost exactly that way. It
+looked done — the WebView on the author's machine was navy — but the template still
+held the seagrass values, so CI, EAS and every fresh clone kept shipping a teal cursor
+line and teal loop handles. Caught only when someone else ran `build:score-web` and the
+old colours came back.
+
 Loop shade was also re-tuned from 20% to 12% alpha: against the old teal accent a 20%
 wash read fine, but a navy shade at 20% sitting between navy handles read as one solid
 band. Alpha values are hue-dependent; re-check them when the hue moves.
+
+The grip glyph sits a step darker than its handle (navy-700 on a navy-600 body at 75%),
+measuring 2.65:1 where the outgoing teal pair measured 2.38:1. It is decorative, so the
+bar is legibility at a glance rather than a WCAG text threshold.
 
 ## SectionColors are data, not brand — leave them alone
 

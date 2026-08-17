@@ -18,13 +18,13 @@ Home surface listing the user's **pieces** and entry points to **import** and **
   - **Skeleton row** appears below the list while an import is in progress.
 - **Stats** section at the **very bottom**, in this order:
   - **Two streak figures** side by side under the heading — **current streak** and **longest
-    streak**. Each carries its unit — "3 days", "1 day" — in the same large seagrass accent as the
+    streak**. Each carries its unit — "3 days", "1 day" — in the same bold navy accent as the
     number, rather than leaving a bare figure to be read off its caption; the captions sit
     underneath, small and black. A day counts towards a streak once it holds any practice at all.
     The current streak runs through yesterday when today has not been started yet, so an unplayed
     morning does not read as a broken streak.
   - A day-based **heatmap** (GitHub-contributions style) of practice time, one cell per day,
-    coloured on the app's seagrass ramp from "no practice" to the darkest accent. Weeks run
+    coloured on the app's navy ramp from "no practice" to the darkest brand shade. Weeks run
     Monday-first; the visible window is as many trailing weeks as fit the screen. See
     "Practice-time tracking" below.
   - **One day is always selected**, and a caption on the **right of the legend row**, level with

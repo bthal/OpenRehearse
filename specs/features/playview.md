@@ -79,7 +79,7 @@ The entire piece is rendered in a **single horizontal line** — all measures la
 - **Deleting a loop**: tap the loop button again (showing ×). The loop is removed entirely.
 - **Visual representation**:
   - Both handles (A = start, B = end) render as draggable markers on the score.
-  - Each handle's **outer** corners (facing away from the loop) are rounded so the pair frames the region; the grip glyph is a darker seagrass than the handle body so it reads clearly.
+  - Each handle's **outer** corners (facing away from the loop) are rounded so the pair frames the region; the grip glyph is a darker navy than the handle body so it reads clearly.
   - The region between A and B is shaded.
 - **Creation animation**: the loop **unfurls out of the cursor**. Every overlay element that is not already at the cursor slides from the cursor line to its final position (`LOOP_UNFURL_MS`, ease-out) — the end handle to the right, and in the near-end case the start handle to the left. A handle that genuinely starts at the cursor is placed directly and does not animate.
 - **Loop bounds are half-open `[A, B)`**: the note under A is the **first note played**; the note
