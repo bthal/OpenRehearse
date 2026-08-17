@@ -4,6 +4,12 @@ import '../../src/i18n';
 import { SectionsBlock } from '@components/sections/SectionsBlock';
 import type { Piece } from '@domain/piece';
 import type { Section } from '@domain/sections';
+import { SectionColors } from '@theme/colors';
+
+// Taken from the shipped palette rather than written as literals: these tests are about
+// which section a color lands on, not about which hues ship, so a palette change should
+// move them rather than break them. The picker labels each swatch with its own hex.
+const [FIRST, SECOND, THIRD, PICKED, PICKED_ALT] = SectionColors as readonly (string | undefined)[];
 
 // The block reads the score through the repository; everything else about it is pure.
 // `mock`-prefixed so jest allows the factory to close over it.
@@ -45,7 +51,7 @@ function sections(...starts: [number, string | null][]): Section[] {
     startMeasureIndex,
     startMeasureNumber: String(startMeasureIndex + 1),
     name,
-    color: ['#0B65DA', '#D43811', '#0E8147'][i] ?? '#0B65DA',
+    color: [FIRST!, SECOND!, THIRD!][i] ?? FIRST!,
     sources: [],
   }));
 }
@@ -134,7 +140,7 @@ describe('repairs made once the score is read', () => {
 
   it('fills in a printed number the stored section never had', async () => {
     const { latest } = renderBlock([
-      { startMeasureIndex: 0, startMeasureNumber: '', name: 'All', color: '#0B65DA', sources: [] },
+      { startMeasureIndex: 0, startMeasureNumber: '', name: 'All', color: FIRST!, sources: [] },
     ]);
     await ready();
     await waitFor(() => expect(latest()[0]!.startMeasureNumber).toBe('1'));
@@ -250,11 +256,11 @@ describe('colors', () => {
     await ready();
     await waitFor(() => expect(screen.getByLabelText('Edit Verse')).toBeTruthy());
     editRow('Verse');
-    fireEvent.press(screen.getByLabelText('#8925D0'));
+    fireEvent.press(screen.getByLabelText(PICKED!));
 
-    await waitFor(() => expect(latest()[1]!.color).toBe('#8925D0'));
-    expect(latest()[0]!.color).toBe('#0B65DA');
-    expect(latest()[2]!.color).toBe('#0E8147');
+    await waitFor(() => expect(latest()[1]!.color).toBe(PICKED));
+    expect(latest()[0]!.color).toBe(FIRST);
+    expect(latest()[2]!.color).toBe(THIRD);
   });
 
   it('mirrors a recolor onto every section sharing the name', async () => {
@@ -267,11 +273,11 @@ describe('colors', () => {
     fireEvent.changeText(screen.getByLabelText('Name'), 'Intro');
     fireEvent(screen.getByLabelText('Name'), 'blur');
     // …then recolouring one has to move both.
-    fireEvent.press(screen.getByLabelText('#A96404'));
+    fireEvent.press(screen.getByLabelText(PICKED_ALT!));
 
-    await waitFor(() => expect(latest()[2]!.color).toBe('#A96404'));
-    expect(latest()[0]!.color).toBe('#A96404');
-    expect(latest()[1]!.color).toBe('#D43811');
+    await waitFor(() => expect(latest()[2]!.color).toBe(PICKED_ALT));
+    expect(latest()[0]!.color).toBe(PICKED_ALT);
+    expect(latest()[1]!.color).toBe(SECOND);
   });
 
   it('does not adopt a matching color mid-word, only on commit', async () => {
@@ -283,12 +289,12 @@ describe('colors', () => {
 
     const field = screen.getByLabelText('Name');
     fireEvent.changeText(field, 'Intr');
-    expect(latest()[2]!.color).toBe('#0E8147');
+    expect(latest()[2]!.color).toBe(THIRD);
     fireEvent.changeText(field, 'Intro');
-    expect(latest()[2]!.color).toBe('#0E8147');
+    expect(latest()[2]!.color).toBe(THIRD);
 
     fireEvent(field, 'blur');
-    await waitFor(() => expect(latest()[2]!.color).toBe('#0B65DA'));
+    await waitFor(() => expect(latest()[2]!.color).toBe(FIRST));
   });
 });
 

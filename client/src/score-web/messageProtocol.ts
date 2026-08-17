@@ -35,4 +35,14 @@ export type WebToNativeMessage =
    * are set. Emitted only when the index changes — about once per section, not
    * per frame, so it stays off the animation hot path.
    */
-  | { type: 'SECTION_INDEX'; payload: number | null };
+  | { type: 'SECTION_INDEX'; payload: number | null }
+  /**
+   * True while the score is moving under the cursor — a finger panning it, the
+   * momentum coast, the settle glide, or a loop handle being dragged — and false once
+   * it has come to rest on an onset. The native shell hides the centred play button
+   * while it is true, so the button only ever offers to play from a settled position.
+   *
+   * Emitted only when the value changes, like SECTION_INDEX, and coalesced across a
+   * turn so a coast handing over to a glide does not report a stop in between.
+   */
+  | { type: 'SCORE_MOTION'; payload: boolean };

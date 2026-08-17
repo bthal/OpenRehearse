@@ -137,9 +137,9 @@ Unit tests use inline XML fixtures only: `testfiles/` is gitignored and unavaila
 
 ### The label
 
-A small label in the **upper-right** corner of the score area names the section the cursor is
-currently in. It responds to a horizontal **swipe** (see Navigation) but never to a tap: a tap on it
-falls through to the score beneath, which toggles playback.
+A label **centred across the top** of the score area names the section the cursor is currently in.
+It responds to a horizontal **swipe** (see Navigation) but never to a tap: a tap on it falls through
+to the score beneath, which toggles playback.
 
 - **Name**: the section's score-given `name`, else the ordinal `Section N` (1-based). Large and
   bold, always in **white**.
@@ -149,8 +149,9 @@ falls through to the score beneath, which toggles playback.
   **strip** — the label's own top edge, same width and same color, with no text. Only the height
   moves, while the contents cross-fade, so it reads as one object rolling up rather than a swap. The
   name is not readable during playback; the color alone carries which section is running.
-- **Fixed geometry**: one width for every section, pinned in absolute screen space above the WebView
-  (`elevation` as well as `zIndex`, or Android renders the WebView over it).
+- **Fixed geometry**: **50% of the screen width**, the same for every section, pinned in absolute
+  screen space above the WebView (`elevation` as well as `zIndex`, or Android renders the WebView
+  over it). The end fades are a fraction of that width, so the ramps keep their shape on any device.
 - **Nothing is shown** when the piece has no sections. There is no "whole piece" label.
 - The name updates **continuously while the score is panned**, not once the scroll settles.
 
@@ -163,7 +164,9 @@ the right, and the two meet at a crisp two-pixel seam carrying one pixel of each
 - **Junctions only.** A mark sits *between* two sections, so *n* sections produce *n−1* marks; the
   opening of the piece is not marked.
 - The fade reaches roughly **half a measure** to each side, measured from the engraving rather than
-  assumed, and is held at low opacity so it never competes with the notes or with a loop's shade.
+  assumed. Its opacity is held **high**, which the light palette both requires and permits: at the
+  low alpha the old saturated hues needed, these colors would wash out to the white of the page,
+  and a light color at high alpha still does not compete with the notes or with a loop's shade.
 - Marks sit at the same resolved junction the label and the swipe use — always a barline, per the
   pickup policy below — so all three agree about where a section begins.
 - The seam is drawn **on the engraved barline**, not on the first notehead of the incoming section.
@@ -177,11 +180,22 @@ Sections walk a categorical palette (`SectionColors` in `client/src/theme/colors
 already given** — both `Refrain` sections share a hue, which is the point of coloring them at all.
 Unnamed sections are not the same section as each other, so each takes the next slot.
 
-These are saturated hues rather than brand tints: the color carries information, and tints of a
-single hue cannot be told apart at a glance. Because the label always draws **white** text, every
-entry is held at a lightness that carries white at roughly 4.5:1 — which is why the ochre and olive
-entries are much darker than their nominal hue suggests. Any hue added here must be checked against
-white first.
+These are distinct hues rather than brand tints: the color carries information, and tints of a
+single hue cannot be told apart at a glance. They are all held at **one OKLCH lightness**, so no hue
+reads heavier than its neighbours — the constraint that shapes the palette, along with the sRGB
+gamut, which runs out of chroma for blue and violet long before it does for green or yellow. The
+presets are **generated from the same hue ramp the color picker draws** (`domain/oklch.ts`, one hue
+per slot) rather than hand-tuned, so a preset and a user-picked color can never look like they came
+from different palettes.
+
+The label draws **white** text on these, which measures roughly **2:1** — under the 3:1 WCAG floor
+for large text, and chosen anyway. Black is comfortably legible on them but reads heavy; the color
+is what carries which section is running, and the name is a glance-level cue rather than something
+read word by word. Nothing about the palette guarantees the text is legible, and raising that is a
+decision about the text rather than a reason to move these values.
+
+Colors already stored on a piece are **not migrated**. A piece imported before this palette landed
+keeps the darker color it saved until the user edits or re-imports it.
 
 They are written as **hex**, unlike the `hsl()` used elsewhere in `colors.ts`, because the same
 string crosses three color parsers: React Native styles, the SVG gradient behind the label, and a CSS
@@ -195,8 +209,9 @@ The label is **swiped** horizontally to move between sections, jumping to the **
 
 It behaves as a pager: the names travel with the finger, so dragging **rightward** brings the
 *earlier* section in from the left and dragging leftward brings the next one in from the right. The
-ground **crossfades** between the two sections' colors as the drag progresses. A swipe commits past
-about a quarter of the label's width, or on a flick; short of that it settles back.
+ground **crossfades** between the two sections' colors as the drag progresses. A swipe commits past a
+**fixed distance** — deliberately not a fraction of the width, which on a near-full-width label
+would make the same gesture cost far more — or on a flick; short of that it settles back.
 
 **One swipe is one section.** The only cells that exist are the two immediate neighbours, so the
 gesture cannot be ridden further than one section in either direction, however far the finger

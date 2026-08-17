@@ -60,6 +60,12 @@ interface WarmUpState extends WarmUpSettings {
   isPlaying: boolean;
   loopActive: boolean;
   metronomeOn: boolean;
+  /**
+   * Whether the score is moving under the cursor — panned, coasting or gliding.
+   * Driven by SCORE_MOTION from the WebView; the centred play button hides while it
+   * is true. See `playViewStore`, which carries the same slice.
+   */
+  scoreMoving: boolean;
 
   initSettings: () => Promise<void>;
   updateHanon: (patch: Partial<ExerciseSettings>) => void;
@@ -74,6 +80,7 @@ interface WarmUpState extends WarmUpSettings {
   setPlaying: (v: boolean) => void;
   setLoopActive: (v: boolean) => void;
   setMetronomeOn: (v: boolean) => void;
+  setScoreMoving: (v: boolean) => void;
   resetPlayback: () => void;
 }
 
@@ -122,6 +129,7 @@ export const useWarmUpStore = create<WarmUpState>()((set, get) => ({
   isPlaying: false,
   loopActive: false,
   metronomeOn: false,
+  scoreMoving: false,
 
   initSettings: async () => {
     const settings = await loadSettings();
@@ -171,6 +179,7 @@ export const useWarmUpStore = create<WarmUpState>()((set, get) => ({
   setPlaying: (v) => set({ isPlaying: v }),
   setLoopActive: (v) => set({ loopActive: v }),
   setMetronomeOn: (v) => set({ metronomeOn: v }),
+  setScoreMoving: (v) => set({ scoreMoving: v }),
   resetPlayback: () =>
     set({
       webViewReady: false,
@@ -179,5 +188,6 @@ export const useWarmUpStore = create<WarmUpState>()((set, get) => ({
       isPlaying: false,
       loopActive: false,
       metronomeOn: false,
+      scoreMoving: false,
     }),
 }));

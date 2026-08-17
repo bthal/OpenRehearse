@@ -18,12 +18,13 @@ Home surface listing the user's **pieces** and entry points to **import** and **
   - **Skeleton row** appears below the list while an import is in progress.
 - **Stats** section at the **very bottom**, in this order:
   - **Two streak figures** side by side under the heading — **current streak** and **longest
-    streak**, in days. The numbers are large and in the seagrass accent; their labels sit
+    streak**. Each carries its unit — "3 days", "1 day" — in the same bold navy accent as the
+    number, rather than leaving a bare figure to be read off its caption; the captions sit
     underneath, small and black. A day counts towards a streak once it holds any practice at all.
     The current streak runs through yesterday when today has not been started yet, so an unplayed
     morning does not read as a broken streak.
   - A day-based **heatmap** (GitHub-contributions style) of practice time, one cell per day,
-    coloured on the app's seagrass ramp from "no practice" to the darkest accent. Weeks run
+    coloured on the app's navy ramp from "no practice" to the darkest brand shade. Weeks run
     Monday-first; the visible window is as many trailing weeks as fit the screen. See
     "Practice-time tracking" below.
   - **One day is always selected**, and a caption on the **right of the legend row**, level with
@@ -86,8 +87,9 @@ Home surface listing the user's **pieces** and entry points to **import** and **
 - [x] Privacy note and brand header visible at all times on the dashboard.
 - [x] Practice heatmap sits at the very bottom of the Stats section, populated from tracked
       practice time and coloured from the app palette.
-- [x] Current and longest streaks head the Stats section; an unplayed today does not break the
-      current streak, and both read 0 before anything is practised.
+- [x] Current and longest streaks head the Stats section, each shown with its unit ("3 days"); an
+      unplayed today does not break the current streak, and both read "0 days" before anything is
+      practised.
 - [x] The heatmap renders every week in full — none clipped at the edge — and the grid, heading,
       and Less→More legend all share the section's left edge.
 - [x] Tapping a heatmap day names it and its practice total in the caption, and rings that cell;

@@ -1054,11 +1054,41 @@ requesting frames (cursor parked at the start) until the transport actually star
 `'started'` frame it clears `countingIn` and drops `countInNodes` (so a later mid-piece pause is
 not mistaken for a count-in abort).
 
-**Eligibility — only a *fresh* start counts in**, never a resumed pause: piece/routine when
-`posTicks <= firstStepTicks`; loop when `startPlayback` seeks to the A handle (`didLoopSeek`). A
-pause during the pre-roll aborts it (`cancelCountIn` stops any un-played oscillators) and resets to
-the start rather than freezing mid-count. `countInMeasures` is set via `__rn_set_count_in` and, as
-a user setting, is preserved across score reloads (`disposePlayback` keeps it).
+**Eligibility — only a *fresh* start counts in**, never a resumed pause. The rule is pure and lives
+in `domain/countIn.ts` as `isFreshStart` (tested): piece/routine when `posTicks <= firstStepTicks`;
+loop when `startPlayback` seeks to the A handle (`didLoopSeek`), *or* when a cancelled count-in is
+owed a retry (below). `countInMeasures` is set via `__rn_set_count_in` and, as a user setting, is
+preserved across score reloads (`disposePlayback` keeps it).
+
+**LANDMINE: `Tone.Transport.state` is not "is it playing?" — use `isPlaybackActive()`.** The state
+getter reports the state *at now*, so throughout a count-in — whose transport start is scheduled in
+the future — it reads `'stopped'`. There is a second blind window before it, while `startPlayback`
+awaits `Tone.loaded()`, which is seconds on a cold first play. In both, the native shell has already
+been told `'playing'` (the post moved to the top of `startPlayback` so the toolbar leaves on the
+tap), so the user sees a playing screen and taps it to stop.
+
+Six call sites tested `Tone.Transport.state === 'started'` and all six were wrong in those windows.
+The tap handler was the one that bit: it read the tap as a *fresh start*, called `startPlayback()`
+again, and scheduled a second pre-roll over the first — heard as two competing sets of clicks, one
+more per tap. `isPlaybackActive()` (`state === 'started' || countingIn || startPending`) is now the
+only sanctioned test; a raw state check in `playback.ts` is almost certainly a bug.
+
+`startPending` needs a companion: a start parked on the `await` must not wake up and seize a
+transport that has since been cancelled. Every cancel bumps a module `playToken`, and `startPlayback`
+compares the token it captured before the await and returns if it has been superseded.
+
+**Cancelling a pre-roll — `abortStart`, deliberately not `_stopInternal`.** Nothing has sounded, so
+there is no position to freeze; but `_stopInternal` rewinds to the top of the piece, which is a
+no-op at bar 1 and throws the score back from a loop's A handle to the start of the piece. Nothing
+needs restoring visually either — `animateCursorLoop` parks itself during the pre-roll, so the score
+is still where the start left it. Only the transport position does, because `Transport.stop()`
+rewinds it as a side effect of cancelling the scheduled start; `countInOriginTicks` puts it back.
+
+That leaves the playhead on A having never played a note — positionally identical to a pause taken
+on A, which is exactly the case `isFreshStart` refuses. So the abort sets `countInReArmed`, honoured
+by the next start only while `posTicks` is still `countInOriginTicks` (cancel, scroll elsewhere in
+the loop, press play → an ordinary mid-loop resume again). Without it, cancelling a loop's count-in
+would silently buy you a loop with no pre-roll.
 
 ## Sections: junction ticks, and why they must not come from `noteEvents`
 

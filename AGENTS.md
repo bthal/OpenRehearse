@@ -34,6 +34,7 @@ RN/OSMD/Tone imports. See `specs/architecture.md` for the authoritative version.
 | Settings & count-in | `specs/features/settings.md`, `compound-docs/tone-playback.md` (count-in) |
 | Files & MusicXML | `specs/features/import.md` |
 | Sections: detection, user editing & the PlayView label | `specs/features/section-detection.md`, `compound-docs/osmd-webview.md` |
+| Play-surface overlays & animation | `specs/features/playview.md`, `compound-docs/expo-rn-setup.md` |
 | Local data & offline | `specs/features/offline-storage.md` |
 | Audio + cursor sync | `specs/features/playback-synthesis.md`, `specs/features/playview.md` |
 | State & domain | `specs/features/pieces-domain.md` |
@@ -156,6 +157,17 @@ The `/commit` command runs a guided pass over all of this: assess scope → read
 - **State**: **Zustand** (not TanStack Query) unless specs are formally amended.
 - **Orientation**: PlayView → **landscape**; Dashboard → **portrait**. `app.json` uses `"default"`; each screen locks via `<Stack.Screen options>` (react-native-screens, no extra package).
 - **Styling**: **NativeWind** throughout; **light mode only** — dark mode is a non-goal.
+- **"Is it playing?" is `isPlaybackActive()`, never `Tone.Transport.state === 'started'`.** A
+  count-in schedules the transport to start in the *future*, so the state getter reads `'stopped'`
+  for the whole pre-roll — and again while `startPlayback` awaits the sample load. Both windows look
+  like playback to the user. See `compound-docs/tone-playback.md`.
+- **Animation**: RN core `Animated` with **`useNativeDriver: false`**. Not a preference — a
+  native-driven transform falls back to React's last committed value when it completes, which
+  flickers on any component that does not re-render mid-animation. `react-native-reanimated` is
+  installed but imported nowhere. See `compound-docs/expo-rn-setup.md`.
+- **Play surfaces run edge to edge** — PlayView and warm-up are deliberately **not** wrapped in
+  `SafeAreaView`; insetting them pads the screen in that view's own white, a blank band beside a
+  landscape camera cutout. Overlays that must clear the cutout apply the insets themselves.
 - **Icons**: **MDI only** — no other icon libraries.
 - **Auth**: **non-goal for MVP** — no Supabase, no login flow.
 - **Lint/format**: **ESLint** + **Prettier** must stay clean for touched files.

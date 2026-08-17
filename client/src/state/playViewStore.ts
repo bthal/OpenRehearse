@@ -27,6 +27,12 @@ interface PlayViewState {
    * Driven by SECTION_INDEX from the WebView, which owns the position.
    */
   currentSectionIndex: number | null;
+  /**
+   * Whether the score is moving under the cursor — panned, coasting, gliding, or
+   * dragged by a loop handle. Driven by SCORE_MOTION from the WebView, which owns the
+   * gesture; the centred play button hides while it is true.
+   */
+  scoreMoving: boolean;
 
   setActivePieceId: (id: string | null) => void;
   setWebViewReady: (ready: boolean) => void;
@@ -39,6 +45,7 @@ interface PlayViewState {
   setMetronomeOn: (v: boolean) => void;
   setActiveHand: (h: ActiveHand) => void;
   setCurrentSectionIndex: (index: number | null) => void;
+  setScoreMoving: (moving: boolean) => void;
   reset: () => void;
 }
 
@@ -54,6 +61,7 @@ const initial = {
   metronomeOn: false,
   activeHand: 'both' as ActiveHand,
   currentSectionIndex: null,
+  scoreMoving: false,
 };
 
 export const usePlayViewStore = create<PlayViewState>()((set) => ({
@@ -69,5 +77,6 @@ export const usePlayViewStore = create<PlayViewState>()((set) => ({
   setMetronomeOn: (v) => set({ metronomeOn: v }),
   setActiveHand: (h) => set({ activeHand: h }),
   setCurrentSectionIndex: (index) => set({ currentSectionIndex: index }),
+  setScoreMoving: (moving) => set({ scoreMoving: moving }),
   reset: () => set(initial),
 }));

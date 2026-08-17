@@ -7,8 +7,6 @@ import {
   mdiMetronome,
   mdiMetronomeTick,
   mdiMusicNoteOutline,
-  mdiPause,
-  mdiPlay,
   mdiSpeedometer,
 } from '@mdi/js';
 import { router, Stack, useLocalSearchParams } from 'expo-router';
@@ -22,10 +20,11 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
 import WebView, { type WebViewMessageEvent } from 'react-native-webview';
 
 import { AppIcon } from '@components/AppIcon';
+import { CenterPlayButton } from '@components/CenterPlayButton';
+import { ToolbarShell } from '@components/ToolbarShell';
 import { SCORE_WEB_HTML } from '@score-web/html';
 import type { WebToNativeMessage } from '@score-web/messageProtocol';
 import { useCountInSync } from '@score-web/useCountInSync';
@@ -135,6 +134,7 @@ export default function WarmUpView() {
   const scoreError = useWarmUpStore((s) => s.scoreError);
   const isPlaying = useWarmUpStore((s) => s.isPlaying);
   const metronomeOn = useWarmUpStore((s) => s.metronomeOn);
+  const scoreMoving = useWarmUpStore((s) => s.scoreMoving);
 
   const setWebViewReady = useWarmUpStore((s) => s.setWebViewReady);
   const setLoadingScore = useWarmUpStore((s) => s.setLoadingScore);
@@ -142,6 +142,7 @@ export default function WarmUpView() {
   const setPlaying = useWarmUpStore((s) => s.setPlaying);
   const setLoopActive = useWarmUpStore((s) => s.setLoopActive);
   const setMetronomeOn = useWarmUpStore((s) => s.setMetronomeOn);
+  const setScoreMoving = useWarmUpStore((s) => s.setScoreMoving);
   const resetPlayback = useWarmUpStore((s) => s.resetPlayback);
 
   const [openPanel, setOpenPanel] = useState<OpenPanel>(null);
@@ -269,12 +270,15 @@ export default function WarmUpView() {
         case 'LOOP_STATE':
           setLoopActive(msg.payload);
           break;
+        case 'SCORE_MOTION':
+          setScoreMoving(msg.payload);
+          break;
         case 'SCORE_BPM':
           // Intentionally ignored — warm-up BPM is always user-controlled
           break;
       }
     },
-    [setLoadingScore, setScoreError, setPlaying, setLoopActive],
+    [setLoadingScore, setScoreError, setPlaying, setLoopActive, setScoreMoving],
   );
 
   function animatePanel(panel: PanelKey, toValue: number) {
@@ -321,14 +325,6 @@ export default function WarmUpView() {
       animatePanel(panel, 0);
     }
   }
-
-  const handlePlayPause = useCallback(() => {
-    if (isPlaying) {
-      webViewRef.current?.injectJavaScript('window.__rn_pause();void 0;');
-    } else {
-      webViewRef.current?.injectJavaScript('window.__rn_play();void 0;');
-    }
-  }, [isPlaying]);
 
   const handleBpmChange = useCallback(
     (bpm: WarmUpBpm) => {
@@ -423,7 +419,9 @@ export default function WarmUpView() {
   return (
     <>
       <Stack.Screen options={{ orientation: 'landscape', title }} />
-      <SafeAreaView className="flex-1 bg-white">
+      {/* Deliberately not a SafeAreaView — see the play view for why: the score runs to
+        the physical edges, and the toolbar applies the cutout inset itself. */}
+      <View className="flex-1 bg-white">
         <View ref={scoreAreaRef} className="flex-1">
           <WebView
             ref={webViewRef}
@@ -438,136 +436,119 @@ export default function WarmUpView() {
             style={{ flex: 1 }}
           />
 
-          {/* Toolbar */}
+          {/* The play affordance sits on the cursor at screen centre, not in the
+            toolbar. Decorative — the WebView's tap-on-the-score handles the press. */}
+          <CenterPlayButton ready={scoreReady} playing={isPlaying} scoreMoving={scoreMoving} />
+
+          {/* Toolbar — slides away while playing, leaving the notation alone. */}
           {scoreReady && (
-            <View
-              style={{ position: 'absolute', left: 0, top: 0, bottom: 0, justifyContent: 'center' }}
-            >
-              <View
-                ref={toolbarRef}
-                className="bg-white rounded-xl py-3 px-2 items-center gap-4"
-                style={{
-                  elevation: 4,
-                  shadowColor: '#000',
-                  shadowOpacity: 0.12,
-                  shadowRadius: 6,
-                  shadowOffset: { width: 2, height: 0 },
-                }}
-              >
-                {/* Back */}
-                <TouchableOpacity onPress={() => router.back()} hitSlop={12} className="p-1">
-                  <AppIcon path={mdiArrowLeft} size={24} color={Colors.icon} />
-                </TouchableOpacity>
+            <ToolbarShell ref={toolbarRef} hidden={isPlaying}>
+              {/* Back */}
+              <TouchableOpacity onPress={() => router.back()} hitSlop={12} className="p-1">
+                <AppIcon path={mdiArrowLeft} size={24} color={Colors.icon} />
+              </TouchableOpacity>
 
-                {/* Play / Pause */}
-                <TouchableOpacity onPress={handlePlayPause} hitSlop={8} className="p-1">
-                  <AppIcon path={isPlaying ? mdiPause : mdiPlay} size={36} color={Colors.primary} />
-                </TouchableOpacity>
+              {/* Metronome */}
+              <TouchableOpacity onPress={handleMetronomeToggle} hitSlop={8} className="p-1.5">
+                <AppIcon
+                  path={metronomeOn ? mdiMetronome : mdiMetronomeTick}
+                  size={26}
+                  color={metronomeOn ? Colors.primary : Colors.icon}
+                />
+              </TouchableOpacity>
 
-                {/* Metronome */}
-                <TouchableOpacity onPress={handleMetronomeToggle} hitSlop={8} className="p-1.5">
+              {/* Speed trigger */}
+              <View ref={speedTriggerRef}>
+                <TouchableOpacity
+                  onPress={() => togglePanel('speed', speedTriggerRef)}
+                  hitSlop={8}
+                  className="items-center px-2 py-1"
+                >
+                  <View style={{ height: 22, justifyContent: 'center', alignItems: 'center' }}>
+                    {openPanel === 'speed' ? (
+                      <AppIcon path={mdiSpeedometer} size={22} color={Colors.primary} />
+                    ) : (
+                      <Text className="text-base font-semibold text-gray-700">{settings.bpm}</Text>
+                    )}
+                  </View>
+                  <Text className="text-[9px] text-black mt-0.5">{t('common.bpm')}</Text>
+                </TouchableOpacity>
+              </View>
+
+              {/* Hand trigger */}
+              <View ref={handTriggerRef}>
+                <TouchableOpacity
+                  onPress={() => togglePanel('hand', handTriggerRef)}
+                  hitSlop={8}
+                  className="p-1.5"
+                >
                   <AppIcon
-                    path={metronomeOn ? mdiMetronome : mdiMetronomeTick}
-                    size={26}
-                    color={metronomeOn ? Colors.primary : Colors.icon}
+                    path={HAND_ICON[settings.hand]}
+                    size={22}
+                    color={settings.hand !== 'both' ? Colors.primary : Colors.icon}
                   />
                 </TouchableOpacity>
+              </View>
 
-                {/* Speed trigger */}
-                <View ref={speedTriggerRef}>
+              {/* Key trigger — hidden for drill45 */}
+              {showKeyOctave && (
+                <View ref={keyTriggerRef}>
                   <TouchableOpacity
-                    onPress={() => togglePanel('speed', speedTriggerRef)}
+                    onPress={() => togglePanel('key', keyTriggerRef)}
                     hitSlop={8}
                     className="items-center px-2 py-1"
                   >
-                    <View style={{ height: 22, justifyContent: 'center', alignItems: 'center' }}>
-                      {openPanel === 'speed' ? (
-                        <AppIcon path={mdiSpeedometer} size={22} color={Colors.primary} />
-                      ) : (
-                        <Text className="text-base font-semibold text-gray-700">
-                          {settings.bpm}
-                        </Text>
-                      )}
-                    </View>
-                    <Text className="text-[9px] text-black mt-0.5">{t('common.bpm')}</Text>
+                    <Text
+                      className="text-base font-semibold mt-0.5"
+                      style={{ color: openPanel === 'key' ? Colors.primary : Colors.icon }}
+                    >
+                      {currentKeyLabel}
+                    </Text>
+                    <Text className="text-[9px] text-black mt-0.5">{t('warmup.key')}</Text>
                   </TouchableOpacity>
                 </View>
+              )}
 
-                {/* Hand trigger */}
-                <View ref={handTriggerRef}>
+              {/* Peak repeats trigger — drill45 only */}
+              {!showKeyOctave && (
+                <View ref={peakTriggerRef}>
                   <TouchableOpacity
-                    onPress={() => togglePanel('hand', handTriggerRef)}
+                    onPress={() => togglePanel('peak', peakTriggerRef)}
                     hitSlop={8}
-                    className="p-1.5"
+                    className="items-center px-2 py-1"
                   >
-                    <AppIcon
-                      path={HAND_ICON[settings.hand]}
-                      size={22}
-                      color={settings.hand !== 'both' ? Colors.primary : Colors.icon}
-                    />
+                    <Text
+                      className="text-base font-semibold mt-0.5"
+                      style={{ color: openPanel === 'peak' ? Colors.primary : Colors.icon }}
+                    >
+                      ×{peakRepeats}
+                    </Text>
+                    <Text className="text-[9px] text-black mt-0.5">{t('warmup.peak')}</Text>
                   </TouchableOpacity>
                 </View>
+              )}
 
-                {/* Key trigger — hidden for drill45 */}
-                {showKeyOctave && (
-                  <View ref={keyTriggerRef}>
-                    <TouchableOpacity
-                      onPress={() => togglePanel('key', keyTriggerRef)}
-                      hitSlop={8}
-                      className="items-center px-2 py-1"
+              {/* Octave trigger — hidden for drill45 */}
+              {showKeyOctave && (
+                <View ref={octaveTriggerRef}>
+                  <TouchableOpacity
+                    onPress={() => togglePanel('octave', octaveTriggerRef)}
+                    hitSlop={8}
+                    className="items-center px-2 py-1"
+                  >
+                    <Text
+                      className="text-base font-semibold mt-0.5"
+                      style={{ color: openPanel === 'octave' ? Colors.primary : Colors.icon }}
                     >
-                      <Text
-                        className="text-base font-semibold mt-0.5"
-                        style={{ color: openPanel === 'key' ? Colors.primary : Colors.icon }}
-                      >
-                        {currentKeyLabel}
-                      </Text>
-                      <Text className="text-[9px] text-black mt-0.5">{t('warmup.key')}</Text>
-                    </TouchableOpacity>
-                  </View>
-                )}
-
-                {/* Peak repeats trigger — drill45 only */}
-                {!showKeyOctave && (
-                  <View ref={peakTriggerRef}>
-                    <TouchableOpacity
-                      onPress={() => togglePanel('peak', peakTriggerRef)}
-                      hitSlop={8}
-                      className="items-center px-2 py-1"
-                    >
-                      <Text
-                        className="text-base font-semibold mt-0.5"
-                        style={{ color: openPanel === 'peak' ? Colors.primary : Colors.icon }}
-                      >
-                        ×{peakRepeats}
-                      </Text>
-                      <Text className="text-[9px] text-black mt-0.5">{t('warmup.peak')}</Text>
-                    </TouchableOpacity>
-                  </View>
-                )}
-
-                {/* Octave trigger — hidden for drill45 */}
-                {showKeyOctave && (
-                  <View ref={octaveTriggerRef}>
-                    <TouchableOpacity
-                      onPress={() => togglePanel('octave', octaveTriggerRef)}
-                      hitSlop={8}
-                      className="items-center px-2 py-1"
-                    >
-                      <Text
-                        className="text-base font-semibold mt-0.5"
-                        style={{ color: openPanel === 'octave' ? Colors.primary : Colors.icon }}
-                      >
-                        {settings.octaves}
-                      </Text>
-                      <Text className="text-[9px] text-black mt-0.5">
-                        {t('warmup.octave', { count: settings.octaves })}
-                      </Text>
-                    </TouchableOpacity>
-                  </View>
-                )}
-              </View>
-            </View>
+                      {settings.octaves}
+                    </Text>
+                    <Text className="text-[9px] text-black mt-0.5">
+                      {t('warmup.octave', { count: settings.octaves })}
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+              )}
+            </ToolbarShell>
           )}
 
           {/* Speed panel */}
@@ -777,7 +758,7 @@ export default function WarmUpView() {
             </View>
           )}
         </View>
-      </SafeAreaView>
+      </View>
     </>
   );
 }

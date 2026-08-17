@@ -84,25 +84,35 @@ export const HeatmapColors = {
  * because section labels only ever appear on light PlayView surfaces, never against
  * navy chrome. If that ever stops being true, re-check `blue` first.
  *
- * The label always draws white text, so every entry is held at a lightness that
- * carries white at roughly 4.5:1 or better. That is the binding constraint on this
- * palette: the ochre and olive entries in particular are much darker than their
- * nominal hue would suggest, because a bright yellow-green cannot hold white type.
- * Any hue added here has to be checked against white before it goes in.
+ * Every entry is generated straight off the section hue ramp (`domain/oklch.ts`,
+ * L 0.78 / C 0.15, one hue per slot), which the color picker also draws from. Keeping
+ * both on the same ramp is what stops a hand-picked color and a preset from looking
+ * like they came from different palettes, and holding one OKLCH lightness across the
+ * circle is what stops any single hue reading heavier than its neighbours. Any hue
+ * added here should be generated the same way rather than typed in.
+ *
+ * The label draws **white** text on these, which is roughly 2:1 — under the WCAG floor
+ * for large text, and deliberately so. Black is comfortably legible on them but reads
+ * heavy; the color is what carries which section is running, and the name is a
+ * glance-level cue rather than a paragraph. Nothing about this palette guarantees the
+ * text is readable, and that is a decision about the text, not about these values.
  *
  * Written as hex rather than the `hsl(H S% L%)` used elsewhere in this file, because
  * these strings cross three different color parsers: React Native styles, the
  * `react-native-svg` gradient stops behind the label, and CSS gradients inside the
  * WebView, which receives them verbatim over SET_SECTIONS. Hex is the only notation
  * all three parse identically. The source hue is kept in the comment.
+ *
+ * Not migrated: a piece imported before this palette landed keeps the darker color it
+ * stored, and will show black text on it until the user edits or re-imports it.
  */
 export const SectionColors: readonly string[] = [
-  '#0B65DA', // blue — hsl(214 90% 45%)
-  '#D43811', // vermilion — hsl(12 85% 45%)
-  '#0E8147', // green — hsl(150 80% 28%)
-  '#8925D0', // violet — hsl(275 70% 48%)
-  '#A96404', // ochre — hsl(35 95% 34%)
-  '#C1156B', // magenta — hsl(330 80% 42%)
-  '#087F91', // teal — hsl(188 90% 30%)
-  '#4B7D12', // olive — hsl(88 75% 28%)
+  '#8BB9FF', // blue — h 259, 10.5:1 on black
+  '#FF977F', // vermilion — h 34, 10.0:1
+  '#5DD38A', // green — h 154, 11.2:1
+  '#CD9FFF', // violet — h 305, 10.0:1
+  '#F9A140', // amber — h 64, 10.2:1
+  '#FF8FB6', // magenta — h 359, 9.9:1
+  '#00CDEA', // teal — h 212, 10.9:1
+  '#92CB62', // olive — h 133, 10.9:1
 ] as const;

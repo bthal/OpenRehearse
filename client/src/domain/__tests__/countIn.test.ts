@@ -1,4 +1,4 @@
-import { computeCountIn, loopLeadInBeats } from '../countIn';
+import { computeCountIn, isFreshStart, loopLeadInBeats } from '../countIn';
 
 // One quarter-note beat at 60 BPM = 1 second, which keeps the offset assertions
 // readable (offsetSec === beat index).
@@ -123,5 +123,53 @@ describe('loopLeadInBeats', () => {
   it('is phase-invariant across whole measures and guards bad meters', () => {
     expect(loopLeadInBeats(6, 4)).toBe(loopLeadInBeats(2, 4)); // offset wraps by measure
     expect(loopLeadInBeats(2, 0)).toBe(0);
+  });
+});
+
+describe('isFreshStart', () => {
+  const PIECE = { hasLoop: false, didLoopSeek: false, resumingAbortedCountIn: false };
+  const LOOP = { hasLoop: true, posTicks: 1920, firstStepTicks: 0 };
+
+  it('counts in at the top of a piece', () => {
+    expect(isFreshStart({ ...PIECE, posTicks: 0, firstStepTicks: 0 })).toBe(true);
+  });
+
+  it('counts in at the first onset of a piece that opens with a rest', () => {
+    expect(isFreshStart({ ...PIECE, posTicks: 480, firstStepTicks: 480 })).toBe(true);
+  });
+
+  it('does not count in when resuming a mid-piece pause', () => {
+    expect(isFreshStart({ ...PIECE, posTicks: 1920, firstStepTicks: 0 })).toBe(false);
+  });
+
+  it('counts in when a loop seeks to its A handle', () => {
+    expect(isFreshStart({ ...LOOP, didLoopSeek: true, resumingAbortedCountIn: false })).toBe(true);
+  });
+
+  it('does not count in when resuming a pause inside a loop', () => {
+    expect(isFreshStart({ ...LOOP, didLoopSeek: false, resumingAbortedCountIn: false })).toBe(
+      false,
+    );
+  });
+
+  // The bug this rule exists for: cancelling a loop's count-in leaves the playhead on
+  // A without a seek, which is positionally identical to a pause taken on A. Without
+  // the remembered intent, pressing play again would start the loop with no pre-roll.
+  it('counts in again after a cancelled loop count-in, with no seek', () => {
+    expect(isFreshStart({ ...LOOP, didLoopSeek: false, resumingAbortedCountIn: true })).toBe(true);
+  });
+
+  it('ignores a stale re-arm once the playhead has left the loop start', () => {
+    // The caller only sets resumingAbortedCountIn while the position is unchanged, so
+    // a resume from elsewhere in the loop arrives here as a plain mid-loop resume.
+    expect(
+      isFreshStart({
+        hasLoop: true,
+        didLoopSeek: false,
+        resumingAbortedCountIn: false,
+        posTicks: 2880,
+        firstStepTicks: 0,
+      }),
+    ).toBe(false);
   });
 });

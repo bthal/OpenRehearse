@@ -286,8 +286,8 @@ describe('PracticeHeatmap', () => {
 
       expect(screen.getByText('Current streak')).toBeTruthy();
       expect(screen.getByText('Longest streak')).toBeTruthy();
-      expect(screen.getByText('3')).toBeTruthy();
-      expect(screen.getByText('5')).toBeTruthy();
+      expect(screen.getByText('3 days')).toBeTruthy();
+      expect(screen.getByText('5 days')).toBeTruthy();
     });
 
     it('shows zeroes rather than blanks before anything is practised', () => {
@@ -295,7 +295,7 @@ describe('PracticeHeatmap', () => {
 
       render(<PracticeHeatmap />);
 
-      expect(screen.getAllByText('0')).toHaveLength(2);
+      expect(screen.getAllByText('0 days')).toHaveLength(2);
     });
   });
 
