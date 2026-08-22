@@ -536,6 +536,34 @@ describe('generateHanonXml', () => {
     expect(generateHanonXml(0, 'major', 'right', 1, 99)).toEqual(last);
   });
 
+  it('spells every exercise in every key consistently with its key signature', () => {
+    // The scales tests assert this invariant for scale runs; Hanon needs it too, and
+    // more so — a cell can leap a sixth or an octave and reach below its bar's root,
+    // so it touches degrees a plain scale never does. A note spelled against the
+    // signature would make OSMD print a courtesy accidental on every bar.
+    const EXPECTED_FIFTHS: Record<'major' | 'minor', number[]> = {
+      major: [0, -5, 2, -3, 4, -1, 6, 1, -4, 3, -2, 5],
+      minor: [-3, 4, -1, 6, 1, -4, 3, -2, 5, 0, -5, 2],
+    };
+    for (let no = 1; no <= HANON_EXERCISE_COUNT; no++) {
+      for (const mode of ['major', 'minor'] as const) {
+        for (let pc = 0; pc < 12; pc++) {
+          const xml = generateHanonXml(pc, mode, 'both', 2, no);
+          const fifths = Number(/<fifths>(-?\d+)<\/fifths>/.exec(xml)![1]);
+          expect(fifths).toBe(EXPECTED_FIFTHS[mode][pc]);
+
+          const sounded = new Set(pitches(xml).map((p) => p.replace(/\d+$/, '')));
+          // A key is all-sharp or all-flat, never mixed.
+          const sharps = [...sounded].filter((n) => n.includes('#'));
+          const flats = [...sounded].filter((n) => n.includes('b'));
+          expect(sharps.length === 0 || flats.length === 0).toBe(true);
+          // And every accidental it uses must be one the signature already covers.
+          expect(sharps.length + flats.length).toBeLessThanOrEqual(Math.abs(fifths));
+        }
+      }
+    }
+  });
+
   it('transposes every exercise into every key without a bare accidental clash', () => {
     // A cell can reach below its bar's root (No. 12), which used to index the scale
     // table with a negative degree and silently yield a wrong pitch.
