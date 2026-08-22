@@ -17,6 +17,9 @@ export interface ExerciseBlock {
   hand: WarmUpHand;
   bpm: WarmUpBpm;
   octaves: WarmUpOctaves;
+  // Hanon only; absent on blocks saved before the exercise number existed (treated as
+  // No. 1, which is what every such block was).
+  exercise?: number;
   // drill45 only; absent on blocks saved before this parameter existed (treated as 1).
   peakRepeats?: WarmUpPeakRepeats;
 }

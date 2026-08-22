@@ -47,7 +47,7 @@ describe('warm-up registry', () => {
   });
 
   it('declares at least one parameter per exercise, and only known ones', () => {
-    const known = ['key', 'bpm', 'hand', 'octaves', 'peakRepeats'];
+    const known = ['exercise', 'key', 'bpm', 'hand', 'octaves', 'peakRepeats'];
     for (const t of WARM_UP_TYPES) {
       const { params } = WARM_UP_REGISTRY[t];
       expect(params.length).toBeGreaterThan(0);
@@ -139,7 +139,7 @@ describe('routines containing an unrecognised exercise', () => {
 
   it('still renders the blocks it does understand', () => {
     const xml = generateRoutineXml(routine);
-    expect(xml).toContain('<rehearsal>Hanon I in C</rehearsal>');
+    expect(xml).toContain('<rehearsal>Hanon 1 in C</rehearsal>');
     expect(xml).toContain('</score-partwise>');
   });
 });

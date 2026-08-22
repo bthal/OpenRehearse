@@ -237,7 +237,10 @@ function scaleSteps(intervals: ScaleIntervals): readonly number[] {
 /** MIDI pitch for diatonic degree (can be > 7, spans multiple octaves). */
 function diatonicMidi(rootMidi: number, degree: number, steps: readonly number[]): number {
   const octaves = Math.floor(degree / 7);
-  const degInOctave = degree % 7;
+  // Euclidean remainder: JS `%` is signed, so a negative degree would index steps[-n]
+  // and silently fall back to 0 — a wrong pitch rather than an error. Negative degrees
+  // are reachable now that a Hanon cell can sit below its bar's root note (No. 12).
+  const degInOctave = ((degree % 7) + 7) % 7;
   const step = steps[degInOctave] ?? 0; // steps has 7 elements, degInOctave is 0-6
   return rootMidi + octaves * 12 + step;
 }
@@ -499,49 +502,342 @@ export function generateFiveScaleXml(
   return buildTwoHandXml(fifths, mode, hand, rh, lh);
 }
 
-// Correct Hanon No.1 cell: skip a third up, then step up to a 6th, then step back to 2nd.
-// In C major from C: C–E–F–G–A–G–F–E (diatonic offsets: 0,2,3,4,5,4,3,2)
-const HANON_CELL_UP = [0, 2, 3, 4, 5, 4, 3, 2] as const;
-// Descending mirror: D–A–G–F–E–F–G–A → offsets: 0,-2,-3,-4,-5,-4,-3,-2
-const HANON_CELL_DOWN = [0, -2, -3, -4, -5, -4, -3, -2] as const;
-const HANON_FINGER_UP = [1, 2, 3, 4, 5, 4, 3, 2] as const;
-const HANON_FINGER_DOWN = [5, 4, 3, 2, 1, 2, 3, 4] as const;
+// ─── Hanon, Le Pianiste Virtuose Part I (Nos. 1-20) ──────────────────────────
+//
+// Each exercise is one 8-note figure ("cell") of diatonic degree offsets, played once
+// per bar and shifted up a degree per bar to the top of the range, then a mirrored
+// figure shifted back down, then a held tonic.
+//
+// The offsets and fingerings below were extracted mechanically from the Mutopia
+// Project's LilyPond engraving of the Schirmer (1900) edition — see
+// THIRD_PARTY_NOTICES.md. They are NOT transcribed by hand or from memory.
+//
+// Things the sources establish that a uniform model would get wrong:
+//   - the descending figure is not the arithmetic negation of the ascending one
+//     (No. 2 rises 0,2,5,... but falls 0,-3,-5,...), so both are stored
+//   - each hand has its own fingering; they are not always mirror images
+//   - the number of bars and the degree the descent starts on vary per exercise,
+//     hence the deltas below, expressed relative to 7 x octaves
+//   - a cell can sit BELOW its bar's root note (No. 12), giving negative degrees
+//
+// `null` in a fingering array means the reference edition prints no fingering for
+// that note (No. 4 only); the generator omits the mark rather than inventing one.
+
+interface HanonPattern {
+  /** Diatonic degree offsets from the bar's root, ascending half. */
+  upCell: readonly number[];
+  /** Descending half. Stored, not derived — see above. */
+  downCell: readonly number[];
+  rhUpFingering: readonly (number | null)[];
+  rhDownFingering: readonly (number | null)[];
+  lhUpFingering: readonly (number | null)[];
+  lhDownFingering: readonly (number | null)[];
+  /** Degree the ascent begins on. Usually the tonic (0), but Nos. 12, 13 and 20
+   *  start elsewhere, so this cannot be assumed. Not scaled by octaves. */
+  ascentStart: number;
+  /** Ascending bar count, relative to 7 x octaves. */
+  upBars: number;
+  /** Descending bar count, relative to 7 x octaves. */
+  downBars: number;
+  /** Degree the descent begins on, relative to 7 x octaves. */
+  descentStart: number;
+}
+
+/** Indexed by exercise number minus one. */
+const HANON_PATTERNS: readonly HanonPattern[] = [
+  {
+    upCell: [0, 2, 3, 4, 5, 4, 3, 2],
+    downCell: [0, -2, -3, -4, -5, -4, -3, -2],
+    rhUpFingering: [1, 2, 3, 4, 5, 4, 3, 2],
+    rhDownFingering: [5, 4, 3, 2, 1, 2, 3, 4],
+    lhUpFingering: [5, 4, 3, 2, 1, 2, 3, 4],
+    lhDownFingering: [1, 2, 3, 4, 5, 4, 3, 2],
+    ascentStart: 0,
+    upBars: 0,
+    downBars: 1,
+    descentStart: 4,
+  },
+  {
+    upCell: [0, 2, 5, 4, 3, 4, 3, 2],
+    downCell: [0, -3, -5, -4, -3, -4, -3, -2],
+    rhUpFingering: [1, 2, 5, 4, 3, 4, 3, 2],
+    rhDownFingering: [5, 2, 1, 2, 3, 2, 3, 4],
+    lhUpFingering: [5, 3, 1, 2, 3, 2, 3, 4],
+    lhDownFingering: [1, 3, 5, 4, 3, 4, 3, 2],
+    ascentStart: 0,
+    upBars: 0,
+    downBars: 0,
+    descentStart: 4,
+  },
+  {
+    upCell: [0, 2, 5, 4, 3, 2, 3, 4],
+    downCell: [0, -3, -5, -4, -3, -2, -3, -4],
+    rhUpFingering: [1, 2, 5, 4, 3, 2, 3, 4],
+    rhDownFingering: [5, 2, 1, 2, 3, 4, 3, 2],
+    lhUpFingering: [5, 3, 1, 2, 3, 4, 3, 2],
+    lhDownFingering: [1, 3, 5, 4, 3, 2, 3, 4],
+    ascentStart: 0,
+    upBars: 0,
+    downBars: 0,
+    descentStart: 4,
+  },
+  {
+    upCell: [0, 1, 0, 2, 5, 4, 3, 2],
+    downCell: [0, -1, 0, -3, -5, -4, -3, -2],
+    rhUpFingering: [1, 2, 1, 2, 5, null, null, 2],
+    rhDownFingering: [5, 4, 5, 2, 1, null, 2, null],
+    lhUpFingering: [5, 4, 5, 3, 1, null, null, 3],
+    lhDownFingering: [1, 2, 1, 3, 5, null, 3, null],
+    ascentStart: 0,
+    upBars: 0,
+    downBars: 0,
+    descentStart: 4,
+  },
+  {
+    upCell: [0, 5, 4, 5, 3, 4, 2, 3],
+    downCell: [0, 1, 0, 2, 1, 3, 2, 4],
+    rhUpFingering: [1, 5, 4, 5, 3, 4, 2, 3],
+    rhDownFingering: [1, 2, 1, 3, 2, 4, 3, 5],
+    lhUpFingering: [5, 1, 2, 1, 3, 2, 4, 3],
+    lhDownFingering: [5, 4, 5, 3, 4, 2, 3, 1],
+    ascentStart: 0,
+    upBars: 0,
+    downBars: 0,
+    descentStart: 0,
+  },
+  {
+    upCell: [0, 5, 4, 5, 3, 5, 2, 5],
+    downCell: [0, -5, -4, -5, -3, -5, -2, -5],
+    rhUpFingering: [1, 5, 4, 5, 3, 5, 2, 5],
+    rhDownFingering: [5, 1, 2, 1, 3, 1, 4, 1],
+    lhUpFingering: [5, 1, 2, 1, 3, 1, 4, 1],
+    lhDownFingering: [1, 5, 4, 5, 3, 5, 2, 5],
+    ascentStart: 0,
+    upBars: -1,
+    downBars: -1,
+    descentStart: 4,
+  },
+  {
+    upCell: [0, 2, 1, 3, 2, 4, 3, 2],
+    downCell: [0, -2, -1, -3, -2, -4, -3, -2],
+    rhUpFingering: [1, 3, 2, 4, 3, 5, 4, 3],
+    rhDownFingering: [5, 3, 4, 2, 3, 1, 3, 4],
+    lhUpFingering: [5, 3, 4, 2, 3, 1, 3, 4],
+    lhDownFingering: [1, 3, 2, 4, 3, 5, 4, 3],
+    ascentStart: 0,
+    upBars: 0,
+    downBars: 0,
+    descentStart: 4,
+  },
+  {
+    upCell: [0, 2, 4, 5, 3, 4, 2, 3],
+    downCell: [0, -2, -4, -5, -3, -4, -2, -3],
+    rhUpFingering: [1, 2, 4, 5, 3, 4, 2, 3],
+    rhDownFingering: [5, 4, 2, 1, 3, 2, 4, 3],
+    lhUpFingering: [5, 4, 2, 1, 3, 2, 4, 3],
+    lhDownFingering: [1, 2, 4, 5, 3, 4, 2, 3],
+    ascentStart: 0,
+    upBars: 0,
+    downBars: 0,
+    descentStart: 4,
+  },
+  {
+    upCell: [0, 2, 3, 2, 4, 3, 5, 4],
+    downCell: [0, -2, -3, -2, -4, -3, -5, -4],
+    rhUpFingering: [1, 2, 3, 2, 4, 3, 5, 4],
+    rhDownFingering: [5, 4, 3, 4, 2, 3, 1, 2],
+    lhUpFingering: [5, 4, 3, 4, 2, 3, 1, 2],
+    lhDownFingering: [1, 2, 3, 2, 4, 3, 5, 4],
+    ascentStart: 0,
+    upBars: 0,
+    downBars: -1,
+    descentStart: 4,
+  },
+  {
+    upCell: [0, 5, 4, 3, 2, 3, 2, 3],
+    downCell: [0, -5, -4, -3, -2, -3, -2, -3],
+    rhUpFingering: [1, 5, 4, 3, 2, 3, 2, 3],
+    rhDownFingering: [5, 1, 2, 3, 4, 3, 4, 3],
+    lhUpFingering: [5, 1, 2, 3, 4, 3, 4, 3],
+    lhDownFingering: [1, 5, 4, 3, 2, 3, 2, 3],
+    ascentStart: 0,
+    upBars: 0,
+    downBars: 0,
+    descentStart: 4,
+  },
+  {
+    upCell: [0, 2, 5, 4, 5, 4, 3, 4],
+    downCell: [0, -3, -5, -4, -5, -4, -3, -4],
+    rhUpFingering: [1, 2, 5, 4, 5, 4, 3, 4],
+    rhDownFingering: [5, 2, 1, 2, 1, 2, 3, 2],
+    lhUpFingering: [5, 3, 1, 2, 1, 2, 3, 2],
+    lhDownFingering: [1, 3, 5, 4, 5, 4, 3, 4],
+    ascentStart: 0,
+    upBars: 0,
+    downBars: 0,
+    descentStart: 4,
+  },
+  {
+    upCell: [0, -5, -3, -4, -5, -4, -3, -5],
+    downCell: [0, 5, 3, 4, 5, 4, 3, 5],
+    rhUpFingering: [5, 1, 3, 2, 1, 2, 3, 1],
+    rhDownFingering: [1, 5, 3, 4, 5, 4, 3, 5],
+    lhUpFingering: [1, 5, 3, 4, 5, 4, 3, 5],
+    lhDownFingering: [5, 1, 3, 2, 1, 2, 3, 1],
+    ascentStart: 6,
+    upBars: -2,
+    downBars: 0,
+    descentStart: -1,
+  },
+  {
+    upCell: [0, -2, 1, -1, 2, 0, 1, 2],
+    downCell: [0, 2, -1, 1, 0, -2, -1, 0],
+    rhUpFingering: [3, 1, 4, 2, 5, 3, 4, 5],
+    rhDownFingering: [3, 5, 2, 4, 3, 1, 3, 4],
+    lhUpFingering: [3, 5, 2, 4, 1, 3, 2, 1],
+    lhDownFingering: [3, 1, 4, 2, 3, 5, 3, 2],
+    ascentStart: 2,
+    upBars: 0,
+    downBars: 0,
+    descentStart: 2,
+  },
+  {
+    upCell: [0, 1, 3, 2, 3, 2, 4, 3],
+    downCell: [0, -1, -3, -2, -3, -2, -4, -3],
+    rhUpFingering: [1, 2, 4, 3, 4, 3, 5, 4],
+    rhDownFingering: [5, 4, 2, 3, 2, 3, 1, 3],
+    lhUpFingering: [5, 4, 2, 3, 2, 3, 1, 3],
+    lhDownFingering: [1, 2, 4, 3, 4, 3, 5, 4],
+    ascentStart: 0,
+    upBars: 0,
+    downBars: 0,
+    descentStart: 4,
+  },
+  {
+    upCell: [0, 2, 1, 3, 2, 4, 3, 5],
+    downCell: [0, -2, -1, -3, -2, -4, -3, -5],
+    rhUpFingering: [1, 2, 1, 3, 2, 4, 3, 5],
+    rhDownFingering: [5, 3, 4, 2, 3, 1, 2, 1],
+    lhUpFingering: [5, 3, 4, 2, 3, 1, 2, 1],
+    lhDownFingering: [1, 2, 1, 3, 2, 4, 3, 5],
+    ascentStart: 0,
+    upBars: -1,
+    downBars: -1,
+    descentStart: 4,
+  },
+  {
+    upCell: [0, 2, 1, 2, 5, 4, 3, 4],
+    downCell: [0, -3, -2, -3, -5, -4, -3, -4],
+    rhUpFingering: [1, 3, 2, 3, 5, 4, 3, 4],
+    rhDownFingering: [5, 2, 3, 2, 1, 2, 3, 2],
+    lhUpFingering: [5, 3, 4, 3, 1, 2, 3, 2],
+    lhDownFingering: [1, 3, 2, 3, 5, 4, 3, 4],
+    ascentStart: 0,
+    upBars: 0,
+    downBars: 0,
+    descentStart: 4,
+  },
+  {
+    upCell: [0, 2, 5, 4, 6, 5, 4, 5],
+    downCell: [0, -3, -5, -4, -6, -5, -4, -6],
+    rhUpFingering: [1, 2, 4, 3, 5, 4, 3, 4],
+    rhDownFingering: [5, 3, 2, 3, 1, 2, 3, 1],
+    lhUpFingering: [5, 4, 2, 3, 1, 2, 3, 2],
+    lhDownFingering: [1, 2, 4, 3, 5, 4, 3, 5],
+    ascentStart: 0,
+    upBars: -1,
+    downBars: -2,
+    descentStart: 4,
+  },
+  {
+    upCell: [0, 1, 3, 2, 4, 3, 1, 2],
+    downCell: [0, -1, -3, -2, -4, -3, -1, -2],
+    rhUpFingering: [1, 2, 4, 3, 5, 4, 2, 3],
+    rhDownFingering: [5, 4, 2, 3, 1, 2, 4, 3],
+    lhUpFingering: [5, 4, 2, 3, 1, 2, 4, 3],
+    lhDownFingering: [1, 2, 4, 3, 5, 4, 2, 3],
+    ascentStart: 0,
+    upBars: 0,
+    downBars: 0,
+    descentStart: 4,
+  },
+  {
+    upCell: [0, 5, 3, 4, 5, 3, 2, 4],
+    downCell: [0, -5, -3, -4, -5, -3, -2, -4],
+    rhUpFingering: [1, 5, 3, 4, 5, 3, 2, 4],
+    rhDownFingering: [5, 1, 3, 2, 1, 3, 4, 2],
+    lhUpFingering: [5, 1, 3, 2, 1, 3, 4, 2],
+    lhDownFingering: [1, 5, 3, 4, 5, 3, 2, 4],
+    ascentStart: 0,
+    upBars: 0,
+    downBars: 0,
+    descentStart: 4,
+  },
+  {
+    upCell: [0, 2, 5, 7, 5, 4, 5, 3],
+    downCell: [0, -2, -5, -7, -5, -6, -5, -7],
+    rhUpFingering: [1, 2, 4, 5, 4, 3, 4, 2],
+    rhDownFingering: [5, 4, 2, 1, 3, 2, 3, 1],
+    lhUpFingering: [5, 4, 2, 1, 2, 3, 2, 4],
+    lhDownFingering: [1, 2, 4, 5, 3, 4, 3, 5],
+    ascentStart: -5,
+    upBars: 0,
+    downBars: 0,
+    descentStart: 2,
+  },
+];
+
+export const HANON_EXERCISE_COUNT = HANON_PATTERNS.length;
+
+/** Clamps an arbitrary number to a valid exercise index. */
+function hanonPattern(exercise: number): HanonPattern {
+  const i = Math.min(Math.max(Math.trunc(exercise) - 1, 0), HANON_PATTERNS.length - 1);
+  return HANON_PATTERNS[i]!;
+}
 
 function buildHanonMeasuresInternal(
   rootMidi: number,
   names: KeyInfo['names'],
   steps: readonly number[],
   octaves: number,
+  pattern: HanonPattern,
+  upFingering: readonly (number | null)[],
+  downFingering: readonly (number | null)[],
   showFingering = true,
 ): string[][] {
   const measures: string[][] = [];
   const BEAM_GROUP = 4;
-  for (let d = 0; d < 7 * octaves; d++) {
-    measures.push(
-      HANON_CELL_UP.map((offset, i) =>
-        eighth(
-          diatonicMidi(rootMidi, d + offset, steps),
-          names,
-          beamFor(i, 8, BEAM_GROUP),
-          showFingering && d < 2 ? HANON_FINGER_UP[i] : undefined,
-        ),
+  const span = 7 * octaves;
+
+  const bar = (
+    root: number,
+    cell: readonly number[],
+    fingering: readonly (number | null)[],
+    marked: boolean,
+  ) =>
+    cell.map((offset, i) =>
+      eighth(
+        diatonicMidi(rootMidi, root + offset, steps),
+        names,
+        beamFor(i, cell.length, BEAM_GROUP),
+        marked ? (fingering[i] ?? undefined) : undefined,
       ),
     );
+
+  // Fingering is printed on the first two bars of each direction only; after that the
+  // hand shape repeats and the marks are clutter.
+  const upBars = span + pattern.upBars;
+  for (let i = 0; i < upBars; i++) {
+    const root = pattern.ascentStart + i;
+    measures.push(bar(root, pattern.upCell, upFingering, showFingering && i < 2));
   }
-  const descentTop = 7 * octaves + 4;
-  for (let d = descentTop; d >= 5; d--) {
-    const cellIndex = descentTop - d;
-    measures.push(
-      HANON_CELL_DOWN.map((offset, i) =>
-        eighth(
-          diatonicMidi(rootMidi, d + offset, steps),
-          names,
-          beamFor(i, 8, BEAM_GROUP),
-          showFingering && cellIndex < 2 ? HANON_FINGER_DOWN[i] : undefined,
-        ),
-      ),
-    );
+
+  const descentTop = span + pattern.descentStart;
+  const downBars = span + pattern.downBars;
+  for (let i = 0; i < downBars; i++) {
+    measures.push(bar(descentTop - i, pattern.downCell, downFingering, showFingering && i < 2));
   }
+
   measures.push([wholeNote(rootMidi, names)]);
   return measures;
 }
@@ -552,18 +848,38 @@ export function getHanonMeasureNotes(
   hand: WarmUpHand,
   octaves: number,
   showFingering = true,
+  exercise = 1,
 ): { rh: string[][] | null; lh: string[][] | null } {
   const { names } = getKeyInfo(pitchClass, mode);
   const intervals = mode === 'major' ? MAJOR_INTERVALS : MINOR_INTERVALS;
   const steps = scaleSteps(intervals);
+  const pattern = hanonPattern(exercise);
   const rh =
     hand === 'left'
       ? null
-      : buildHanonMeasuresInternal(60 + pitchClass, names, steps, octaves, showFingering);
+      : buildHanonMeasuresInternal(
+          60 + pitchClass,
+          names,
+          steps,
+          octaves,
+          pattern,
+          pattern.rhUpFingering,
+          pattern.rhDownFingering,
+          showFingering,
+        );
   const lh =
     hand === 'right'
       ? null
-      : buildHanonMeasuresInternal(48 + pitchClass, names, steps, octaves, showFingering);
+      : buildHanonMeasuresInternal(
+          48 + pitchClass,
+          names,
+          steps,
+          octaves,
+          pattern,
+          pattern.lhUpFingering,
+          pattern.lhDownFingering,
+          showFingering,
+        );
   return { rh, lh };
 }
 
@@ -716,8 +1032,9 @@ export function generateHanonXml(
   mode: WarmUpScaleMode,
   hand: WarmUpHand,
   octaves = 1,
+  exercise = 1,
 ): string {
   const { fifths } = getKeyInfo(pitchClass, mode);
-  const { rh, lh } = getHanonMeasureNotes(pitchClass, mode, hand, octaves);
+  const { rh, lh } = getHanonMeasureNotes(pitchClass, mode, hand, octaves, true, exercise);
   return buildTwoHandXml(fifths, mode, hand, rh, lh);
 }

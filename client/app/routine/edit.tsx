@@ -28,6 +28,7 @@ import {
 } from '@domain/warmup';
 import {
   DEFAULT_EXERCISE_PARAMS,
+  HANON_EXERCISE_COUNT,
   WARM_UP_REGISTRY,
   WARM_UP_TYPES,
   hasParam,
@@ -42,6 +43,7 @@ import { useRoutinesStore } from '@state/routinesStore';
 type BlockWithKey = RoutineBlock & { _key: string };
 
 type PickerType =
+  | 'exercise'
   | 'key'
   | 'bpm'
   | 'hand'
@@ -88,6 +90,7 @@ function defaultExerciseBlock(type: WarmUpType): ExerciseBlock {
     hand,
     bpm,
     octaves,
+    ...(hasParam(type, 'exercise') ? { exercise: DEFAULT_EXERCISE_PARAMS.exercise } : {}),
     ...(hasParam(type, 'peakRepeats') ? { peakRepeats: DEFAULT_PEAK_REPEATS } : {}),
   };
 }
@@ -99,6 +102,10 @@ function keyLabel(pitchClass: number, mode: 'major' | 'minor', t: TFn): string {
     ' ' +
     t(mode === 'major' ? 'routineEdit.modeMajor' : 'routineEdit.modeMinor')
   );
+}
+
+function exerciseLabel(exercise: number | undefined, t: TFn): string {
+  return t('routineEdit.exerciseNo', { number: exercise ?? DEFAULT_EXERCISE_PARAMS.exercise });
 }
 
 function octavesLabel(octaves: WarmUpOctaves, t: TFn): string {
@@ -284,6 +291,12 @@ export default function RoutineEditScreen() {
     if (type === 'key' && block.type !== 'pause') {
       options = WARMUP_KEYS.map((k) => ({ label: k.label, value: `${k.pitchClass}:${k.mode}` }));
       currentValue = `${block.pitchClass}:${block.mode}`;
+    } else if (type === 'exercise' && block.type !== 'pause') {
+      options = Array.from({ length: HANON_EXERCISE_COUNT }, (_, i) => ({
+        label: exerciseLabel(i + 1, t),
+        value: i + 1,
+      }));
+      currentValue = block.exercise ?? DEFAULT_EXERCISE_PARAMS.exercise;
     } else if (type === 'bpm' && block.type !== 'pause') {
       options = WARMUP_BPMS.map((b) => ({ label: String(b), value: b }));
       currentValue = block.bpm;
@@ -339,6 +352,8 @@ export default function RoutineEditScreen() {
     } else if (type === 'key') {
       const [pc, mode] = String(value).split(':');
       patchBlock(blockKey!, { pitchClass: Number(pc), mode: mode as 'major' | 'minor' });
+    } else if (type === 'exercise') {
+      patchBlock(blockKey!, { exercise: value as number });
     } else if (type === 'bpm') {
       patchBlock(blockKey!, { bpm: value as WarmUpBpm });
     } else if (type === 'hand') {
@@ -423,6 +438,12 @@ export default function RoutineEditScreen() {
                     {/* Parameter pills */}
                     {block.type !== 'pause' ? (
                       <View className="mt-2 flex-row flex-wrap gap-2">
+                        {hasParam(block.type, 'exercise') && (
+                          <Pill
+                            label={exerciseLabel(block.exercise, t)}
+                            onPress={() => openPicker(block._key, 'exercise', block)}
+                          />
+                        )}
                         {hasParam(block.type, 'key') && (
                           <Pill
                             label={keyLabel(block.pitchClass, block.mode, t)}

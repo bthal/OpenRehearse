@@ -16,7 +16,7 @@
   "dashboard": {
     "title": "OpenRehearse",
     "warmUps": "Warm-ups",
-    "hanon": "Hanon I",
+    "hanon": "Hanon",
     "scales": "Scales",
     "arpeggio": "Arpeggios",
     "chromatic": "Chromatic Scale",
@@ -61,6 +61,7 @@
     "octave_one": "Octave",
     "octave_other": "Octaves",
     "peak": "Peak",
+    "exercise": "No.",
     "failedToGenerate": "Failed to generate score."
   },
   "settings": {
@@ -136,7 +137,7 @@
     "editTitle": "Edit Routine",
     "namePlaceholder": "Routine name…",
     "addExercise": "Add Exercise",
-    "addExerciseHanon": "Hanon I",
+    "addExerciseHanon": "Hanon",
     "addExerciseScales": "Scale",
     "addExerciseArpeggio": "Arpeggio",
     "addExerciseChromatic": "Chromatic",
@@ -160,6 +161,7 @@
     "measure_one": "{{count}} Measure",
     "measure_other": "{{count}} Measures",
     "peakRepeats": "Peak ×{{times}}",
+    "exerciseNo": "No. {{number}}",
     "swapExercises": "Swap Exercises"
   },
   "routineRow": {

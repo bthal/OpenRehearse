@@ -80,7 +80,7 @@ describe('generateRoutineXml', () => {
         ],
       }),
     );
-    expect(xml).toContain('<rehearsal>Hanon I in C</rehearsal>');
+    expect(xml).toContain('<rehearsal>Hanon 1 in C</rehearsal>');
     expect(xml).toContain('<rehearsal>G Scale</rehearsal>');
   });
 

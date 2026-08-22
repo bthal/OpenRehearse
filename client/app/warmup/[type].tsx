@@ -39,6 +39,7 @@ import {
   type WarmUpPeakRepeats,
 } from '@domain/warmup';
 import {
+  HANON_EXERCISE_COUNT,
   WARM_UP_REGISTRY,
   hasParam,
   isWarmUpType,
@@ -48,15 +49,18 @@ import {
 import { useWarmUpStore } from '@state/warmupStore';
 import { Colors } from '@theme/colors';
 
-type PanelKey = 'speed' | 'hand' | 'key' | 'octave' | 'peak';
+type PanelKey = 'speed' | 'hand' | 'key' | 'octave' | 'peak' | 'exercise';
 type OpenPanel = PanelKey | null;
 
 const PANEL_WIDTH = 176; // key panel (4 keys visible, scroll for more)
 const HAND_PANEL_WIDTH = 132; // 3 × 44
 const OCTAVE_PANEL_WIDTH = 132; // 3 × 44
 const PEAK_PANEL_WIDTH = 220; // 5 × 44
+const EXERCISE_PANEL_WIDTH = 176; // 4 visible, scroll for the rest
 
 const HAND_OPTIONS: WarmUpHand[] = ['both', 'left', 'right'];
+
+const HANON_EXERCISE_NUMBERS = Array.from({ length: HANON_EXERCISE_COUNT }, (_, i) => i + 1);
 
 const HAND_ICON: Record<WarmUpHand, string> = {
   both: mdiHandClap,
@@ -102,6 +106,7 @@ export default function WarmUpView() {
     key: new Animated.Value(0),
     octave: new Animated.Value(0),
     peak: new Animated.Value(0),
+    exercise: new Animated.Value(0),
   }));
   const [panelLayout, setPanelLayout] = useState<Record<PanelKey, { top: number; left: number }>>({
     speed: { top: 0, left: 0 },
@@ -109,6 +114,7 @@ export default function WarmUpView() {
     key: { top: 0, left: 0 },
     octave: { top: 0, left: 0 },
     peak: { top: 0, left: 0 },
+    exercise: { top: 0, left: 0 },
   });
 
   const scoreAreaRef = useRef<View>(null);
@@ -117,6 +123,7 @@ export default function WarmUpView() {
   const keyTriggerRef = useRef<View>(null);
   const octaveTriggerRef = useRef<View>(null);
   const peakTriggerRef = useRef<View>(null);
+  const exerciseTriggerRef = useRef<View>(null);
   const toolbarRef = useRef<View>(null);
   const webViewRef = useRef<WebView>(null);
 
@@ -134,13 +141,14 @@ export default function WarmUpView() {
   // Destructured so the generation effect depends on the note-affecting parameters
   // only. Depending on `settings` wholesale would reload the score on every tempo
   // change, which handleBpmChange goes out of its way to avoid.
-  const { pitchClass, mode, hand, octaves, peakRepeats } = settings;
+  const { exercise, pitchClass, mode, hand, octaves, peakRepeats } = settings;
 
   const sendScore = useCallback(async () => {
     setLoadingScore(true);
     setScoreError(null);
     try {
       const xml = WARM_UP_REGISTRY[warmUpType].generateXml({
+        exercise,
         pitchClass,
         mode,
         hand,
@@ -152,7 +160,18 @@ export default function WarmUpView() {
       setLoadingScore(false);
       setScoreError(err instanceof Error ? err.message : t('warmup.failedToGenerate'));
     }
-  }, [warmUpType, pitchClass, mode, hand, octaves, peakRepeats, setLoadingScore, setScoreError, t]);
+  }, [
+    warmUpType,
+    exercise,
+    pitchClass,
+    mode,
+    hand,
+    octaves,
+    peakRepeats,
+    setLoadingScore,
+    setScoreError,
+    t,
+  ]);
 
   useEffect(() => {
     if (webViewReady) void sendScore();
@@ -303,12 +322,24 @@ export default function WarmUpView() {
     [isPlaying, updateSettings],
   );
 
+  const handleExerciseChange = useCallback(
+    (value: number) => {
+      if (isPlaying) webViewRef.current?.injectJavaScript('window.__rn_pause();void 0;');
+      updateSettings({ exercise: value });
+      setOpenPanel(null);
+      animatePanel('exercise', 0);
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [isPlaying, updateSettings],
+  );
+
   const handleMetronomeToggle = useCallback(() => {
     webViewRef.current?.injectJavaScript('window.__rn_toggle_metronome();void 0;');
     setMetronomeOn(!metronomeOn);
   }, [metronomeOn, setMetronomeOn]);
 
   const scoreReady = webViewReady && !isLoadingScore && !scoreError;
+  const showExercise = hasParam(warmUpType, 'exercise');
   const showKey = hasParam(warmUpType, 'key');
   const showOctave = hasParam(warmUpType, 'octaves');
   const showPeak = hasParam(warmUpType, 'peakRepeats');
@@ -376,6 +407,25 @@ export default function WarmUpView() {
                   color={metronomeOn ? Colors.primary : Colors.icon}
                 />
               </TouchableOpacity>
+
+              {/* Exercise-number trigger — families with numbered exercises */}
+              {showExercise && (
+                <View ref={exerciseTriggerRef}>
+                  <TouchableOpacity
+                    onPress={() => togglePanel('exercise', exerciseTriggerRef)}
+                    hitSlop={8}
+                    className="items-center px-2 py-1"
+                  >
+                    <Text
+                      className="text-base font-semibold mt-0.5"
+                      style={{ color: openPanel === 'exercise' ? Colors.primary : Colors.icon }}
+                    >
+                      {settings.exercise}
+                    </Text>
+                    <Text className="text-[9px] text-black mt-0.5">{t('warmup.exercise')}</Text>
+                  </TouchableOpacity>
+                </View>
+              )}
 
               {/* Speed trigger */}
               <View ref={speedTriggerRef}>
@@ -469,6 +519,47 @@ export default function WarmUpView() {
                 </View>
               )}
             </ToolbarShell>
+          )}
+
+          {/* Exercise-number panel */}
+          {showExercise && (
+            <Animated.View
+              pointerEvents={openPanel === 'exercise' ? 'auto' : 'none'}
+              style={[
+                panelBase,
+                {
+                  top: panelLayout.exercise.top,
+                  left: panelLayout.exercise.left,
+                  width: panelWidthInterp('exercise', EXERCISE_PANEL_WIDTH),
+                },
+              ]}
+            >
+              <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+                {HANON_EXERCISE_NUMBERS.map((n) => (
+                  <TouchableOpacity
+                    key={n}
+                    onPress={() => handleExerciseChange(n)}
+                    hitSlop={4}
+                    style={{
+                      width: 44,
+                      height: 44,
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                    }}
+                  >
+                    <Text
+                      style={{
+                        fontSize: 13,
+                        fontWeight: '600',
+                        color: settings.exercise === n ? Colors.primary : Colors.iconMuted,
+                      }}
+                    >
+                      {n}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </ScrollView>
+            </Animated.View>
           )}
 
           {/* Speed panel */}

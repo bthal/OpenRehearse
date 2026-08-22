@@ -116,6 +116,33 @@ placing it in the public domain.
 
 ---
 
+## Warm-up exercises — Hanon, *Le Pianiste Virtuose* Nos. 1–20
+
+No score file is bundled for these. `client/src/domain/warmupMusicXml.ts` holds a table
+of note offsets and fingerings per exercise and generates MusicXML at runtime, which is
+what lets the app transpose each exercise into any key and span one to three octaves.
+
+**Music:** Charles-Louis Hanon (1819–1900), *Le Pianiste Virtuose en 60 Exercices*,
+first published 1873 — **public domain** (author died > 70 years ago; published well
+before 1929). This covers all twenty exercises of Part I, No. 1 included.
+
+**Reference edition:** G. Schirmer No. 925 (1900), scanned on IMSLP as
+[#91547](https://imslp.org/wiki/The_Virtuoso_Pianist_(Hanon,_Charles-Louis)) and marked
+public domain there. Note that IMSLP hosts later editions of the same work that are
+*not* public domain in every jurisdiction (Curci 1947, Jurgenson 1909); those were not
+used.
+
+**Machine-readable reference:** The offsets and fingerings in the table were extracted
+from the [Mutopia Project](https://www.mutopiaproject.org/cgibin/piece-info.cgi?id=2037)
+LilyPond engraving of Part I, typeset from the Schirmer 1900 edition by Steve Taylor and
+Javier Ruiz-Alma and published under **CC BY-SA 4.0**. Credited here because it saved
+real work. What the app keeps from it is which notes Hanon wrote — facts about a public
+domain composition, not the engraving — so no share-alike obligation is claimed over
+this source tree. Mutopia's own editorial fingering annotations were deliberately not
+used; fingerings come from the Schirmer edition.
+
+---
+
 ## App logo — piano icon
 
 The OpenRehearse mark in `client/assets/brand/` and the app icons in

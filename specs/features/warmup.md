@@ -2,13 +2,13 @@
 
 ## Goal
 
-Built-in exercises (Hanon No. 1, major/minor scales, arpeggios, chromatic scales, 5-finger
+Built-in exercises (Hanon Nos. 1-20, major/minor scales, arpeggios, chromatic scales, 5-finger
 scales, and a 4-5 finger drill) rendered as live score and played back with synthesis — no
 file import needed.
 
 ## Parameters
 
-Hanon I, Scales, Arpeggios, Chromatic, and 5-Finger scales share the same controls:
+Hanon, Scales, Arpeggios, Chromatic, and 5-Finger scales share the same controls:
 
 | Parameter | Options |
 |-----------|---------|
@@ -42,9 +42,21 @@ Hanon I, Scales, Arpeggios, Chromatic, and 5-Finger scales share the same contro
 - **5-Finger**: scale degrees 1-5 ascending then back to the tonic (C-D-E-F-G-F-E-D-C in C
   major). Multi-octave runs climb the five-note pattern into each successive octave before
   the mirror brings it back down.
-- **Hanon No. 1**: 7 ascending cells per octave (peak at degree 7n+4); symmetric
-  descent; whole-note landing. First 16 ascending notes fingered 1-2-3-4-5-4-3-2 ×2;
-  first 16 descending 5-4-3-2-1-2-3-4 ×2.
+- **Hanon Nos. 1-20** (Part I of *Le Pianiste Virtuose*): each exercise is one 8-note
+  figure of diatonic degree offsets, played once per bar and shifted up a degree per bar
+  across the range, then a mirrored figure shifted back down, then a held tonic. An
+  **Exercise** toolbar panel selects the number; key, hand, octaves and speed apply as
+  for the other exercises.
+  Per-exercise data (offsets, per-hand fingerings, bar counts, the degree the ascent and
+  descent begin on) lives in `HANON_PATTERNS` in `warmupMusicXml.ts`, extracted from the
+  reference edition — see THIRD_PARTY_NOTICES.md. Three things the data captures that a
+  uniform model would get wrong: the descending figure is not the negation of the
+  ascending one, each hand has its own fingering, and a figure can sit below its bar's
+  root note (No. 12).
+  Fingering is printed on the first two bars of each direction only. No. 4 has four notes
+  the reference edition leaves unfingered; those render without a mark.
+  The app does not reproduce the printed edition's opening and turnaround bars — the
+  repeating figure is generated and the exercise closes on a held tonic instead.
 - **4-5 Drill**: 6 measures of 4/4 in C major. Grand staff with two voices per hand.
   RH voice 1 (fingers 4+5): C5/B4 alternating eighths. RH voice 2 (fingers 1–3): ascending
   half-note melody C4→A4 then descending G4→C4. LH mirrors in contrary motion. Final measure:
@@ -80,7 +92,7 @@ Hanon I, Scales, Arpeggios, Chromatic, and 5-Finger scales share the same contro
 
 ## Routines
 
-A **Routine** is an ordered list of exercise blocks (Hanon I, Scales, Arpeggios, Chromatic, 5-Finger) and optional Pause blocks, rendered and played back as a single continuous score.
+A **Routine** is an ordered list of exercise blocks (Hanon, Scales, Arpeggios, Chromatic, 5-Finger) and optional Pause blocks, rendered and played back as a single continuous score.
 
 ### Dashboard
 
@@ -103,14 +115,14 @@ A **Routine** is an ordered list of exercise blocks (Hanon I, Scales, Arpeggios,
 - Simplified toolbar: back arrow, play/pause, metronome only. No loop, no speed panel.
 - Generates a combined MusicXML via `generateRoutineXml(routine)` in `domain/routineMusicXml.ts`.
 - Score always uses 2 staves (treble + bass); single-hand exercises fill the unused staff with whole-note rests.
-- Each exercise block's first measure includes a `<rehearsal>` section label (e.g. "Hanon I", "Scales") and a `<sound tempo="X"/>` directive.
+- Each exercise block's first measure includes a `<rehearsal>` section label (e.g. "Hanon 7 in C", "C Scale") and a `<sound tempo="X"/>` directive.
 - Pause blocks appear as rest measures with a "Pause" rehearsal mark; they play at the BPM of the **next** exercise block.
 - Tempo changes are driven by `computeRoutineTempoSchedule()` in `domain/routineMusicXml.ts`, which computes cumulative quarter-beat positions for each BPM change. `initPlayback` receives this as `externalTempoSchedule` and registers each change via `Tone.Transport.schedule()` so BPM fires at the correct tick on every play and replay. OSMD's `<sound tempo>` detection is bypassed when an external schedule is provided.
 
 ### Acceptance criteria
 
 - [X] "New Routine" button creates an empty routine; edit view opens.
-- [X] Blocks can be added (Hanon I, Scales, 4-5 Drill, Pause), reordered, and deleted with confirm.
+- [X] Blocks can be added (Hanon, Scales, 4-5 Drill, Pause), reordered, and deleted with confirm.
 - [X] Exercise parameter pills update the block.
 - [X] Save is disabled until the routine has a title, ≥1 exercise block, and the last block is not a pause.
 - [X] Saved routine appears in the dashboard; persists after app restart.
