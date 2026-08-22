@@ -62,6 +62,7 @@ const WHOLE_REST = `<note><rest measure="yes"/><duration>${DIVISIONS * 4}</durat
 // routine written before a parameter existed still renders.
 function blockParams(block: ExerciseBlock): ExerciseParams {
   return {
+    exercise: block.exercise ?? 1,
     pitchClass: block.pitchClass,
     mode: block.mode,
     hand: block.hand,
@@ -74,7 +75,7 @@ function blockParams(block: ExerciseBlock): ExerciseParams {
 function exerciseRehearsalLabel(block: ExerciseBlock): string {
   const d = warmUpDescriptor(block.type);
   if (!d) return '';
-  return d.rehearsalLabel(keyLabel(block.pitchClass, block.mode));
+  return d.rehearsalLabel(blockParams(block), keyLabel(block.pitchClass, block.mode));
 }
 
 // Right-/left-hand measures for any exercise block. Routines never render fingering.

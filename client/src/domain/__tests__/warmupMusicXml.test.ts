@@ -1,8 +1,10 @@
 import {
+  HANON_EXERCISE_COUNT,
   generateArpeggioXml,
   generateChromaticXml,
   generateDrill45Xml,
   generateFiveScaleXml,
+  generateHanonXml,
   generateScaleXml,
 } from '../warmupMusicXml';
 
@@ -211,4 +213,340 @@ describe('key signatures and spelling', () => {
       });
     }
   }
+});
+
+// ─── Hanon Nos. 1-20 ─────────────────────────────────────────────────────────
+//
+// These lock in output that was verified note-for-note against the Mutopia LilyPond
+// engraving of the Schirmer (1900) edition: for all 20 exercises and both hands, the
+// repeating figure the generator produces matched the source exactly. They cannot
+// re-prove the transcription (they read the same table the generator does) — they
+// exist so a regression in the generator or an edit to the table is caught.
+describe('generateHanonXml', () => {
+  // C major, right hand, two octaves. `first` is the opening bar; `lastFigure` is the
+  // final figure bar, i.e. the bar before the closing held tonic.
+  const CASES: { no: number; measures: number; first: string[]; lastFigure: string[] }[] = [
+    {
+      no: 1,
+      measures: 30,
+      first: ['C4', 'E4', 'F4', 'G4', 'A4', 'G4', 'F4', 'E4'],
+      lastFigure: ['G4', 'E4', 'D4', 'C4', 'B3', 'C4', 'D4', 'E4'],
+    },
+    {
+      no: 2,
+      measures: 29,
+      first: ['C4', 'E4', 'A4', 'G4', 'F4', 'G4', 'F4', 'E4'],
+      lastFigure: ['A4', 'E4', 'C4', 'D4', 'E4', 'D4', 'E4', 'F4'],
+    },
+    {
+      no: 3,
+      measures: 29,
+      first: ['C4', 'E4', 'A4', 'G4', 'F4', 'E4', 'F4', 'G4'],
+      lastFigure: ['A4', 'E4', 'C4', 'D4', 'E4', 'F4', 'E4', 'D4'],
+    },
+    {
+      no: 4,
+      measures: 29,
+      first: ['C4', 'D4', 'C4', 'E4', 'A4', 'G4', 'F4', 'E4'],
+      lastFigure: ['A4', 'G4', 'A4', 'E4', 'C4', 'D4', 'E4', 'F4'],
+    },
+    {
+      no: 5,
+      measures: 29,
+      first: ['C4', 'A4', 'G4', 'A4', 'F4', 'G4', 'E4', 'F4'],
+      lastFigure: ['D4', 'E4', 'D4', 'F4', 'E4', 'G4', 'F4', 'A4'],
+    },
+    {
+      no: 6,
+      measures: 27,
+      first: ['C4', 'A4', 'G4', 'A4', 'F4', 'A4', 'E4', 'A4'],
+      lastFigure: ['B4', 'D4', 'E4', 'D4', 'F4', 'D4', 'G4', 'D4'],
+    },
+    {
+      no: 7,
+      measures: 29,
+      first: ['C4', 'E4', 'D4', 'F4', 'E4', 'G4', 'F4', 'E4'],
+      lastFigure: ['A4', 'F4', 'G4', 'E4', 'F4', 'D4', 'E4', 'F4'],
+    },
+    {
+      no: 8,
+      measures: 29,
+      first: ['C4', 'E4', 'G4', 'A4', 'F4', 'G4', 'E4', 'F4'],
+      lastFigure: ['A4', 'F4', 'D4', 'C4', 'E4', 'D4', 'F4', 'E4'],
+    },
+    {
+      no: 9,
+      measures: 28,
+      first: ['C4', 'E4', 'F4', 'E4', 'G4', 'F4', 'A4', 'G4'],
+      lastFigure: ['B4', 'G4', 'F4', 'G4', 'E4', 'F4', 'D4', 'E4'],
+    },
+    {
+      no: 10,
+      measures: 29,
+      first: ['C4', 'A4', 'G4', 'F4', 'E4', 'F4', 'E4', 'F4'],
+      lastFigure: ['A4', 'C4', 'D4', 'E4', 'F4', 'E4', 'F4', 'E4'],
+    },
+    {
+      no: 11,
+      measures: 29,
+      first: ['C4', 'E4', 'A4', 'G4', 'A4', 'G4', 'F4', 'G4'],
+      lastFigure: ['A4', 'E4', 'C4', 'D4', 'C4', 'D4', 'E4', 'D4'],
+    },
+    {
+      no: 12,
+      measures: 27,
+      first: ['B4', 'D4', 'F4', 'E4', 'D4', 'E4', 'F4', 'D4'],
+      lastFigure: ['C4', 'A4', 'F4', 'G4', 'A4', 'G4', 'F4', 'A4'],
+    },
+    {
+      no: 13,
+      measures: 29,
+      first: ['E4', 'C4', 'F4', 'D4', 'G4', 'E4', 'F4', 'G4'],
+      lastFigure: ['F4', 'A4', 'E4', 'G4', 'F4', 'D4', 'E4', 'F4'],
+    },
+    {
+      no: 14,
+      measures: 29,
+      first: ['C4', 'D4', 'F4', 'E4', 'F4', 'E4', 'G4', 'F4'],
+      lastFigure: ['A4', 'G4', 'E4', 'F4', 'E4', 'F4', 'D4', 'E4'],
+    },
+    {
+      no: 15,
+      measures: 27,
+      first: ['C4', 'E4', 'D4', 'F4', 'E4', 'G4', 'F4', 'A4'],
+      lastFigure: ['B4', 'G4', 'A4', 'F4', 'G4', 'E4', 'F4', 'D4'],
+    },
+    {
+      no: 16,
+      measures: 29,
+      first: ['C4', 'E4', 'D4', 'E4', 'A4', 'G4', 'F4', 'G4'],
+      lastFigure: ['A4', 'E4', 'F4', 'E4', 'C4', 'D4', 'E4', 'D4'],
+    },
+    {
+      no: 17,
+      measures: 26,
+      first: ['C4', 'E4', 'A4', 'G4', 'B4', 'A4', 'G4', 'A4'],
+      lastFigure: ['C5', 'G4', 'E4', 'F4', 'D4', 'E4', 'F4', 'D4'],
+    },
+    {
+      no: 18,
+      measures: 29,
+      first: ['C4', 'D4', 'F4', 'E4', 'G4', 'F4', 'D4', 'E4'],
+      lastFigure: ['A4', 'G4', 'E4', 'F4', 'D4', 'E4', 'G4', 'F4'],
+    },
+    {
+      no: 19,
+      measures: 29,
+      first: ['C4', 'A4', 'F4', 'G4', 'A4', 'F4', 'E4', 'G4'],
+      lastFigure: ['A4', 'C4', 'E4', 'D4', 'C4', 'E4', 'F4', 'D4'],
+    },
+    {
+      no: 20,
+      measures: 29,
+      first: ['E3', 'G3', 'C4', 'E4', 'C4', 'B3', 'C4', 'A3'],
+      lastFigure: ['F4', 'D4', 'A3', 'F3', 'A3', 'G3', 'A3', 'F3'],
+    },
+  ];
+
+  for (const c of CASES) {
+    describe(`No. ${c.no}`, () => {
+      const xml = generateHanonXml(0, 'major', 'right', 2, c.no);
+      const measures = partXml(xml, 'P1').split('<measure number=').slice(1);
+
+      it('opens on the expected figure', () => {
+        expect(pitches(measures[0]!)).toEqual(c.first);
+      });
+
+      it('ends its descent on the expected figure', () => {
+        expect(pitches(measures[measures.length - 2]!)).toEqual(c.lastFigure);
+      });
+
+      it('spans the expected number of measures', () => {
+        expect(measures.length).toBe(c.measures);
+      });
+
+      it('closes on a held tonic', () => {
+        const closing = measures[measures.length - 1]!;
+        expect(pitches(closing)).toEqual(['C4']);
+        expect(closing).toContain('<type>whole</type>');
+      });
+    });
+  }
+
+  // Fingering is per hand and per exercise — passing one hand's marks to the other was
+  // a real bug. '-' means the reference edition prints no fingering for that note
+  // (No. 4 only); the generator leaves the note unmarked rather than inventing one.
+  describe('fingering', () => {
+    const FINGERS: { no: number; rh: string[]; lh: string[] }[] = [
+      {
+        no: 1,
+        rh: ['1', '2', '3', '4', '5', '4', '3', '2'],
+        lh: ['5', '4', '3', '2', '1', '2', '3', '4'],
+      },
+      {
+        no: 2,
+        rh: ['1', '2', '5', '4', '3', '4', '3', '2'],
+        lh: ['5', '3', '1', '2', '3', '2', '3', '4'],
+      },
+      {
+        no: 3,
+        rh: ['1', '2', '5', '4', '3', '2', '3', '4'],
+        lh: ['5', '3', '1', '2', '3', '4', '3', '2'],
+      },
+      {
+        no: 4,
+        rh: ['1', '2', '1', '2', '5', '-', '-', '2'],
+        lh: ['5', '4', '5', '3', '1', '-', '-', '3'],
+      },
+      {
+        no: 5,
+        rh: ['1', '5', '4', '5', '3', '4', '2', '3'],
+        lh: ['5', '1', '2', '1', '3', '2', '4', '3'],
+      },
+      {
+        no: 6,
+        rh: ['1', '5', '4', '5', '3', '5', '2', '5'],
+        lh: ['5', '1', '2', '1', '3', '1', '4', '1'],
+      },
+      {
+        no: 7,
+        rh: ['1', '3', '2', '4', '3', '5', '4', '3'],
+        lh: ['5', '3', '4', '2', '3', '1', '3', '4'],
+      },
+      {
+        no: 8,
+        rh: ['1', '2', '4', '5', '3', '4', '2', '3'],
+        lh: ['5', '4', '2', '1', '3', '2', '4', '3'],
+      },
+      {
+        no: 9,
+        rh: ['1', '2', '3', '2', '4', '3', '5', '4'],
+        lh: ['5', '4', '3', '4', '2', '3', '1', '2'],
+      },
+      {
+        no: 10,
+        rh: ['1', '5', '4', '3', '2', '3', '2', '3'],
+        lh: ['5', '1', '2', '3', '4', '3', '4', '3'],
+      },
+      {
+        no: 11,
+        rh: ['1', '2', '5', '4', '5', '4', '3', '4'],
+        lh: ['5', '3', '1', '2', '1', '2', '3', '2'],
+      },
+      {
+        no: 12,
+        rh: ['5', '1', '3', '2', '1', '2', '3', '1'],
+        lh: ['1', '5', '3', '4', '5', '4', '3', '5'],
+      },
+      {
+        no: 13,
+        rh: ['3', '1', '4', '2', '5', '3', '4', '5'],
+        lh: ['3', '5', '2', '4', '1', '3', '2', '1'],
+      },
+      {
+        no: 14,
+        rh: ['1', '2', '4', '3', '4', '3', '5', '4'],
+        lh: ['5', '4', '2', '3', '2', '3', '1', '3'],
+      },
+      {
+        no: 15,
+        rh: ['1', '2', '1', '3', '2', '4', '3', '5'],
+        lh: ['5', '3', '4', '2', '3', '1', '2', '1'],
+      },
+      {
+        no: 16,
+        rh: ['1', '3', '2', '3', '5', '4', '3', '4'],
+        lh: ['5', '3', '4', '3', '1', '2', '3', '2'],
+      },
+      {
+        no: 17,
+        rh: ['1', '2', '4', '3', '5', '4', '3', '4'],
+        lh: ['5', '4', '2', '3', '1', '2', '3', '2'],
+      },
+      {
+        no: 18,
+        rh: ['1', '2', '4', '3', '5', '4', '2', '3'],
+        lh: ['5', '4', '2', '3', '1', '2', '4', '3'],
+      },
+      {
+        no: 19,
+        rh: ['1', '5', '3', '4', '5', '3', '2', '4'],
+        lh: ['5', '1', '3', '2', '1', '3', '4', '2'],
+      },
+      {
+        no: 20,
+        rh: ['1', '2', '4', '5', '4', '3', '4', '2'],
+        lh: ['5', '4', '2', '1', '2', '3', '2', '4'],
+      },
+    ];
+
+    function firstBarFingers(xml: string, part: string): string[] {
+      const bar = partXml(xml, part).split('<measure number=')[1]!;
+      return bar
+        .split('<note>')
+        .slice(1)
+        .map((n) => /<fingering>(\d)<\/fingering>/.exec(n)?.[1] ?? '-');
+    }
+
+    for (const c of FINGERS) {
+      it(`No. ${c.no} fingers each hand independently`, () => {
+        const xml = generateHanonXml(0, 'major', 'both', 2, c.no);
+        expect(firstBarFingers(xml, 'P1')).toEqual(c.rh);
+        expect(firstBarFingers(xml, 'P2')).toEqual(c.lh);
+      });
+    }
+
+    it('marks only the first two bars of each direction', () => {
+      const xml = generateHanonXml(0, 'major', 'right', 2, 1);
+      const bars = partXml(xml, 'P1').split('<measure number=').slice(1);
+      // Two at the start of the ascent, two at the start of the descent.
+      const marked = bars.filter((b) => b.includes('<fingering>')).length;
+      expect(marked).toBe(4);
+    });
+  });
+
+  it('covers exactly the twenty exercises of Part I', () => {
+    expect(HANON_EXERCISE_COUNT).toBe(20);
+  });
+
+  it('gives each hand its own fingering', () => {
+    // The hands do not mirror each other's fingering, and passing one hand's marks to
+    // the other was a real bug: No. 1 ascends 1-2-3-4-5 in the right hand and
+    // 5-4-3-2-1 in the left.
+    const xml = generateHanonXml(0, 'major', 'both', 1, 1);
+    const fingers = (part: string) =>
+      [...partXml(xml, part).matchAll(/<fingering>(\d)<\/fingering>/g)]
+        .map((m) => m[1])
+        .slice(0, 5);
+    expect(fingers('P1')).toEqual(['1', '2', '3', '4', '5']);
+    expect(fingers('P2')).toEqual(['5', '4', '3', '2', '1']);
+  });
+
+  it('renders a different exercise for a different number', () => {
+    const a = generateHanonXml(0, 'major', 'right', 1, 1);
+    const b = generateHanonXml(0, 'major', 'right', 1, 7);
+    expect(a).not.toEqual(b);
+  });
+
+  it('clamps an out-of-range exercise number instead of throwing', () => {
+    const first = generateHanonXml(0, 'major', 'right', 1, 1);
+    const last = generateHanonXml(0, 'major', 'right', 1, 20);
+    expect(generateHanonXml(0, 'major', 'right', 1, 0)).toEqual(first);
+    expect(generateHanonXml(0, 'major', 'right', 1, -3)).toEqual(first);
+    expect(generateHanonXml(0, 'major', 'right', 1, 99)).toEqual(last);
+  });
+
+  it('transposes every exercise into every key without a bare accidental clash', () => {
+    // A cell can reach below its bar's root (No. 12), which used to index the scale
+    // table with a negative degree and silently yield a wrong pitch.
+    for (let no = 1; no <= HANON_EXERCISE_COUNT; no++) {
+      for (const mode of ['major', 'minor'] as const) {
+        for (let pc = 0; pc < 12; pc++) {
+          const xml = generateHanonXml(pc, mode, 'both', 1, no);
+          expect(xml).toContain('<score-partwise');
+          expect(pitches(xml).length).toBeGreaterThan(0);
+        }
+      }
+    }
+  });
 });

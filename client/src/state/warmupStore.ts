@@ -13,6 +13,7 @@ import {
 } from '@domain/warmup';
 import {
   DEFAULT_EXERCISE_PARAMS,
+  HANON_EXERCISE_COUNT,
   WARM_UP_TYPES,
   type ExerciseParams,
   type WarmUpType,
@@ -72,6 +73,13 @@ function coerceExercise(raw: unknown): ExerciseSettings {
     options.includes(value as T) ? (value as T) : fallback;
 
   return {
+    exercise:
+      typeof o.exercise === 'number' &&
+      Number.isInteger(o.exercise) &&
+      o.exercise >= 1 &&
+      o.exercise <= HANON_EXERCISE_COUNT
+        ? o.exercise
+        : DEFAULT_EXERCISE_PARAMS.exercise,
     pitchClass:
       typeof o.pitchClass === 'number' &&
       Number.isInteger(o.pitchClass) &&

@@ -24,6 +24,7 @@ import {
   type WarmUpScaleMode,
 } from './warmup';
 import {
+  HANON_EXERCISE_COUNT,
   generateArpeggioXml,
   generateChromaticXml,
   generateDrill45Xml,
@@ -39,7 +40,7 @@ import {
 } from './warmupMusicXml';
 
 /** A parameter an exercise can declare. `key` covers pitchClass + mode together. */
-export type WarmUpParam = 'key' | 'bpm' | 'hand' | 'octaves' | 'peakRepeats';
+export type WarmUpParam = 'exercise' | 'key' | 'bpm' | 'hand' | 'octaves' | 'peakRepeats';
 
 /**
  * The union of every exercise parameter. Exercises carry all fields regardless of
@@ -48,6 +49,8 @@ export type WarmUpParam = 'key' | 'bpm' | 'hand' | 'octaves' | 'peakRepeats';
  * Fields not in an exercise's `params` are ignored by its generator.
  */
 export interface ExerciseParams {
+  /** Which numbered exercise within a family (Hanon 1-20). 1 for everything else. */
+  exercise: number;
   pitchClass: number;
   mode: WarmUpScaleMode;
   hand: WarmUpHand;
@@ -87,7 +90,7 @@ export interface WarmUpDescriptor {
    * here rather than in a switch statement so it is at least declared next to the
    * other labels. Revisit if a second locale ever lands.
    */
-  rehearsalLabel: (keyLabel: string) => string;
+  rehearsalLabel: (p: ScoreParams, keyLabel: string) => string;
   /** Complete standalone MusicXML for the exercise screen. */
   generateXml: (p: ScoreParams) => string;
   /** Per-hand measures, for splicing into a multi-exercise routine score. */
@@ -103,21 +106,25 @@ export function keyLabel(pitchClass: number, mode: WarmUpScaleMode): string {
 // only the pair of functions differs.
 const KEYED_PARAMS = ['key', 'bpm', 'hand', 'octaves'] as const;
 
+export { HANON_EXERCISE_COUNT };
+
 export const WARM_UP_REGISTRY = {
   hanon: {
-    params: KEYED_PARAMS,
+    // The only family with a numbered exercise; 'exercise' leads so its control sits
+    // first in the toolbar, before the key.
+    params: ['exercise', 'key', 'bpm', 'hand', 'octaves'],
     labelKey: 'dashboard.hanon',
     shortLabelKey: 'routineEdit.addExerciseHanon',
-    rehearsalLabel: (k) => `Hanon I in ${k}`,
-    generateXml: (p) => generateHanonXml(p.pitchClass, p.mode, p.hand, p.octaves),
+    rehearsalLabel: (p, k) => `Hanon ${p.exercise} in ${k}`,
+    generateXml: (p) => generateHanonXml(p.pitchClass, p.mode, p.hand, p.octaves, p.exercise),
     measureNotes: (p, fingering) =>
-      getHanonMeasureNotes(p.pitchClass, p.mode, p.hand, p.octaves, fingering),
+      getHanonMeasureNotes(p.pitchClass, p.mode, p.hand, p.octaves, fingering, p.exercise),
   },
   scales: {
     params: KEYED_PARAMS,
     labelKey: 'dashboard.scales',
     shortLabelKey: 'routineEdit.addExerciseScales',
-    rehearsalLabel: (k) => `${k} Scale`,
+    rehearsalLabel: (_p, k) => `${k} Scale`,
     generateXml: (p) => generateScaleXml(p.pitchClass, p.mode, p.hand, p.octaves),
     measureNotes: (p) => getScaleMeasureNotes(p.pitchClass, p.mode, p.hand, p.octaves),
   },
@@ -125,7 +132,7 @@ export const WARM_UP_REGISTRY = {
     params: KEYED_PARAMS,
     labelKey: 'dashboard.arpeggio',
     shortLabelKey: 'routineEdit.addExerciseArpeggio',
-    rehearsalLabel: (k) => `${k} Arpeggio`,
+    rehearsalLabel: (_p, k) => `${k} Arpeggio`,
     generateXml: (p) => generateArpeggioXml(p.pitchClass, p.mode, p.hand, p.octaves),
     measureNotes: (p) => getArpeggioMeasureNotes(p.pitchClass, p.mode, p.hand, p.octaves),
   },
@@ -133,7 +140,7 @@ export const WARM_UP_REGISTRY = {
     params: KEYED_PARAMS,
     labelKey: 'dashboard.chromatic',
     shortLabelKey: 'routineEdit.addExerciseChromatic',
-    rehearsalLabel: (k) => `${k} Chromatic`,
+    rehearsalLabel: (_p, k) => `${k} Chromatic`,
     generateXml: (p) => generateChromaticXml(p.pitchClass, p.mode, p.hand, p.octaves),
     measureNotes: (p) => getChromaticMeasureNotes(p.pitchClass, p.mode, p.hand, p.octaves),
   },
@@ -141,7 +148,7 @@ export const WARM_UP_REGISTRY = {
     params: KEYED_PARAMS,
     labelKey: 'dashboard.fiveScale',
     shortLabelKey: 'routineEdit.addExerciseFiveScale',
-    rehearsalLabel: (k) => `${k} 5-Finger`,
+    rehearsalLabel: (_p, k) => `${k} 5-Finger`,
     generateXml: (p) => generateFiveScaleXml(p.pitchClass, p.mode, p.hand, p.octaves),
     measureNotes: (p) => getFiveScaleMeasureNotes(p.pitchClass, p.mode, p.hand, p.octaves),
   },
@@ -176,6 +183,7 @@ export function hasParam(type: WarmUpType, param: WarmUpParam): boolean {
 }
 
 export const DEFAULT_EXERCISE_PARAMS: ExerciseParams = {
+  exercise: 1,
   pitchClass: 0,
   mode: 'major',
   hand: 'both',
@@ -197,7 +205,7 @@ const measureCountCache = new Map<string, number>();
 const MEASURE_COUNT_CACHE_LIMIT = 512;
 
 export function measureCount(type: WarmUpType, p: ScoreParams): number {
-  const cacheKey = `${type}|${p.pitchClass}|${p.mode}|${p.hand}|${p.octaves}|${p.peakRepeats}`;
+  const cacheKey = `${type}|${p.exercise}|${p.pitchClass}|${p.mode}|${p.hand}|${p.octaves}|${p.peakRepeats}`;
   const hit = measureCountCache.get(cacheKey);
   if (hit !== undefined) return hit;
 
