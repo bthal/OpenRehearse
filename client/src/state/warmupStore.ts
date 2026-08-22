@@ -2,58 +2,42 @@ import * as FileSystem from 'expo-file-system/legacy';
 import { create } from 'zustand';
 
 import {
-  DEFAULT_PEAK_REPEATS,
-  DEFAULT_WARMUP_BPM,
+  WARMUP_BPMS,
+  WARMUP_OCTAVES,
+  WARMUP_PEAK_REPEATS,
   type WarmUpBpm,
   type WarmUpHand,
   type WarmUpOctaves,
   type WarmUpPeakRepeats,
   type WarmUpScaleMode,
 } from '@domain/warmup';
+import {
+  DEFAULT_EXERCISE_PARAMS,
+  WARM_UP_TYPES,
+  type ExerciseParams,
+  type WarmUpType,
+} from '@domain/warmupRegistry';
 
-interface ExerciseSettings {
-  pitchClass: number;
-  mode: WarmUpScaleMode;
-  hand: WarmUpHand;
-  bpm: WarmUpBpm;
-  octaves: WarmUpOctaves;
-}
+/**
+ * Remembered parameters for one exercise. Every exercise stores the full parameter
+ * set even where it doesn't use all of it — the registry's `params` list decides what
+ * is shown and what its generator reads. One shape means one merge, one validator,
+ * and no padding at the call site.
+ */
+export type ExerciseSettings = ExerciseParams;
 
-export interface Drill45Settings {
-  hand: WarmUpHand;
-  bpm: WarmUpBpm;
-  peakRepeats: WarmUpPeakRepeats;
-}
+type WarmUpSettings = Record<WarmUpType, ExerciseSettings>;
 
-interface WarmUpSettings {
-  hanon: ExerciseSettings;
-  scales: ExerciseSettings;
-  arpeggio: ExerciseSettings;
-  chromatic: ExerciseSettings;
-  fiveScale: ExerciseSettings;
-  drill45: Drill45Settings;
-}
-
-const defaultExerciseSettings = (): ExerciseSettings => ({
-  pitchClass: 0,
-  mode: 'major',
-  hand: 'both',
-  bpm: DEFAULT_WARMUP_BPM,
-  octaves: 1,
-});
-
-const DEFAULTS: WarmUpSettings = {
-  hanon: defaultExerciseSettings(),
-  scales: defaultExerciseSettings(),
-  arpeggio: defaultExerciseSettings(),
-  chromatic: defaultExerciseSettings(),
-  fiveScale: defaultExerciseSettings(),
-  drill45: { hand: 'both', bpm: DEFAULT_WARMUP_BPM, peakRepeats: DEFAULT_PEAK_REPEATS },
-};
+const DEFAULTS: WarmUpSettings = Object.fromEntries(
+  WARM_UP_TYPES.map((t) => [t, { ...DEFAULT_EXERCISE_PARAMS }]),
+) as WarmUpSettings;
 
 const SETTINGS_PATH = (FileSystem.documentDirectory ?? '') + 'warmup-settings.json';
 
-interface WarmUpState extends WarmUpSettings {
+interface WarmUpState {
+  /** Persisted per-exercise parameters, keyed by exercise id. */
+  exercises: WarmUpSettings;
+
   webViewReady: boolean;
   isLoadingScore: boolean;
   scoreError: string | null;
@@ -68,12 +52,7 @@ interface WarmUpState extends WarmUpSettings {
   scoreMoving: boolean;
 
   initSettings: () => Promise<void>;
-  updateHanon: (patch: Partial<ExerciseSettings>) => void;
-  updateScales: (patch: Partial<ExerciseSettings>) => void;
-  updateArpeggio: (patch: Partial<ExerciseSettings>) => void;
-  updateChromatic: (patch: Partial<ExerciseSettings>) => void;
-  updateFiveScale: (patch: Partial<ExerciseSettings>) => void;
-  updateDrill45: (patch: Partial<Drill45Settings>) => void;
+  updateExercise: (type: WarmUpType, patch: Partial<ExerciseSettings>) => void;
   setWebViewReady: (v: boolean) => void;
   setLoadingScore: (v: boolean) => void;
   setScoreError: (v: string | null) => void;
@@ -84,22 +63,45 @@ interface WarmUpState extends WarmUpSettings {
   resetPlayback: () => void;
 }
 
+// Values are validated field by field rather than trusted, following
+// `settingsRepository.coerce`. A saved file is user-writable data on disk: a value
+// outside its option list would otherwise reach a generator and render nonsense.
+function coerceExercise(raw: unknown): ExerciseSettings {
+  const o = (raw ?? {}) as Partial<Record<keyof ExerciseSettings, unknown>>;
+  const pick = <T>(value: unknown, options: readonly T[], fallback: T): T =>
+    options.includes(value as T) ? (value as T) : fallback;
+
+  return {
+    pitchClass:
+      typeof o.pitchClass === 'number' &&
+      Number.isInteger(o.pitchClass) &&
+      o.pitchClass >= 0 &&
+      o.pitchClass <= 11
+        ? o.pitchClass
+        : DEFAULT_EXERCISE_PARAMS.pitchClass,
+    mode: pick<WarmUpScaleMode>(o.mode, ['major', 'minor'], DEFAULT_EXERCISE_PARAMS.mode),
+    hand: pick<WarmUpHand>(o.hand, ['both', 'right', 'left'], DEFAULT_EXERCISE_PARAMS.hand),
+    bpm: pick<WarmUpBpm>(o.bpm, WARMUP_BPMS, DEFAULT_EXERCISE_PARAMS.bpm),
+    octaves: pick<WarmUpOctaves>(o.octaves, WARMUP_OCTAVES, DEFAULT_EXERCISE_PARAMS.octaves),
+    peakRepeats: pick<WarmUpPeakRepeats>(
+      o.peakRepeats,
+      WARMUP_PEAK_REPEATS,
+      DEFAULT_EXERCISE_PARAMS.peakRepeats,
+    ),
+  };
+}
+
 async function loadSettings(): Promise<WarmUpSettings> {
   try {
     const info = await FileSystem.getInfoAsync(SETTINGS_PATH);
     if (!info.exists) return DEFAULTS;
     const raw = await FileSystem.readAsStringAsync(SETTINGS_PATH);
-    const saved = JSON.parse(raw) as Partial<WarmUpSettings>;
-    // Merge per exercise, not just per top-level key: a file written before a setting
-    // was added would otherwise replace that exercise wholesale and drop its default.
-    return {
-      hanon: { ...DEFAULTS.hanon, ...saved.hanon },
-      scales: { ...DEFAULTS.scales, ...saved.scales },
-      arpeggio: { ...DEFAULTS.arpeggio, ...saved.arpeggio },
-      chromatic: { ...DEFAULTS.chromatic, ...saved.chromatic },
-      fiveScale: { ...DEFAULTS.fiveScale, ...saved.fiveScale },
-      drill45: { ...DEFAULTS.drill45, ...saved.drill45 },
-    };
+    const saved = (JSON.parse(raw) ?? {}) as Record<string, unknown>;
+    // Built from the registry rather than from the file, so an exercise removed from
+    // this build is dropped and a newly added one picks up its defaults.
+    return Object.fromEntries(
+      WARM_UP_TYPES.map((t) => [t, coerceExercise(saved[t])]),
+    ) as WarmUpSettings;
   } catch {
     return DEFAULTS;
   }
@@ -109,20 +111,8 @@ function saveSettings(settings: WarmUpSettings): void {
   FileSystem.writeAsStringAsync(SETTINGS_PATH, JSON.stringify(settings)).catch(() => {});
 }
 
-// Extracts just the persisted settings slice from the full store state.
-function snapshotSettings(state: WarmUpState): WarmUpSettings {
-  return {
-    hanon: state.hanon,
-    scales: state.scales,
-    arpeggio: state.arpeggio,
-    chromatic: state.chromatic,
-    fiveScale: state.fiveScale,
-    drill45: state.drill45,
-  };
-}
-
 export const useWarmUpStore = create<WarmUpState>()((set, get) => ({
-  ...DEFAULTS,
+  exercises: DEFAULTS,
   webViewReady: false,
   isLoadingScore: false,
   scoreError: null,
@@ -132,45 +122,12 @@ export const useWarmUpStore = create<WarmUpState>()((set, get) => ({
   scoreMoving: false,
 
   initSettings: async () => {
-    const settings = await loadSettings();
-    set({
-      hanon: settings.hanon,
-      scales: settings.scales,
-      arpeggio: settings.arpeggio,
-      chromatic: settings.chromatic,
-      fiveScale: settings.fiveScale,
-      drill45: settings.drill45,
-    });
+    set({ exercises: await loadSettings() });
   },
 
-  updateHanon: (patch) => {
-    set((s) => ({ hanon: { ...s.hanon, ...patch } }));
-    saveSettings(snapshotSettings(get()));
-  },
-
-  updateScales: (patch) => {
-    set((s) => ({ scales: { ...s.scales, ...patch } }));
-    saveSettings(snapshotSettings(get()));
-  },
-
-  updateArpeggio: (patch) => {
-    set((s) => ({ arpeggio: { ...s.arpeggio, ...patch } }));
-    saveSettings(snapshotSettings(get()));
-  },
-
-  updateChromatic: (patch) => {
-    set((s) => ({ chromatic: { ...s.chromatic, ...patch } }));
-    saveSettings(snapshotSettings(get()));
-  },
-
-  updateFiveScale: (patch) => {
-    set((s) => ({ fiveScale: { ...s.fiveScale, ...patch } }));
-    saveSettings(snapshotSettings(get()));
-  },
-
-  updateDrill45: (patch) => {
-    set((s) => ({ drill45: { ...s.drill45, ...patch } }));
-    saveSettings(snapshotSettings(get()));
+  updateExercise: (type, patch) => {
+    set((s) => ({ exercises: { ...s.exercises, [type]: { ...s.exercises[type], ...patch } } }));
+    saveSettings(get().exercises);
   },
 
   setWebViewReady: (v) => set({ webViewReady: v }),

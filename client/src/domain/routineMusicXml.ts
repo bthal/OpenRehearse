@@ -1,16 +1,13 @@
 import type { ExerciseBlock, Routine, RoutineBlock } from './routine';
-import { WARMUP_KEYS } from './warmup';
+import { DEFAULT_PEAK_REPEATS } from './warmup';
 import {
-  getArpeggioMeasureNotes,
-  getChromaticMeasureNotes,
-  getDrill45MeasureNotes,
-  getFiveScaleMeasureNotes,
-  getHanonMeasureNotes,
-  getScaleMeasureNotes,
-} from './warmupMusicXml';
-
-// Divisions per quarter note — must match warmupMusicXml.ts
-const DIVISIONS = 2;
+  keyLabel,
+  measureCount as exerciseMeasureCount,
+  warmUpDescriptor,
+  type ExerciseParams,
+  type MeasureNotes,
+} from './warmupRegistry';
+import { DIVISIONS, getKeyFifths } from './warmupMusicXml';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -61,44 +58,40 @@ const WHOLE_REST = `<note><rest measure="yes"/><duration>${DIVISIONS * 4}</durat
 
 // ─── Rehearsal label ──────────────────────────────────────────────────────────
 
+// A saved block carries every parameter; absent ones fall back to their default so a
+// routine written before a parameter existed still renders.
+function blockParams(block: ExerciseBlock): ExerciseParams {
+  return {
+    pitchClass: block.pitchClass,
+    mode: block.mode,
+    hand: block.hand,
+    bpm: block.bpm,
+    octaves: block.octaves,
+    peakRepeats: block.peakRepeats ?? DEFAULT_PEAK_REPEATS,
+  };
+}
+
 function exerciseRehearsalLabel(block: ExerciseBlock): string {
-  if (block.type === 'drill45') return '4-5 Drill';
-  const keyLabel =
-    WARMUP_KEYS.find((k) => k.pitchClass === block.pitchClass && k.mode === block.mode)?.label ??
-    'C';
-  switch (block.type) {
-    case 'hanon':
-      return `Hanon I in ${keyLabel}`;
-    case 'arpeggio':
-      return `${keyLabel} Arpeggio`;
-    case 'chromatic':
-      return `${keyLabel} Chromatic`;
-    case 'fiveScale':
-      return `${keyLabel} 5-Finger`;
-    case 'scales':
-      return `${keyLabel} Scale`;
-  }
+  const d = warmUpDescriptor(block.type);
+  if (!d) return '';
+  return d.rehearsalLabel(keyLabel(block.pitchClass, block.mode));
 }
 
 // Right-/left-hand measures for any exercise block. Routines never render fingering.
-function measureNotesForBlock(block: ExerciseBlock): {
-  rh: string[][] | null;
-  lh: string[][] | null;
-} {
-  switch (block.type) {
-    case 'hanon':
-      return getHanonMeasureNotes(block.pitchClass, block.mode, block.hand, block.octaves, false);
-    case 'scales':
-      return getScaleMeasureNotes(block.pitchClass, block.mode, block.hand, block.octaves);
-    case 'arpeggio':
-      return getArpeggioMeasureNotes(block.pitchClass, block.mode, block.hand, block.octaves);
-    case 'chromatic':
-      return getChromaticMeasureNotes(block.pitchClass, block.mode, block.hand, block.octaves);
-    case 'fiveScale':
-      return getFiveScaleMeasureNotes(block.pitchClass, block.mode, block.hand, block.octaves);
-    case 'drill45':
-      return getDrill45MeasureNotes(block.hand, false, block.peakRepeats);
-  }
+// Returns empty measures for a type this build doesn't know, rather than throwing:
+// routines.json is loaded with a blind cast, so an unrecognised type is reachable.
+function measureNotesForBlock(block: ExerciseBlock): MeasureNotes {
+  const d = warmUpDescriptor(block.type);
+  if (!d) return { rh: null, lh: null };
+  return d.measureNotes(blockParams(block), false);
+}
+
+// Measure count for an exercise block, memoised in the registry so a routine's blocks
+// are generated once rather than once per consumer (estimate, schedule, assembly).
+function blockMeasureCount(block: ExerciseBlock): number {
+  const d = warmUpDescriptor(block.type);
+  if (!d) return 0;
+  return exerciseMeasureCount(block.type, blockParams(block));
 }
 
 // Estimate total duration in seconds for a routine (used for UI display only).
@@ -111,38 +104,11 @@ export function estimateRoutineSeconds(routine: Routine): number {
       totalSeconds += (block.measures * 4 * 60) / lastBpm;
     } else {
       lastBpm = block.bpm;
-      const { rh, lh } = measureNotesForBlock(block);
-      const measureCount = (rh ?? lh)!.length;
-      totalSeconds += (measureCount * 4 * 60) / block.bpm;
+      totalSeconds += (blockMeasureCount(block) * 4 * 60) / block.bpm;
     }
   }
 
   return totalSeconds;
-}
-
-// ─── Key info lookup (mirrors warmupMusicXml KEY_INFO) ────────────────────────
-
-type PitchClass = 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11;
-type Mode = 'major' | 'minor';
-
-const KEY_FIFTHS: Record<PitchClass, Record<Mode, number>> = {
-  0: { major: 0, minor: -3 },
-  1: { major: -5, minor: 4 },
-  2: { major: 2, minor: -1 },
-  3: { major: -3, minor: 6 },
-  4: { major: 4, minor: 1 },
-  5: { major: -1, minor: -4 },
-  6: { major: 6, minor: 3 },
-  7: { major: 1, minor: -2 },
-  8: { major: -4, minor: 5 },
-  9: { major: 3, minor: 0 },
-  10: { major: -2, minor: -5 },
-  11: { major: 5, minor: 2 },
-};
-
-function getFifths(pitchClass: number, mode: Mode): number {
-  const pc = (((pitchClass % 12) + 12) % 12) as PitchClass;
-  return KEY_FIFTHS[pc][mode];
 }
 
 // ─── Main generator ───────────────────────────────────────────────────────────
@@ -182,9 +148,7 @@ export function computeRoutineTempoSchedule(routine: Routine): RoutineTempoChang
         schedule.push({ quarterBeat: cumulativeQuarters, bpm });
         lastEmittedBpm = bpm;
       }
-      const { rh, lh } = measureNotesForBlock(block);
-      const measureCount = (rh ?? lh)!.length;
-      cumulativeQuarters += measureCount * 4;
+      cumulativeQuarters += blockMeasureCount(block) * 4;
     }
   }
 
@@ -233,13 +197,12 @@ export function generateRoutineXml(routine: Routine): string {
 
     // Exercise block
     const { pitchClass, mode, bpm } = block;
-    const fifths = getFifths(pitchClass, mode);
+    const fifths = getKeyFifths(pitchClass, mode);
     const label = exerciseRehearsalLabel(block);
     const includeTempo = lastEmittedBpm === null || bpm !== lastEmittedBpm;
 
     const { rh, lh } = measureNotesForBlock(block);
-
-    const measureCount = (rh ?? lh)!.length;
+    const measureCount = (rh ?? lh)?.length ?? 0;
 
     for (let m = 0; m < measureCount; m++) {
       const p1Notes = rh?.[m] ?? [WHOLE_REST];
