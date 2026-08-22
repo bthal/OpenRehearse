@@ -17,7 +17,6 @@ import {
 } from '@domain/routine';
 import {
   DEFAULT_PEAK_REPEATS,
-  DEFAULT_WARMUP_BPM,
   WARMUP_BPMS,
   WARMUP_KEYS,
   WARMUP_OCTAVES,
@@ -27,6 +26,14 @@ import {
   type WarmUpOctaves,
   type WarmUpPeakRepeats,
 } from '@domain/warmup';
+import {
+  DEFAULT_EXERCISE_PARAMS,
+  WARM_UP_REGISTRY,
+  WARM_UP_TYPES,
+  hasParam,
+  keyLabel as keyName,
+  type WarmUpType,
+} from '@domain/warmupRegistry';
 import { Colors } from '@theme/colors';
 import { useRoutinesStore } from '@state/routinesStore';
 
@@ -65,40 +72,28 @@ const HAND_OPTIONS: { tKey: string; value: WarmUpHand }[] = [
   { tKey: 'routineEdit.handLeft', value: 'left' },
 ];
 
-// Exercise types offered in the "Add Exercise" picker, in display order.
-const EXERCISE_TYPES: ExerciseBlock['type'][] = [
-  'hanon',
-  'scales',
-  'arpeggio',
-  'chromatic',
-  'fiveScale',
-  'drill45',
-];
+// Exercise types offered in the "Add Exercise" picker, in registry display order.
+const EXERCISE_TYPES: WarmUpType[] = WARM_UP_TYPES;
 
-const EXERCISE_LABEL_KEY: Record<ExerciseBlock['type'], string> = {
-  hanon: 'routineEdit.addExerciseHanon',
-  scales: 'routineEdit.addExerciseScales',
-  arpeggio: 'routineEdit.addExerciseArpeggio',
-  chromatic: 'routineEdit.addExerciseChromatic',
-  fiveScale: 'routineEdit.addExerciseFiveScale',
-  drill45: 'routineEdit.addExerciseDrill45',
-};
+function exerciseLabelKey(type: WarmUpType): string {
+  return WARM_UP_REGISTRY[type].shortLabelKey;
+}
 
-function defaultExerciseBlock(type: ExerciseBlock['type']): ExerciseBlock {
+function defaultExerciseBlock(type: WarmUpType): ExerciseBlock {
+  const { pitchClass, mode, hand, bpm, octaves } = DEFAULT_EXERCISE_PARAMS;
   return {
     type,
-    pitchClass: 0,
-    mode: 'major',
-    hand: 'both',
-    bpm: DEFAULT_WARMUP_BPM,
-    octaves: 1,
-    ...(type === 'drill45' ? { peakRepeats: DEFAULT_PEAK_REPEATS } : {}),
+    pitchClass,
+    mode,
+    hand,
+    bpm,
+    octaves,
+    ...(hasParam(type, 'peakRepeats') ? { peakRepeats: DEFAULT_PEAK_REPEATS } : {}),
   };
 }
 
 function keyLabel(pitchClass: number, mode: 'major' | 'minor', t: TFn): string {
-  const label =
-    WARMUP_KEYS.find((k) => k.pitchClass === pitchClass && k.mode === mode)?.label ?? 'C';
+  const label = keyName(pitchClass, mode);
   return (
     label.replace(/m$/, '') +
     ' ' +
@@ -271,7 +266,7 @@ export default function RoutineEditScreen() {
       type: 'addType',
       options: [
         ...EXERCISE_TYPES.map((exType) => ({
-          label: t(EXERCISE_LABEL_KEY[exType]),
+          label: t(exerciseLabelKey(exType)),
           value: exType,
         })),
         { label: t('routineEdit.addExercisePause'), value: 'pause' },
@@ -422,13 +417,13 @@ export default function RoutineEditScreen() {
                     <Text className="text-center text-lg font-semibold text-slate-950">
                       {block.type === 'pause'
                         ? t('routineEdit.addExercisePause')
-                        : t(EXERCISE_LABEL_KEY[block.type])}
+                        : t(exerciseLabelKey(block.type))}
                     </Text>
 
                     {/* Parameter pills */}
                     {block.type !== 'pause' ? (
                       <View className="mt-2 flex-row flex-wrap gap-2">
-                        {block.type !== 'drill45' && (
+                        {hasParam(block.type, 'key') && (
                           <Pill
                             label={keyLabel(block.pitchClass, block.mode, t)}
                             onPress={() => openPicker(block._key, 'key', block)}
@@ -445,13 +440,13 @@ export default function RoutineEditScreen() {
                           )}
                           onPress={() => openPicker(block._key, 'hand', block)}
                         />
-                        {block.type !== 'drill45' && (
+                        {hasParam(block.type, 'octaves') && (
                           <Pill
                             label={octavesLabel(block.octaves, t)}
                             onPress={() => openPicker(block._key, 'octaves', block)}
                           />
                         )}
-                        {block.type === 'drill45' && (
+                        {hasParam(block.type, 'peakRepeats') && (
                           <Pill
                             label={peakRepeatsLabel(block.peakRepeats, t)}
                             onPress={() => openPicker(block._key, 'peakRepeats', block)}

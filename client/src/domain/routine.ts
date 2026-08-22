@@ -5,12 +5,13 @@ import type {
   WarmUpPeakRepeats,
   WarmUpScaleMode,
 } from './warmup';
+import type { WarmUpType } from './warmupRegistry';
 
 export const PAUSE_MEASURES = [1, 2, 3, 4] as const;
 export type PauseMeasures = (typeof PAUSE_MEASURES)[number];
 
 export interface ExerciseBlock {
-  type: 'hanon' | 'scales' | 'arpeggio' | 'chromatic' | 'fiveScale' | 'drill45';
+  type: WarmUpType;
   pitchClass: number;
   mode: WarmUpScaleMode;
   hand: WarmUpHand;

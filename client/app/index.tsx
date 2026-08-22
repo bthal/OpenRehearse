@@ -15,7 +15,7 @@ import { useTranslation } from 'react-i18next';
 
 import { AppIcon } from '@components/AppIcon';
 import { BrandMark } from '@components/BrandMark';
-import { WARMUP_FEATURES } from '../src/config/warmupFeatures';
+import { WARM_UP_REGISTRY, WARM_UP_TYPES } from '@domain/warmupRegistry';
 import { PieceEditModal, type PieceEditMode } from '@components/PieceEditModal';
 import { isPieceComplete } from '@domain/piece';
 import { PieceRow, PieceRowSkeleton } from '@components/PieceRow';
@@ -321,42 +321,13 @@ export default function Dashboard() {
                 />
               ))}
 
-              {WARMUP_FEATURES.drill45 && (
+              {WARM_UP_TYPES.map((warmUpType) => (
                 <WarmUpRow
-                  title={t('dashboard.drill45')}
-                  onPress={() => router.push('/warmup/drill45')}
+                  key={warmUpType}
+                  title={t(WARM_UP_REGISTRY[warmUpType].labelKey)}
+                  onPress={() => router.push(`/warmup/${warmUpType}`)}
                 />
-              )}
-              {WARMUP_FEATURES.hanon && (
-                <WarmUpRow
-                  title={t('dashboard.hanon')}
-                  onPress={() => router.push('/warmup/hanon')}
-                />
-              )}
-              {WARMUP_FEATURES.scales && (
-                <WarmUpRow
-                  title={t('dashboard.scales')}
-                  onPress={() => router.push('/warmup/scales')}
-                />
-              )}
-              {WARMUP_FEATURES.arpeggio && (
-                <WarmUpRow
-                  title={t('dashboard.arpeggio')}
-                  onPress={() => router.push('/warmup/arpeggio')}
-                />
-              )}
-              {WARMUP_FEATURES.chromatic && (
-                <WarmUpRow
-                  title={t('dashboard.chromatic')}
-                  onPress={() => router.push('/warmup/chromatic')}
-                />
-              )}
-              {WARMUP_FEATURES.fiveScale && (
-                <WarmUpRow
-                  title={t('dashboard.fiveScale')}
-                  onPress={() => router.push('/warmup/fiveScale')}
-                />
-              )}
+              ))}
             </View>
 
             {/* Pieces header */}

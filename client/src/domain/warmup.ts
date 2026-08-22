@@ -1,4 +1,4 @@
-export type WarmUpType = 'hanon' | 'scales' | 'arpeggio' | 'chromatic' | 'fiveScale' | 'drill45';
+// WarmUpType is derived from WARM_UP_REGISTRY — see warmupRegistry.ts.
 export type WarmUpHand = 'both' | 'right' | 'left';
 export type WarmUpScaleMode = 'major' | 'minor';
 

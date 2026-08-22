@@ -1,5 +1,8 @@
 import { WARMUP_PEAK_REPEATS, type WarmUpHand, type WarmUpScaleMode } from './warmup';
 
+/** MusicXML divisions per quarter note. Shared with routineMusicXml. */
+export const DIVISIONS = 2;
+
 type PitchClass = 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11;
 
 interface KeyInfo {
@@ -43,7 +46,7 @@ const KEY_INFO: Record<PitchClass, Record<WarmUpScaleMode, KeyInfo>> = {
   3: {
     // Eb major (-3) / D# minor (+6)
     major: { fifths: -3, names: ['C', 'C#', 'D', 'Eb', 'E', 'F', 'F#', 'G', 'Ab', 'A', 'Bb', 'B'] },
-    minor: { fifths: 6, names: ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'] },
+    minor: { fifths: 6, names: ['C', 'C#', 'D', 'D#', 'E', 'E#', 'F#', 'G', 'G#', 'A', 'A#', 'B'] },
   },
   4: {
     major: { fifths: 4, names: ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'] },
@@ -53,11 +56,11 @@ const KEY_INFO: Record<PitchClass, Record<WarmUpScaleMode, KeyInfo>> = {
     major: { fifths: -1, names: ['C', 'C#', 'D', 'Eb', 'E', 'F', 'F#', 'G', 'G#', 'A', 'Bb', 'B'] },
     minor: {
       fifths: -4,
-      names: ['C', 'C#', 'D', 'Eb', 'E', 'F', 'F#', 'G', 'Ab', 'A', 'Bb', 'Cb'],
+      names: ['C', 'Db', 'D', 'Eb', 'E', 'F', 'F#', 'G', 'Ab', 'A', 'Bb', 'Cb'],
     },
   },
   6: {
-    major: { fifths: 6, names: ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'] },
+    major: { fifths: 6, names: ['C', 'C#', 'D', 'D#', 'E', 'E#', 'F#', 'G', 'G#', 'A', 'A#', 'B'] },
     minor: { fifths: 3, names: ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'] },
   },
   7: {
@@ -68,7 +71,7 @@ const KEY_INFO: Record<PitchClass, Record<WarmUpScaleMode, KeyInfo>> = {
     // Ab major (-4) / G# minor (+5)
     major: {
       fifths: -4,
-      names: ['C', 'C#', 'D', 'Eb', 'E', 'F', 'F#', 'G', 'Ab', 'A', 'Bb', 'Cb'],
+      names: ['C', 'Db', 'D', 'Eb', 'E', 'F', 'F#', 'G', 'Ab', 'A', 'Bb', 'Cb'],
     },
     minor: { fifths: 5, names: ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'] },
   },
@@ -77,11 +80,11 @@ const KEY_INFO: Record<PitchClass, Record<WarmUpScaleMode, KeyInfo>> = {
     minor: { fifths: 0, names: ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'] },
   },
   10: {
-    // Bb major (-2) / Bb minor (-4)
+    // Bb major (-2) / Bb minor (-5)
     major: { fifths: -2, names: ['C', 'C#', 'D', 'Eb', 'E', 'F', 'F#', 'G', 'G#', 'A', 'Bb', 'B'] },
     minor: {
-      fifths: -4,
-      names: ['C', 'C#', 'D', 'Eb', 'E', 'F', 'F#', 'G', 'Ab', 'A', 'Bb', 'Cb'],
+      fifths: -5,
+      names: ['C', 'Db', 'D', 'Eb', 'E', 'F', 'Gb', 'G', 'Ab', 'A', 'Bb', 'Cb'],
     },
   },
   11: {
@@ -98,6 +101,15 @@ type ScaleIntervals = typeof MAJOR_INTERVALS | typeof MINOR_INTERVALS;
 function getKeyInfo(pitchClass: number, mode: WarmUpScaleMode): KeyInfo {
   const pc = (((pitchClass % 12) + 12) % 12) as PitchClass;
   return KEY_INFO[pc][mode];
+}
+
+/**
+ * Key signature (fifths) for a key. The single source of truth — routineMusicXml used
+ * to keep a parallel KEY_FIFTHS table that had silently drifted out of sync for
+ * Bb minor (-4 here vs -5 there; -5 is correct).
+ */
+export function getKeyFifths(pitchClass: number, mode: WarmUpScaleMode): number {
+  return getKeyInfo(pitchClass, mode).fifths;
 }
 
 function midiToPitch(
@@ -195,7 +207,7 @@ function buildXml(fifths: number, mode: WarmUpScaleMode, parts: PartDef[]): stri
         .map((notes, mi) => {
           const attrXml =
             mi === 0
-              ? `<attributes><divisions>2</divisions><key><fifths>${fifths}</fifths><mode>${modeStr}</mode></key><time><beats>4</beats><beat-type>4</beat-type></time><clef><sign>${p.clef.sign}</sign><line>${p.clef.line}</line></clef></attributes>`
+              ? `<attributes><divisions>${DIVISIONS}</divisions><key><fifths>${fifths}</fifths><mode>${modeStr}</mode></key><time><beats>4</beats><beat-type>4</beat-type></time><clef><sign>${p.clef.sign}</sign><line>${p.clef.line}</line></clef></attributes>`
               : '';
           const barlineXml = mi === p.measures.length - 1 ? finalBarline : '';
           return `<measure number="${mi + 1}">${attrXml}${notes.join('')}${barlineXml}</measure>`;

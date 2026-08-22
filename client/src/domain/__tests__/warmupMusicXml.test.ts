@@ -167,3 +167,48 @@ describe('generateDrill45Xml', () => {
     expect(measureCount(generateDrill45Xml('both', 999), 'P1')).toBe(21);
   });
 });
+
+// Key signatures and enharmonic spelling used to live in two tables — KEY_INFO here and
+// a parallel KEY_FIFTHS in routineMusicXml — which had drifted apart for Bb minor. Five
+// keys were also spelling a letter twice (F# major printing F instead of E#, Ab major
+// printing C# instead of Db), so the notes contradicted the printed key signature.
+// These assert the invariant directly rather than any one key's note list.
+describe('key signatures and spelling', () => {
+  // fifths for each of the 24 keys, using the enharmonic choices the app documents
+  // (Db major not C# major, D# minor not Eb minor, and so on).
+  const EXPECTED_FIFTHS: Record<'major' | 'minor', number[]> = {
+    major: [0, -5, 2, -3, 4, -1, 6, 1, -4, 3, -2, 5],
+    minor: [-3, 4, -1, 6, 1, -4, 3, -2, 5, 0, -5, 2],
+  };
+
+  function fifthsOf(xml: string): number {
+    return Number(/<fifths>(-?\d+)<\/fifths>/.exec(xml)![1]);
+  }
+
+  for (const mode of ['major', 'minor'] as const) {
+    for (let pitchClass = 0; pitchClass < 12; pitchClass++) {
+      const expected = EXPECTED_FIFTHS[mode][pitchClass]!;
+
+      it(`prints ${expected >= 0 ? `${expected} sharps` : `${-expected} flats`} for pitch class ${pitchClass} ${mode}`, () => {
+        expect(fifthsOf(generateScaleXml(pitchClass, mode, 'right', 1))).toBe(expected);
+      });
+
+      it(`spells pitch class ${pitchClass} ${mode} with seven distinct letters`, () => {
+        // One octave of the scale ascending: seven degrees, so seven different letters.
+        // A doubled letter means an enharmonic was taken from the wrong side.
+        const scale = pitches(generateScaleXml(pitchClass, mode, 'right', 1)).slice(0, 7);
+        const letters = scale.map((p) => p[0]);
+        expect(new Set(letters).size).toBe(7);
+      });
+
+      it(`matches accidental count to key signature for pitch class ${pitchClass} ${mode}`, () => {
+        const scale = pitches(generateScaleXml(pitchClass, mode, 'right', 1)).slice(0, 7);
+        const sharps = scale.filter((p) => p.includes('#')).length;
+        const flats = scale.filter((p) => p.includes('b')).length;
+        // A key is all-sharp or all-flat, never mixed.
+        expect(sharps === 0 || flats === 0).toBe(true);
+        expect(sharps > 0 ? sharps : flats > 0 ? -flats : 0).toBe(expected);
+      });
+    }
+  }
+});

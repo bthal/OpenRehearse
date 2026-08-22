@@ -29,14 +29,6 @@ import { SCORE_WEB_HTML } from '@score-web/html';
 import type { WebToNativeMessage } from '@score-web/messageProtocol';
 import { useCountInSync } from '@score-web/useCountInSync';
 import {
-  generateArpeggioXml,
-  generateChromaticXml,
-  generateDrill45Xml,
-  generateFiveScaleXml,
-  generateHanonXml,
-  generateScaleXml,
-} from '@domain/warmupMusicXml';
-import {
   WARMUP_BPMS,
   WARMUP_KEYS,
   WARMUP_OCTAVES,
@@ -45,8 +37,14 @@ import {
   type WarmUpHand,
   type WarmUpOctaves,
   type WarmUpPeakRepeats,
-  type WarmUpType,
 } from '@domain/warmup';
+import {
+  WARM_UP_REGISTRY,
+  hasParam,
+  isWarmUpType,
+  keyLabel,
+  type WarmUpType,
+} from '@domain/warmupRegistry';
 import { useWarmUpStore } from '@state/warmupStore';
 import { Colors } from '@theme/colors';
 
@@ -57,15 +55,6 @@ const PANEL_WIDTH = 176; // key panel (4 keys visible, scroll for more)
 const HAND_PANEL_WIDTH = 132; // 3 × 44
 const OCTAVE_PANEL_WIDTH = 132; // 3 × 44
 const PEAK_PANEL_WIDTH = 220; // 5 × 44
-
-const WARM_UP_TYPES: WarmUpType[] = [
-  'hanon',
-  'scales',
-  'arpeggio',
-  'chromatic',
-  'fiveScale',
-  'drill45',
-];
 
 const HAND_OPTIONS: WarmUpHand[] = ['both', 'left', 'right'];
 
@@ -78,56 +67,17 @@ const HAND_ICON: Record<WarmUpHand, string> = {
 export default function WarmUpView() {
   const { t } = useTranslation();
   const { type } = useLocalSearchParams<{ type: string }>();
-  const warmUpType = (WARM_UP_TYPES.includes(type as WarmUpType) ? type : 'scales') as WarmUpType;
-  const title = t(`dashboard.${warmUpType}`);
+  const warmUpType: WarmUpType = type && isWarmUpType(type) ? type : 'scales';
+  const descriptor = WARM_UP_REGISTRY[warmUpType];
+  const title = t(descriptor.labelKey);
 
   const initSettings = useWarmUpStore((s) => s.initSettings);
-  const updateHanon = useWarmUpStore((s) => s.updateHanon);
-  const updateScales = useWarmUpStore((s) => s.updateScales);
-  const updateArpeggio = useWarmUpStore((s) => s.updateArpeggio);
-  const updateChromatic = useWarmUpStore((s) => s.updateChromatic);
-  const updateFiveScale = useWarmUpStore((s) => s.updateFiveScale);
-  const updateDrill45 = useWarmUpStore((s) => s.updateDrill45);
-  const hanonSettings = useWarmUpStore((s) => s.hanon);
-  const scalesSettings = useWarmUpStore((s) => s.scales);
-  const arpeggioSettings = useWarmUpStore((s) => s.arpeggio);
-  const chromaticSettings = useWarmUpStore((s) => s.chromatic);
-  const fiveScaleSettings = useWarmUpStore((s) => s.fiveScale);
-  const drill45RawSettings = useWarmUpStore((s) => s.drill45);
-  // Pad drill45 with fixed key/octave so the shared settings shape is satisfied
-  const drill45Settings = {
-    ...drill45RawSettings,
-    pitchClass: 0,
-    mode: 'major' as const,
-    octaves: 1 as const,
-  };
-  // Drill-only parameter — read off its own slice rather than the shared settings shape.
-  const peakRepeats = drill45RawSettings.peakRepeats;
-
-  const settings =
-    warmUpType === 'hanon'
-      ? hanonSettings
-      : warmUpType === 'arpeggio'
-        ? arpeggioSettings
-        : warmUpType === 'chromatic'
-          ? chromaticSettings
-          : warmUpType === 'fiveScale'
-            ? fiveScaleSettings
-            : warmUpType === 'drill45'
-              ? drill45Settings
-              : scalesSettings;
-  const updateSettings =
-    warmUpType === 'hanon'
-      ? updateHanon
-      : warmUpType === 'arpeggio'
-        ? updateArpeggio
-        : warmUpType === 'chromatic'
-          ? updateChromatic
-          : warmUpType === 'fiveScale'
-            ? updateFiveScale
-            : warmUpType === 'drill45'
-              ? updateDrill45
-              : updateScales;
+  const settings = useWarmUpStore((s) => s.exercises[warmUpType]);
+  const updateExercise = useWarmUpStore((s) => s.updateExercise);
+  const updateSettings = useCallback(
+    (patch: Partial<typeof settings>) => updateExercise(warmUpType, patch),
+    [updateExercise, warmUpType],
+  );
 
   const webViewReady = useWarmUpStore((s) => s.webViewReady);
   const isLoadingScore = useWarmUpStore((s) => s.isLoadingScore);
@@ -181,58 +131,28 @@ export default function WarmUpView() {
     return () => resetPlayback();
   }, [initSettings, resetPlayback]);
 
+  // Destructured so the generation effect depends on the note-affecting parameters
+  // only. Depending on `settings` wholesale would reload the score on every tempo
+  // change, which handleBpmChange goes out of its way to avoid.
+  const { pitchClass, mode, hand, octaves, peakRepeats } = settings;
+
   const sendScore = useCallback(async () => {
     setLoadingScore(true);
     setScoreError(null);
     try {
-      const xml =
-        warmUpType === 'hanon'
-          ? generateHanonXml(settings.pitchClass, settings.mode, settings.hand, settings.octaves)
-          : warmUpType === 'drill45'
-            ? generateDrill45Xml(settings.hand, peakRepeats)
-            : warmUpType === 'arpeggio'
-              ? generateArpeggioXml(
-                  settings.pitchClass,
-                  settings.mode,
-                  settings.hand,
-                  settings.octaves,
-                )
-              : warmUpType === 'chromatic'
-                ? generateChromaticXml(
-                    settings.pitchClass,
-                    settings.mode,
-                    settings.hand,
-                    settings.octaves,
-                  )
-                : warmUpType === 'fiveScale'
-                  ? generateFiveScaleXml(
-                      settings.pitchClass,
-                      settings.mode,
-                      settings.hand,
-                      settings.octaves,
-                    )
-                  : generateScaleXml(
-                      settings.pitchClass,
-                      settings.mode,
-                      settings.hand,
-                      settings.octaves,
-                    );
+      const xml = WARM_UP_REGISTRY[warmUpType].generateXml({
+        pitchClass,
+        mode,
+        hand,
+        octaves,
+        peakRepeats,
+      });
       webViewRef.current?.injectJavaScript(`window.__rn_load_xml(${JSON.stringify(xml)});void 0;`);
     } catch (err) {
       setLoadingScore(false);
       setScoreError(err instanceof Error ? err.message : t('warmup.failedToGenerate'));
     }
-  }, [
-    warmUpType,
-    settings.pitchClass,
-    settings.mode,
-    settings.hand,
-    settings.octaves,
-    peakRepeats,
-    setLoadingScore,
-    setScoreError,
-    t,
-  ]);
+  }, [warmUpType, pitchClass, mode, hand, octaves, peakRepeats, setLoadingScore, setScoreError, t]);
 
   useEffect(() => {
     if (webViewReady) void sendScore();
@@ -375,12 +295,12 @@ export default function WarmUpView() {
   const handlePeakRepeatsChange = useCallback(
     (value: WarmUpPeakRepeats) => {
       if (isPlaying) webViewRef.current?.injectJavaScript('window.__rn_pause();void 0;');
-      updateDrill45({ peakRepeats: value });
+      updateSettings({ peakRepeats: value });
       setOpenPanel(null);
       animatePanel('peak', 0);
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [isPlaying, updateDrill45],
+    [isPlaying, updateSettings],
   );
 
   const handleMetronomeToggle = useCallback(() => {
@@ -389,11 +309,11 @@ export default function WarmUpView() {
   }, [metronomeOn, setMetronomeOn]);
 
   const scoreReady = webViewReady && !isLoadingScore && !scoreError;
-  const showKeyOctave = warmUpType !== 'drill45';
+  const showKey = hasParam(warmUpType, 'key');
+  const showOctave = hasParam(warmUpType, 'octaves');
+  const showPeak = hasParam(warmUpType, 'peakRepeats');
 
-  const currentKeyLabel =
-    WARMUP_KEYS.find((k) => k.pitchClass === settings.pitchClass && k.mode === settings.mode)
-      ?.label ?? 'C';
+  const currentKeyLabel = keyLabel(settings.pitchClass, settings.mode);
 
   function panelWidthInterp(panel: Exclude<OpenPanel, null>, maxWidth: number) {
     return panelAnim[panel].interpolate({
@@ -490,8 +410,8 @@ export default function WarmUpView() {
                 </TouchableOpacity>
               </View>
 
-              {/* Key trigger — hidden for drill45 */}
-              {showKeyOctave && (
+              {/* Key trigger — exercises that declare a key */}
+              {showKey && (
                 <View ref={keyTriggerRef}>
                   <TouchableOpacity
                     onPress={() => togglePanel('key', keyTriggerRef)}
@@ -509,8 +429,8 @@ export default function WarmUpView() {
                 </View>
               )}
 
-              {/* Peak repeats trigger — drill45 only */}
-              {!showKeyOctave && (
+              {/* Peak repeats trigger — exercises that declare it */}
+              {showPeak && (
                 <View ref={peakTriggerRef}>
                   <TouchableOpacity
                     onPress={() => togglePanel('peak', peakTriggerRef)}
@@ -521,15 +441,15 @@ export default function WarmUpView() {
                       className="text-base font-semibold mt-0.5"
                       style={{ color: openPanel === 'peak' ? Colors.primary : Colors.icon }}
                     >
-                      ×{peakRepeats}
+                      ×{settings.peakRepeats}
                     </Text>
                     <Text className="text-[9px] text-black mt-0.5">{t('warmup.peak')}</Text>
                   </TouchableOpacity>
                 </View>
               )}
 
-              {/* Octave trigger — hidden for drill45 */}
-              {showKeyOctave && (
+              {/* Octave trigger — exercises that declare octaves */}
+              {showOctave && (
                 <View ref={octaveTriggerRef}>
                   <TouchableOpacity
                     onPress={() => togglePanel('octave', octaveTriggerRef)}
@@ -613,8 +533,8 @@ export default function WarmUpView() {
             ))}
           </Animated.View>
 
-          {/* Key panel — hidden for drill45 */}
-          {showKeyOctave && (
+          {/* Key panel */}
+          {showKey && (
             <Animated.View
               pointerEvents={openPanel === 'key' ? 'auto' : 'none'}
               style={[
@@ -657,8 +577,8 @@ export default function WarmUpView() {
             </Animated.View>
           )}
 
-          {/* Peak repeats panel — drill45 only */}
-          {!showKeyOctave && (
+          {/* Peak repeats panel */}
+          {showPeak && (
             <Animated.View
               pointerEvents={openPanel === 'peak' ? 'auto' : 'none'}
               style={[
@@ -681,7 +601,7 @@ export default function WarmUpView() {
                     style={{
                       fontSize: 13,
                       fontWeight: '600',
-                      color: peakRepeats === n ? Colors.primary : Colors.iconMuted,
+                      color: settings.peakRepeats === n ? Colors.primary : Colors.iconMuted,
                     }}
                   >
                     ×{n}
@@ -691,8 +611,8 @@ export default function WarmUpView() {
             </Animated.View>
           )}
 
-          {/* Octave panel — hidden for drill45 */}
-          {showKeyOctave && (
+          {/* Octave panel */}
+          {showOctave && (
             <Animated.View
               pointerEvents={openPanel === 'octave' ? 'auto' : 'none'}
               style={[
