@@ -3,6 +3,19 @@ import type { OpenSheetMusicDisplay } from 'opensheetmusicdisplay';
 import { ArpeggioType, ArticulationEnum } from 'opensheetmusicdisplay';
 import type { OutboundMessage } from './types';
 import { resolveSections } from '../../src/score-web/sectionResolve';
+import {
+  findBitByPixelSpan,
+  resolveBits,
+  type BitBounds,
+  type ResolvedBit,
+} from '../../src/score-web/bitResolve';
+import {
+  BIT_MAX_ROWS,
+  exceedsRowBudget,
+  packBitRows,
+  type Bit,
+  type BitSpan,
+} from '../../src/domain/bits';
 // Pure count-in and loop-geometry math live in the domain layer (screens/score-web → domain).
 import { computeCountIn, isFreshStart, loopLeadInBeats } from '../../src/domain/countIn';
 import { placeLoopAtCursor } from '../../src/domain/loop';
@@ -91,6 +104,33 @@ const ARPEGGIO_STEP_TICKS = 6;
 // section colors wash out to nearly the white of the page. A light color at high alpha
 // still does not compete with the notation the way a saturated one at low alpha did.
 const SECTION_FADE_ALPHA = 0.8;
+
+// Saved-bit markers, drawn as pills along the bottom of the screen. Tall enough to read
+// as objects rather than hairlines, and capsule-shaped (see the CSS in build.mjs, whose
+// border-radius assumes a height this side owns).
+const PUNCH_HEIGHT_PX = 25;
+const PUNCH_ROW_GAP_PX = 5;
+// Clearance between the lowest row of pills and the bottom of the viewport. The strip is
+// pinned to the screen edge, not to the staff, so this is the only vertical anchor.
+const PUNCH_EDGE_GAP_PX = 14;
+// Inset from each end of the bit's true span, so two bits meeting at a barline read as
+// two markers with air between them rather than one continuous bar. The marker stops
+// being an exact tracing of the loop, which is the point: it is an index entry, and the
+// loop shade is what states the bounds precisely.
+const PUNCH_X_PADDING_PX = 6;
+// Extra travel past the bottom edge when the strip slides away, so the deepest pill's
+// cast shadow clears the screen too rather than lingering as a smudge at the edge.
+const PUNCH_EXIT_MARGIN_PX = 14;
+// How long a finger must rest on a marker before it counts as a long press, which is how
+// a bit is deleted. Deleting from the toolbar was dropped: it could only ever reach the
+// armed bit, and the marker is where the user is already pointing at the one they mean.
+const PUNCH_LONG_PRESS_MS = 500;
+// A one-quarter-note bit in a dense passage can be a handful of pixels wide, which is
+// neither a tap target nor recognisably a pill. The marker grows to this minimum, and the
+// row packing is fed the *drawn* spans so two tiny neighbours cannot end up overlapping
+// on the same row.
+const PUNCH_MIN_WIDTH_PX = 34;
+
 const SECTION_SEAM_PX = 1;
 // The fade reaches roughly half a measure to each side, but engraved measure widths
 // vary wildly (a whole-note bar against a run of semiquavers), so it is clamped.
@@ -222,6 +262,28 @@ let handleAEl: HTMLElement | null = null;
 let handleBEl: HTMLElement | null = null;
 let shadeEl: HTMLElement | null = null;
 let previewEl: HTMLElement | null = null;
+let bitPunchesEl: HTMLElement | null = null;
+// The bounds of the piece's saved bits, kept so the resolution can be redone whenever
+// the grid moves under it. Without the input list a resize could only repaint the markers
+// at pixels resolved against the old grid.
+let bitsInput: BitBounds[] = [];
+// Those bits placed on the current grid. Resolved when the list or the grid changes,
+// never per frame — the punches live inside #osmd and translate with the score for free.
+let resolvedBits: ResolvedBit[] = [];
+// The bit currently armed, or null in ordinary play view. Owns the loop while set: the
+// loop button is not reachable in bit mode, so nothing else can touch loopRegion.
+let activeBitId: string | null = null;
+// How far the strip travels to leave the screen, and whether it is currently on screen.
+// The distance depends on how many rows are occupied, so it is recomputed whenever the
+// strip is laid out; the flag is what lets that relayout keep the strip where it is
+// instead of snapping it back into view.
+let punchExitOffsetPx = 0;
+let punchesVisible = true;
+// The vertical offset #osmd itself carries, mirroring what recomputeViewportMetrics
+// writes to its `style.top`. The marker strip is pinned to the bottom of the *viewport*
+// while living inside #osmd (so it travels horizontally with the score for free), and
+// this is what converts between the two frames.
+let osmdOffsetTopPx = 0;
 // Grid index the preview line is currently painted at, so the per-frame update can
 // skip the style write unless the target actually changed — roughly once per note
 // rather than 60 times a second. -1 means hidden.
@@ -278,6 +340,11 @@ let osmdActualIdx = -1;
 
 // ─── Hand coloring ────────────────────────────────────────────────────────────
 
+// Notes outside the armed bit were greyed here too for a while, per-onset. It was
+// removed: the pass walks the whole GraphicSheet and calls setColor on every note, which
+// on a long score is a visible hitch every time a bit is entered or left — too costly for
+// a cue the loop shade and the marker already give. Bits are shown by the shade and the
+// strip; the score's own colour means the hand filter and nothing else.
 function applyHandColors(osmd: OpenSheetMusicDisplay): void {
   const coloringOpts = {
     applyToNoteheads: true,
@@ -290,8 +357,7 @@ function applyHandColors(osmd: OpenSheetMusicDisplay): void {
     for (let si = 0; si < measureRow.length; si++) {
       const measure = measureRow[si];
       if (!measure) continue;
-      const greyed =
-        (activeHand === 'right' && si === 1) || (activeHand === 'left' && si === 0);
+      const greyed = (activeHand === 'right' && si === 1) || (activeHand === 'left' && si === 0);
       const color = greyed ? HAND_GREY : NOTE_BLACK;
       for (const staffEntry of measure.staffEntries) {
         for (const voiceEntry of staffEntry.graphicalVoiceEntries) {
@@ -741,7 +807,8 @@ function recomputeViewportMetrics(): void {
 
   const viewportHeight = window.innerHeight;
   const centeredTop = Math.round((viewportHeight - systemHeightPx) / 2);
-  osmdEl.style.top = `${centeredTop - systemTopPx}px`;
+  osmdOffsetTopPx = centeredTop - systemTopPx;
+  osmdEl.style.top = `${osmdOffsetTopPx}px`;
 
   // Bounds are the first and last *onsets*, deliberately not the snap grid's
   // terminal: the centre line must always sit over a note. Widening scrollMinPx to
@@ -767,6 +834,9 @@ function onViewportResize(): void {
   // The terminal target's reachable pixel depends on the viewport width, so the grid
   // has to follow a resize or handle B could end up outside the scrollable span.
   rebuildSnapGrid();
+  // A bit whose end sits on the terminal moves with it, so this is a re-resolve rather
+  // than a repaint.
+  reresolveBits();
   if (wasGliding) {
     // Land the settle against the new bounds rather than animating toward a target
     // computed for the old ones. The logical position was committed before the glide
@@ -957,6 +1027,8 @@ function animateCursorLoop(): void {
   if (quartersElapsed >= totalQuarters && totalQuarters > 0 && !Tone.Transport.loop) {
     _stopInternal();
     postToNative({ type: 'PLAYBACK_END' });
+    // Reaching the end is a pause by another name; the strip has to come back with it.
+    setPunchesVisible(true);
     return;
   }
 
@@ -1119,9 +1191,37 @@ function initTouchHandlers(): void {
 
   let wasPlayingOnTouch = false;
   let hasMoved = false;
+  // Bit the touch landed on, if any. Captured on touchstart and only acted on if the
+  // finger never travelled: a punch must not swallow a pan that happens to start on it,
+  // which is why it is read here rather than by claiming the gesture like a loop handle.
+  let touchedBitId: string | null = null;
+  // Long-press timer on that marker, and whether it has already fired. Once it has, the
+  // lift must not also enter the bit — the gesture was a request to delete, and answering
+  // it with a delete prompt *and* an arm would be two answers to one press.
+  let longPressTimeoutId: number | null = null;
+  let longPressFired = false;
+
+  const cancelPunchLongPress = (): void => {
+    if (longPressTimeoutId === null) return;
+    window.clearTimeout(longPressTimeoutId);
+    longPressTimeoutId = null;
+  };
 
   wrapper.addEventListener('touchstart', (e) => {
+    cancelPunchLongPress();
+    longPressFired = false;
+    touchedBitId = null;
     if ((e.target as Element).closest('.loop-handle')) return;
+    touchedBitId =
+      (e.target as Element).closest('.bit-punch')?.getAttribute('data-bit-id') ?? null;
+    if (touchedBitId !== null && !isPlaybackActive()) {
+      const pressedId = touchedBitId;
+      longPressTimeoutId = window.setTimeout(() => {
+        longPressTimeoutId = null;
+        longPressFired = true;
+        postToNative({ type: 'BIT_LONG_PRESSED', payload: { id: pressedId } });
+      }, PUNCH_LONG_PRESS_MS);
+    }
     // Inherit whatever was already moving, rather than asserting motion outright. A
     // finger landing on a coasting score has taken it over, not stopped it, so the two
     // cancels below must not report a stop the button would answer by blinking on. But
@@ -1156,6 +1256,8 @@ function initTouchHandlers(): void {
     // First significant movement: mark as a drag rather than a tap.
     if (!hasMoved && Math.abs(clientX - startX) > 8) {
       hasMoved = true;
+      // The finger travelled, so this is a pan — not a press being held.
+      cancelPunchLongPress();
       // Now it is a drag, not a tap — this is where a touch on a still score starts
       // counting as motion.
       scoreDragging = true;
@@ -1176,10 +1278,24 @@ function initTouchHandlers(): void {
   }, { passive: true });
 
   wrapper.addEventListener('touchend', () => {
+    cancelPunchLongPress();
     if (!dragging) return;
     dragging = false;
     scoreDragging = false;
     if (!hasMoved) {
+      // The long press already answered this gesture with a delete prompt.
+      if (longPressFired) {
+        syncScoreMotion();
+        return;
+      }
+      // Tap on a marker: enter that bit — or leave it, if it is the armed one — rather
+      // than toggling playback. Guarded on playback because a marker is hidden while
+      // playing but a stale touchstart from just before the tap could still name one.
+      if (touchedBitId !== null && !isPlaybackActive()) {
+        tapBitPunch(touchedBitId);
+        syncScoreMotion();
+        return;
+      }
       // Tap: toggle play/pause.
       if (isPlaybackActive()) {
         pausePlayback();
@@ -1206,6 +1322,7 @@ function initTouchHandlers(): void {
   // drag state below it recovers on the next touchstart anyway, but a stuck motion
   // flag would leave the play button hidden on a screen that looks dead.
   wrapper.addEventListener('touchcancel', () => {
+    cancelPunchLongPress();
     scoreDragging = false;
     syncScoreMotion();
   }, { passive: true });
@@ -1255,8 +1372,24 @@ function updateLoopOverlay(): void {
   paintLoopOverlay(loopRegion.aPx, loopRegion.bPx);
 }
 
+/**
+ * Marks the handles as an armed bit's rather than a live loop's.
+ *
+ * Only the grip glyph changes (see the CSS), but that glyph is the entire "drag me"
+ * affordance, and a bit's bounds are fixed once saved. Kept as one call next to every
+ * place the handles are shown so the class cannot drift from `activeBitId`.
+ */
+function setHandlesInert(inert: boolean): void {
+  for (const el of [handleAEl, handleBEl]) {
+    if (!el) continue;
+    if (inert) el.classList.add('inert');
+    else el.classList.remove('inert');
+  }
+}
+
 // Hides the loop overlay and tells the native toolbar no loop is active.
 function hideLoopOverlay(): void {
+  setHandlesInert(false);
   if (handleAEl) handleAEl.style.display = 'none';
   if (handleBEl) handleBEl.style.display = 'none';
   if (shadeEl) shadeEl.style.display = 'none';
@@ -1443,8 +1576,22 @@ function initLoopHandles(): void {
       dragRafId = requestAnimationFrame(dragFrame);
     }
 
+    // Whether this gesture is a real drag. Every later listener keys off this rather
+    // than re-testing `activeBitId`: bailing out of touchstart alone left touchend still
+    // gliding the overlay from a stale `continuousPx` — zero on the first touch — so
+    // tapping an inert handle flew both of them in from the left edge of the score.
+    let dragActive = false;
+
     el.addEventListener('touchstart', (e) => {
       e.stopPropagation();
+      // A bit's handles are shown but inert. Bits have no edit: their bounds are fixed
+      // once saved, and changing one means deleting it and drawing it again. Dragging
+      // here would move the armed loop while the stored bit stayed where it was, so the
+      // marker and the shade would silently disagree. Bailing after stopPropagation
+      // deliberately — the touch is still the handle's, it just does nothing, so it does
+      // not pan the score out from under the finger either.
+      if (activeBitId !== null) return;
+      dragActive = true;
       // Set before the cancels below for the same reason the wrapper does it: dragging
       // a handle auto-scrolls the score, so this gesture counts as motion throughout.
       handleDragging = true;
@@ -1473,11 +1620,16 @@ function initLoopHandles(): void {
     }, { passive: false });
 
     el.addEventListener('touchmove', (e) => {
+      // `touch-action: none` on .loop-handle already stops the page reacting, so an
+      // inert handle needs no preventDefault of its own.
+      if (!dragActive) return;
       e.preventDefault();
       currentClientX = e.touches[0]?.clientX ?? 0;
     }, { passive: false });
 
     el.addEventListener('touchend', () => {
+      if (!dragActive) return;
+      dragActive = false;
       if (dragRafId !== null) {
         cancelAnimationFrame(dragRafId);
         dragRafId = null;
@@ -1498,6 +1650,7 @@ function initLoopHandles(): void {
 
     // See the wrapper's touchcancel: same reason, same deliberately narrow cleanup.
     el.addEventListener('touchcancel', () => {
+      dragActive = false;
       handleDragging = false;
       syncScoreMotion();
     }, { passive: true });
@@ -1556,6 +1709,7 @@ function createLoop(): void {
   Tone.Transport.loop = true;
   Tone.Transport.loopStart = `${loopRegion.aTicks}i`;
   Tone.Transport.loopEnd = `${loopRegion.bTicks}i`;
+  setHandlesInert(false);
   if (handleAEl) handleAEl.style.display = 'flex';
   if (handleBEl) handleBEl.style.display = 'flex';
   if (shadeEl) shadeEl.style.display = 'block';
@@ -1575,8 +1729,273 @@ function clearLoop(): void {
 }
 
 export function toggleLoop(): void {
+  // Unreachable in bit mode — the loop button is not in the bit toolbar — but clearing
+  // the loop out from under an armed bit would strand the grey-out and leave the native
+  // toolbar in bit mode with nothing armed, so the invariant is asserted rather than
+  // assumed.
+  if (activeBitId !== null) return;
   if (loopRegion) clearLoop();
   else createLoop();
+}
+
+// ─── Saved bits ───────────────────────────────────────────────────────────────
+
+/**
+ * The span a bit's marker actually occupies: inset by the padding at both ends, floored
+ * at a tappable width, and centred on the true span when the floor takes over.
+ *
+ * Shared by the strip and by the create-time row-budget check, so the budget is decided
+ * against the geometry the user will see rather than the raw loop bounds.
+ */
+function punchSpan(bit: { aPx: number; bPx: number }): BitSpan {
+  const width = Math.max(PUNCH_MIN_WIDTH_PX, bit.bPx - bit.aPx - 2 * PUNCH_X_PADDING_PX);
+  const centre = (bit.aPx + bit.bPx) / 2;
+  const left = Math.min(bit.aPx + PUNCH_X_PADDING_PX, centre - width / 2);
+  return { aPx: left, bPx: left + width };
+}
+
+/**
+ * Rebuilds the marker strip from the resolved bits.
+ *
+ * The elements live inside #osmd, so they translate with the score for free and need no
+ * per-frame work — rebuilt only when the list, the active bit or the grid changes.
+ *
+ * Rows come from `domain/bits.ts`, fed the *drawn* widths rather than the true spans so
+ * the packing reflects what is on screen once a very short bit has been widened to a
+ * usable tap target.
+ *
+ * Horizontal position is score-relative and vertical position is viewport-relative, which
+ * is the whole reason the strip lives inside #osmd but computes its own `top`: a marker
+ * has to stay over the bars it loops while staying pinned to the bottom of the screen.
+ */
+function renderBitPunches(): void {
+  if (!bitPunchesEl) return;
+  bitPunchesEl.textContent = '';
+  if (resolvedBits.length === 0) return;
+
+  const drawn = resolvedBits.map(punchSpan);
+  const rows = packBitRows(drawn, BIT_MAX_ROWS);
+
+  // The bottom of the viewport, expressed in #osmd's own coordinates.
+  const viewportBottom = window.innerHeight - osmdOffsetTopPx;
+  // Anchor the *lowest occupied* row against the screen edge rather than reserving the
+  // full row budget: a piece with one bit should not float its pill three rows up.
+  const usedRows = rows.reduce((most, row) => Math.max(most, row), 0) + 1;
+  // Far enough that the *topmost* row clears the bottom edge, which means every row does.
+  punchExitOffsetPx =
+    PUNCH_EDGE_GAP_PX +
+    usedRows * PUNCH_HEIGHT_PX +
+    (usedRows - 1) * PUNCH_ROW_GAP_PX +
+    PUNCH_EXIT_MARGIN_PX;
+
+  resolvedBits.forEach((bit, i) => {
+    const span = drawn[i];
+    if (span === undefined) return;
+    // Row 0 is the shortest bit and sits highest; the last used row, holding the longest,
+    // sits at the edge. Longer bits below, which is what makes nesting readable.
+    const fromBottom = usedRows - (rows[i] ?? 0);
+    const el = document.createElement('div');
+    el.className = bit.id === activeBitId ? 'bit-punch active' : 'bit-punch';
+    // How a tap finds its way back to a bit — see the wrapper's touchend handler.
+    el.setAttribute('data-bit-id', bit.id);
+    el.style.left = `${span.aPx}px`;
+    el.style.width = `${span.bPx - span.aPx}px`;
+    el.style.height = `${PUNCH_HEIGHT_PX}px`;
+    el.style.top = `${
+      viewportBottom -
+      PUNCH_EDGE_GAP_PX -
+      fromBottom * PUNCH_HEIGHT_PX -
+      (fromBottom - 1) * PUNCH_ROW_GAP_PX
+    }px`;
+    bitPunchesEl?.appendChild(el);
+  });
+
+  // A relayout can happen while the strip is off screen — a bit created during a count-in,
+  // a rotation mid-playback — so the transform is re-asserted from the flag rather than
+  // assumed to still be correct for the new travel distance.
+  applyPunchTransform();
+}
+
+/** Puts the strip where its current visibility says it should be. */
+function applyPunchTransform(): void {
+  if (!bitPunchesEl) return;
+  bitPunchesEl.style.transform = punchesVisible
+    ? 'translateY(0)'
+    : `translateY(${punchExitOffsetPx}px)`;
+  if (punchesVisible) bitPunchesEl.classList.remove('hidden');
+  else bitPunchesEl.classList.add('hidden');
+}
+
+/**
+ * Slides the strip off the bottom of the screen while playing, and back up on pause.
+ *
+ * Driven from the one place playback state is announced, so the strip cannot disagree
+ * with the toolbar about whether the piece is playing — including through the count-in
+ * and the cold-start sample load, which is why the caller reads `isPlaybackActive()`
+ * rather than the transport.
+ */
+function setPunchesVisible(visible: boolean): void {
+  if (punchesVisible === visible) return;
+  punchesVisible = visible;
+  applyPunchTransform();
+}
+
+/**
+ * Announces playback state and keeps the punch strip in step with it.
+ *
+ * Every PLAYBACK_STATE goes through here for the same reason every "is it playing?" test
+ * goes through `isPlaybackActive()`: two places deciding the same thing is how they end
+ * up disagreeing.
+ */
+function postPlaybackState(state: 'playing' | 'paused' | 'stopped'): void {
+  postToNative({ type: 'PLAYBACK_STATE', payload: state });
+  setPunchesVisible(state !== 'playing');
+}
+
+/**
+ * Arms a bit: its loop becomes the active loop, the playhead travels to its first note,
+ * and the music around it recedes.
+ *
+ * The handles are shown but `initLoopHandles` is never called for a bit, so they are
+ * inert by construction rather than by a flag that could rot — a bit's bounds are not
+ * editable, and deleting and redrawing is the way to change one.
+ */
+function armBit(bit: ResolvedBit): void {
+  endLoopOverlayTransition();
+  hideSnapPreview();
+  stopMomentum();
+
+  activeBitId = bit.id;
+  loopRegion = loopFromSteps(bit.aStep, bit.bStep);
+  Tone.Transport.loop = true;
+  Tone.Transport.loopStart = `${loopRegion.aTicks}i`;
+  Tone.Transport.loopEnd = `${loopRegion.bTicks}i`;
+  setHandlesInert(true);
+  if (handleAEl) handleAEl.style.display = 'flex';
+  if (handleBEl) handleBEl.style.display = 'flex';
+  if (shadeEl) shadeEl.style.display = 'block';
+  updateLoopOverlay();
+  // Play from A rather than from wherever the playhead happens to be, the same rule a
+  // freshly created or edited loop uses.
+  loopModified = true;
+  if (isPlaybackActive()) pausePlayback();
+
+  // Commit the logical position immediately, then put the pixels back and travel there:
+  // the transport and the OSMD cursor must not lag behind an animation, but the score
+  // sliding to the bit reads far better than snapping to it.
+  const fromOffset = scrollOffsetPx;
+  seekToStep(bit.aStep);
+  applyTranslate(fromOffset);
+  startScoreGlide(bit.aStep, () => {});
+
+  postToNative({ type: 'LOOP_STATE', payload: true });
+  postToNative({ type: 'BIT_ENTERED', payload: { id: bit.id } });
+  renderBitPunches();
+}
+
+/**
+ * Re-places the stored bits on the current grid and repaints the strip.
+ *
+ * Called whenever the grid can have moved, not only when the list changes: the terminal
+ * target's pixel depends on the viewport width, so a bit ending on the closing barline
+ * moves with a resize. Repainting alone would leave that marker at a pixel resolved
+ * against the previous grid.
+ */
+function reresolveBits(): void {
+  resolvedBits = resolveBits(bitsInput, cursorSteps, snapGrid);
+  // A bit that is no longer in the list — or that this grid cannot place — cannot stay
+  // armed. Native normally leaves first and sends the new list second, so this is a
+  // safety net rather than the usual path.
+  if (activeBitId !== null && !resolvedBits.some((bit) => bit.id === activeBitId)) {
+    leaveBit();
+    return;
+  }
+  renderBitPunches();
+}
+
+/**
+ * Installs the piece's saved bits.
+ *
+ * Must be called after initPlayback: bits are stored in ticks and resolve against the
+ * note grid, which does not exist until the score has been walked.
+ */
+export function setBits(bits: Bit[]): void {
+  bitsInput = bits;
+  reresolveBits();
+}
+
+/**
+ * A tap on a marker: arms that bit, or leaves it if it is the one already armed.
+ *
+ * Tapping the armed marker toggling it off means the marker is the whole control — the
+ * thing that got you into a bit is the thing that gets you out, and it is under the finger
+ * already. The toolbar's leave button stays as the discoverable route.
+ *
+ * Not exported: entering a bit is always a tap in here, never something native asks for,
+ * so there is no bridge message for it.
+ */
+function tapBitPunch(id: string): void {
+  if (id === activeBitId) {
+    leaveBit();
+    return;
+  }
+  const bit = resolvedBits.find((b) => b.id === id);
+  if (!bit) return;
+  armBit(bit);
+}
+
+/** Disarms the current bit: no loop, no grey-out, back to ordinary play view. */
+export function leaveBit(): void {
+  if (activeBitId === null) return;
+  activeBitId = null;
+  // Clears loopRegion and the transport loop, hides the overlay, posts LOOP_STATE false
+  // and pauses if something was sounding.
+  clearLoop();
+  postToNative({ type: 'BIT_ENTERED', payload: null });
+  renderBitPunches();
+}
+
+/**
+ * Saves the live loop as a bit under the id native minted, and arms it.
+ *
+ * A loop covering a span some bit already holds does not create a second one — it arms
+ * the existing bit. Bits are nameless, so two markers on the same pixels would be
+ * indistinguishable and only one of them tappable.
+ */
+export function createBit(id: string): void {
+  if (!loopRegion || activeBitId !== null) return;
+  const existing = findBitByPixelSpan(resolvedBits, loopRegion.aPx, loopRegion.bPx);
+  if (existing) {
+    armBit(existing);
+    return;
+  }
+  // Refused rather than collapsed. packBitRows would fold the overflow onto the last row,
+  // where the new marker would be drawn over one already there — a bit the user cannot
+  // reach and has no way to know about. Better to say no.
+  if (exceedsRowBudget(resolvedBits.map(punchSpan), punchSpan(loopRegion))) {
+    postToNative({ type: 'BIT_LIMIT_REACHED' });
+    return;
+  }
+  const bit: ResolvedBit = {
+    id,
+    aStep: loopRegion.aStep,
+    bStep: loopRegion.bStep,
+    aPx: loopRegion.aPx,
+    bPx: loopRegion.bPx,
+  };
+  // Added locally as well as reported, so the marker appears on this frame rather than a
+  // round trip later. Both lists: the input one is what a later re-resolve reads, and
+  // leaving the new bit out of it would make the next resize erase its marker.
+  bitsInput = [
+    ...bitsInput,
+    { id, startTicks: loopRegion.aTicks, endTicks: loopRegion.bTicks },
+  ];
+  resolvedBits = [...resolvedBits, bit];
+  postToNative({
+    type: 'BIT_CREATED',
+    payload: { id, startTicks: loopRegion.aTicks, endTicks: loopRegion.bTicks },
+  });
+  armBit(bit);
 }
 
 // ─── Metronome ────────────────────────────────────────────────────────────────
@@ -1915,6 +2334,7 @@ export function initPlayback(
   shadeEl = document.getElementById('loop-shade');
   sectionMarksEl = document.getElementById('section-marks');
   previewEl = document.getElementById('snap-preview');
+  bitPunchesEl = document.getElementById('bit-punches');
   scoreWidth = osmdEl?.scrollWidth ?? 0;
   viewportWidth = window.innerWidth;
   // Needs both buildTimelines (cursorSteps, totalQuarters) and scoreWidth, which
@@ -2036,7 +2456,7 @@ export async function startPlayback(): Promise<void> {
   // The cost is that `practiceTracker` starts its clock here too, so a cold start and
   // the metronome count-in both count as practice time. Accepted deliberately — see
   // `client/src/state/practiceTracker.ts`.
-  postToNative({ type: 'PLAYBACK_STATE', payload: 'playing' });
+  postPlaybackState('playing');
   // Settle before reading the position below. Pressing play from the toolbar while
   // the score is still coasting would otherwise start from whatever tick the *last*
   // settle wrote, and the first RAF frame would drag the score back there.
@@ -2186,7 +2606,7 @@ export function pausePlayback(): void {
   // playhead where the pre-roll was counting into. The next play counts in again.
   if (startPending || countingIn || countInNodes.length > 0) {
     abortStart();
-    postToNative({ type: 'PLAYBACK_STATE', payload: 'paused' });
+    postPlaybackState('paused');
     return;
   }
   Tone.Transport.pause();
@@ -2194,12 +2614,12 @@ export function pausePlayback(): void {
     cancelAnimationFrame(animFrameId);
     animFrameId = null;
   }
-  postToNative({ type: 'PLAYBACK_STATE', payload: 'paused' });
+  postPlaybackState('paused');
 }
 
 export function stopPlayback(): void {
   _stopInternal();
-  postToNative({ type: 'PLAYBACK_STATE', payload: 'stopped' });
+  postPlaybackState('stopped');
 }
 
 export function setTempoBpm(bpm: number): void {
@@ -2250,6 +2670,27 @@ export function disposePlayback(): void {
   // Marks are score-pixel positioned: left in place they would sit at stale
   // coordinates over the next score, exactly like the loop handles below.
   if (sectionMarksEl) sectionMarksEl.textContent = '';
+  // Same hazard for the punches, and one more besides: a leftover activeBitId would put
+  // the next score's toolbar in bit mode with nothing armed.
+  bitsInput = [];
+  resolvedBits = [];
+  // Told, not just cleared. `activeBitId` lives on both sides of the bridge: this one
+  // arms the loop, native's puts the toolbar in bit mode. Dropping ours silently left the
+  // toolbar offering to leave a bit that no longer existed here — and leaving did nothing,
+  // because `leaveBit` had nothing to leave. Any load has to disarm both.
+  if (activeBitId !== null) postToNative({ type: 'BIT_ENTERED', payload: null });
+  activeBitId = null;
+  osmdOffsetTopPx = 0;
+  punchExitOffsetPx = 0;
+  punchesVisible = true;
+  if (bitPunchesEl) {
+    bitPunchesEl.textContent = '';
+    // No transition on the way back: this is a new score, not the old strip returning.
+    bitPunchesEl.style.transition = 'none';
+    applyPunchTransform();
+    void bitPunchesEl.offsetWidth;
+    bitPunchesEl.style.transition = '';
+  }
   cursorSteps = [];
   snapGrid = [];
   currentCursorStep = -1;
@@ -2304,6 +2745,10 @@ export function setActiveHand(hand: ActiveHand): void {
     loopRegion = loopFromSteps(loopRegion.aStep, loopRegion.bStep);
     updateLoopOverlay();
   }
+  // The grid comes back identical, so the bits resolve to where they already were —
+  // redone anyway so their dependence on it is explicit rather than accidental, exactly
+  // like the loop above.
+  reresolveBits();
 
   // Replace Part only — keep sampler and tempo schedule intact.
   part?.dispose();

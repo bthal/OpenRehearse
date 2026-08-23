@@ -34,6 +34,7 @@ RN/OSMD/Tone imports. See `specs/architecture.md` for the authoritative version.
 | Settings & count-in | `specs/features/settings.md`, `compound-docs/tone-playback.md` (count-in) |
 | Files & MusicXML | `specs/features/import.md` |
 | Sections: detection, user editing & the PlayView label | `specs/features/section-detection.md`, `compound-docs/osmd-webview.md` |
+| Bits (saved loops), the marker strip & the bit toolbar | `specs/features/playview.md`, `specs/features/pieces-domain.md`, `compound-docs/osmd-webview.md` |
 | Play-surface overlays & animation | `specs/features/playview.md`, `compound-docs/expo-rn-setup.md` |
 | Local data & offline | `specs/features/offline-storage.md` |
 | Audio + cursor sync | `specs/features/playback-synthesis.md`, `specs/features/playview.md` |
@@ -77,7 +78,8 @@ All app scripts run from **`client/`** (see [`README.md`](README.md) for full de
 | `cd client && npm run format:check` | Prettier check |
 | `cd client && npm run typecheck` | `tsc --noEmit` |
 | `cd client && npm run test` | Jest unit tests |
-| `cd client && npm run ci` | lint + format + typecheck + test |
+| `cd client && npm run bundle:score-web` | Rebuild the WebView bundle only (no reinstall) |
+| `cd client && npm run ci` | lint + format + typecheck + test + score-web bundle |
 
 ## Commit messages
 
@@ -117,7 +119,9 @@ Two invariants worth knowing before you touch anything here:
 - **`client/src/score-web/html.ts` is generated, gitignored, and must never be committed.** It is
   1.5 MB of bundled OSMD + Tone.js, rebuilt from `client/score-web/src/` by `postinstall` (and by
   `eas-build-post-install` on EAS). After editing anything under `client/score-web/src/`, run
-  `cd client && npm run build:score-web` to see your change locally. See
+  `cd client && npm run bundle:score-web` to see your change locally. `npm run ci` now ends with
+  that same bundle step: `score-web/**` is outside tsc and Jest, so building it is the *only*
+  check it gets, and without it a broken bundle reaches CI untouched. See
   [`compound-docs/release-pipeline.md`](compound-docs/release-pipeline.md) for why it works this way.
 - **`client/package.json` `version` is the single source of truth.** release-please edits only that
   file; `scripts/sync-app-version.mjs` derives `app.json`'s `version` and the integer
@@ -147,6 +151,10 @@ The `/commit` command runs a guided pass over all of this: assess scope → read
 - **Scores**: **local device only** in MVP — **do not** upload MusicXML to any server.
 - **Loops**: **one** active loop; handles **continuously draggable** but **discretised to the note
   grid** (bounds are half-open `[A, B)`, minimum one quarter note); **immediate jump** at wrap.
+  Saved loops ("**bits**") do not change that: a bit is *stored bounds plus practice settings*,
+  and an armed bit owns the one active loop — there is never both a loop and a bit. A bit's
+  handles are drawn but **inert**; bits have no edit, only delete-and-redraw. Persisted bounds
+  are **ticks**, never pixels. See `specs/features/playview.md` § "Bits (saved loops)".
 - **Cursor**: **OSMD standard cursor**, **smooth continuous movement** — prefer OSMD APIs over custom
   overlays. Manual positioning is continuous but resolves to a **note onset**, previewed by a guide
   line and settled with a glide — so playback never has to correct the position.

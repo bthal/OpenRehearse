@@ -6,6 +6,7 @@ import {
   nearestGridIndex,
   type AnchorableStep,
   type GridPoint,
+  nearestIndexByQuarters,
 } from '../scoreGrid';
 
 // Four quarter notes plus the terminal target. The terminal always sits exactly
@@ -269,5 +270,40 @@ describe('anchorToBarlines', () => {
 
   it('survives a score with no onsets', () => {
     expect(anchorToBarlines([])).toEqual([]);
+  });
+});
+
+describe('nearestIndexByQuarters', () => {
+  // The musical-time counterpart of nearestGridIndex, used to place a saved bit back on
+  // the grid: bits persist in ticks because pixels do not survive a reload.
+  const grid = [
+    { quarters: 0, pxLeft: 0 },
+    { quarters: 1, pxLeft: 100 },
+    { quarters: 2, pxLeft: 200 },
+  ];
+
+  it('returns the exact index for a position on a grid point', () => {
+    expect(nearestIndexByQuarters(grid, 0)).toBe(0);
+    expect(nearestIndexByQuarters(grid, 1)).toBe(1);
+    expect(nearestIndexByQuarters(grid, 2)).toBe(2);
+  });
+
+  it('picks the nearer neighbour, not the preceding one', () => {
+    expect(nearestIndexByQuarters(grid, 0.4)).toBe(0);
+    expect(nearestIndexByQuarters(grid, 0.6)).toBe(1);
+  });
+
+  // Matches nearestGridIndex, so a position resolved either way lands on one point.
+  it('resolves an exact midpoint forward', () => {
+    expect(nearestIndexByQuarters(grid, 0.5)).toBe(1);
+  });
+
+  it('clamps outside the grid', () => {
+    expect(nearestIndexByQuarters(grid, -5)).toBe(0);
+    expect(nearestIndexByQuarters(grid, 99)).toBe(2);
+  });
+
+  it('returns 0 for an empty grid, like its pixel counterpart', () => {
+    expect(nearestIndexByQuarters([], 3)).toBe(0);
   });
 });

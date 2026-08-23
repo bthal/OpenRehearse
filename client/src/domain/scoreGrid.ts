@@ -183,6 +183,28 @@ function ceilByQuarters(grid: readonly GridPoint[], q: number): number {
 }
 
 /**
+ * Index of the grid point nearest `quarters`.
+ *
+ * The musical-time counterpart of {@link nearestGridIndex}, for callers that hold a
+ * position in quarter notes rather than pixels — restoring a saved bit, whose bounds
+ * were persisted in musical time precisely because pixels do not survive a reload.
+ *
+ * Nearest rather than floor, and exact midpoints resolve forward, so the two searches
+ * agree wherever both are applied to the same position.
+ */
+export function nearestIndexByQuarters(grid: readonly GridPoint[], quarters: number): number {
+  if (grid.length === 0) return 0;
+
+  const floorIdx = floorByQuarters(grid, quarters);
+  if (floorIdx === -1) return 0;
+
+  const here = grid[floorIdx];
+  const next = grid[floorIdx + 1];
+  if (here === undefined || next === undefined) return floorIdx;
+  return quarters - here.quarters < next.quarters - quarters ? floorIdx : floorIdx + 1;
+}
+
+/**
  * Index of the grid point nearest `px`.
  *
  * Nearest rather than floor: the preview line makes the target explicit while

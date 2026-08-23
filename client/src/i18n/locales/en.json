@@ -54,7 +54,19 @@
     "failedToReadScore": "Failed to read score file.",
     "sectionOrdinal": "Section {{n}}",
     "previousSection": "Previous section",
-    "nextSection": "Next section"
+    "nextSection": "Next section",
+    "metronome": "Metronome",
+    "handSelection": "Hand selection",
+    "speed": "Speed",
+    "createLoop": "Select loop",
+    "clearLoop": "Clear loop",
+    "back": "Back",
+    "createBit": "Save as bit",
+    "leaveBit": "Leave bit",
+    "deleteBitTitle": "Delete this bit?",
+    "deleteBitMessage": "Its loop and practice settings will be removed. The music itself is untouched.",
+    "bitLimitTitle": "No room for another bit here",
+    "bitLimitMessage": "Up to {{max}} bits can overlap at one point in a piece. Delete one that covers this passage first."
   },
   "warmup": {
     "key": "Key",
