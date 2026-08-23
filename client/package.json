@@ -52,6 +52,7 @@
   "scripts": {
     "build": "npx eas-cli build --platform android --profile preview",
     "build:score-web": "cd score-web && npm ci && node build.mjs",
+    "bundle:score-web": "node score-web/build.mjs",
     "postinstall": "npm run build:score-web",
     "eas-build-post-install": "npm run build:score-web",
     "start": "expo start",
@@ -64,7 +65,7 @@
     "format": "prettier --write .",
     "typecheck": "tsc --noEmit",
     "test": "jest --passWithNoTests",
-    "ci": "npm run lint && npm run format:check && npm run typecheck && npm run test"
+    "ci": "npm run lint && npm run format:check && npm run typecheck && npm run test && npm run bundle:score-web"
   },
   "private": true
 }

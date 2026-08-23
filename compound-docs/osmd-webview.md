@@ -81,6 +81,25 @@ target: ['chrome58'],
 ```
 `chrome58` (2017) covers logical assignment, optional chaining, nullish coalescing, class fields, and async/await lowering for older engines.
 
+## LANDMINE: a backtick anywhere in `HTML_TEMPLATE` ends the string
+
+`HTML_TEMPLATE` in `score-web/build.mjs` is a JS template literal, so a stray backtick — or
+a `${` — *anywhere* inside it terminates the string and the whole file stops parsing. This
+is easy to do by accident, because the natural way to write a code identifier in a prose
+comment is to wrap it in backticks, and the template is full of CSS comments. Write prose in
+there with plain quotes.
+
+What made it expensive: `npm run ci` used to run lint, format, typecheck and test, none of
+which touch `score-web/**` — it is outside both the app tsconfig and Jest. So a broken
+`build.mjs` passed the local gate *and* the pre-commit hook, and only failed on CI, where
+`npm ci` runs the bundle through `postinstall`. The error surfaces as a bare
+`SyntaxError: Unexpected identifier` pointing into a CSS comment, several steps away from
+anything that looks like JavaScript.
+
+`npm run ci` now ends with `bundle:score-web`, so building the bundle is part of the gate.
+Building it is the *only* automated check this directory gets; treat a change here as
+unverified until it has run.
+
 ## `String.replace(str, str)` corrupts bundles that contain `$&`
 
 **LANDMINE:** `String.prototype.replace(searchStr, replacementStr)` treats special `$`-patterns in the replacement string: `$&` → insert the matched string, `` $` `` → insert the string before the match, `$'` → insert the string after the match. The minified OSMD bundle contains `$&` sequences (bitwise AND applied to a `$`-named variable), so naïve substitution of the bundle into an HTML template string corrupts ~15 sites in the output.

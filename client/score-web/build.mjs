@@ -15,6 +15,11 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 //   #2E2E9E  navy-600, hsl(240 55% 40%) — the interactive accent
 //   #181881  navy-700, hsl(240 68% 30%) — the grip glyph, a step darker than its handle
 //
+// NOTE: this template is a JS template literal, so a backtick or a `${` anywhere inside it
+// — including inside a CSS comment — ends the string and the file stops parsing. Write prose
+// in here with plain quotes. `npm run ci` does NOT build this bundle, so the breakage only
+// shows up on CI (via postinstall) or on the next explicit build; see package.json.
+//
 // THIS FILE is the source. `src/score-web/html.ts` is generated from it and gitignored,
 // so an edit there survives exactly until the next `npm ci` — `postinstall` rebuilds it.
 // The navy migration was first written into the generated file and lost that way.
@@ -87,7 +92,7 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
        written out because this template is a plain string with no access to them. The
        pill and the loop unfurl share one motion feel; keep them in step by hand. */
     /* The strip slides as one object. Transform on the container rather than on each
-       pill: one animated property for the whole strip, and the pills keep their own `top`
+       pill: one animated property for the whole strip, and the pills keep their own top
        so the rows stay in formation on the way down. #osmd-wrapper clips at the viewport,
        so travelling past the bottom edge is genuinely out of sight. Distance is set from
        playback.ts — it depends on how many rows are occupied. */

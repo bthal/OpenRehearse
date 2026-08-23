@@ -78,7 +78,8 @@ All app scripts run from **`client/`** (see [`README.md`](README.md) for full de
 | `cd client && npm run format:check` | Prettier check |
 | `cd client && npm run typecheck` | `tsc --noEmit` |
 | `cd client && npm run test` | Jest unit tests |
-| `cd client && npm run ci` | lint + format + typecheck + test |
+| `cd client && npm run bundle:score-web` | Rebuild the WebView bundle only (no reinstall) |
+| `cd client && npm run ci` | lint + format + typecheck + test + score-web bundle |
 
 ## Commit messages
 
@@ -118,7 +119,9 @@ Two invariants worth knowing before you touch anything here:
 - **`client/src/score-web/html.ts` is generated, gitignored, and must never be committed.** It is
   1.5 MB of bundled OSMD + Tone.js, rebuilt from `client/score-web/src/` by `postinstall` (and by
   `eas-build-post-install` on EAS). After editing anything under `client/score-web/src/`, run
-  `cd client && npm run build:score-web` to see your change locally. See
+  `cd client && npm run bundle:score-web` to see your change locally. `npm run ci` now ends with
+  that same bundle step: `score-web/**` is outside tsc and Jest, so building it is the *only*
+  check it gets, and without it a broken bundle reaches CI untouched. See
   [`compound-docs/release-pipeline.md`](compound-docs/release-pipeline.md) for why it works this way.
 - **`client/package.json` `version` is the single source of truth.** release-please edits only that
   file; `scripts/sync-app-version.mjs` derives `app.json`'s `version` and the integer
