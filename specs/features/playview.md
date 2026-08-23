@@ -106,6 +106,120 @@ The entire piece is rendered in a **single horizontal line** — all measures la
   - While dragging a handle, the score **scrolls to follow** the handle being dragged so it stays visible.
 - **Playback wrap**: on reaching B, playback **immediately jumps** to A (no fade or ritardando).
 
+## Bits (saved loops)
+
+A **bit** is a loop the user saved on a piece, so a passage practised every day does not
+have to be drawn again each session. It carries the practice settings it was saved with.
+
+- **Nameless.** A bit is identified by where it sits in the score and drawn at exactly the
+  span it loops. There is nothing to read and nothing to type — a landscape phone on a
+  music stand is the worst place in the app to ask for text. The consequence: **two bits
+  may not cover the same span**, since identical markers would be indistinguishable and
+  one of them unreachable.
+- **Creating**: with a loop armed (so, paused — the toolbar is gone while playing), tap the
+  brick button that appears below the loop button. The live loop becomes a bit and the user
+  is immediately **inside** it: there is never both a loop and a bit at once. The button
+  takes a slot rather than replacing the loop button, so clearing a loop without saving it
+  stays possible.
+- **What a bit stores**: its bounds, plus **hand**, **speed** and **metronome** as they
+  were at the moment it was saved — the passage was already being worked on that way,
+  which is why it is worth keeping. Count-in is *not* per bit; it stays a global setting.
+- **Entering**: tap its marker. The score **glides** to the bit's start, its loop is armed,
+  and its saved settings are applied. Tapping another bit's marker hops straight there, and
+  tapping the **armed** marker leaves the bit — the marker that got you in is the way out,
+  and it is already under the finger.
+- **Editing a bit's settings**: change hand, speed or metronome from inside it. The change
+  is **written back immediately** — a bit is a live preset, not a snapshot with a save
+  button.
+- **Editing a bit's bounds**: not possible. A wrong bit is **deleted and drawn again**. The
+  handles are still drawn for the armed bit but are **inert**, because a drag would move
+  the armed loop while the stored bit stayed put — and they drop their grip glyph, since
+  that glyph is the whole "drag me" affordance.
+- **Deleting**: **long-press its marker**, behind a confirmation. Not a toolbar button: a
+  button could only ever reach the *armed* bit, while the strip shows every one of them and
+  the finger is already on the one it means. Still confirmed — deletion is the only way to
+  correct a bit, and a press held a moment too long should not lose one. The cost is
+  discoverability: a long press advertises nothing, and this is the only one in the app.
+- **Leaving**: either tap the armed marker or use the toolbar's leave button, which stays
+  as the discoverable route. Clears the loop and **restores the hand, speed and metronome
+  from before the first bit was entered**. A bit's settings stay sealed inside
+  it; visiting one never silently leaves the whole piece slow or one-handed.
+- **Scope**: bits live only in the PlayView. Nothing in the piece editor, nothing on the
+  Dashboard. There is no cap on how many a piece may hold *in total* — but at most
+  `BIT_MAX_ROWS` may overlap at any one point, since that is how many marker rows the
+  strip has. A create that would exceed it is **refused with a message**, not silently
+  collapsed: folding the new marker onto an occupied row would leave a bit the user can
+  neither see nor reach.
+
+### Persistence
+
+Bits are stored as a JSON column on the piece (`domain/bits.ts`, `Piece.bits`), normalised
+on read like sections. Bounds are persisted as **ticks in the unrolled playback timeline** —
+half-open `[start, end)`, the same coordinate `Tone.Transport` and `loopFromSteps` use, and
+a pure function of the XML, which is immutable after import. Measure + beat was the other
+candidate but resolves through `firstTicksBySourceIndex`, which keeps only a measure's
+*first* visit and so cannot address the second pass of a repeat.
+
+**Repeats.** Duplicate detection compares the resolved **pixel** span, not ticks: repeated
+bars are engraved once, so a loop over the second pass has different ticks but the same
+pixels as one over the first. Saving over a span a bit already holds therefore *enters* that
+bit rather than creating a second one. The grey-out is compared in pixels for the same
+reason, so a bit means "these engraved bars" throughout.
+
+### Markers
+
+- Marked as **pills along the bottom of the screen**, paper-white and lit from above —
+  shadow beneath, highlight along the top edge — so they read as objects raised out of the
+  page. The strip is a persistent index of the piece and belongs at the edge of the screen,
+  out of the notation's way, with clearance from the physical edge.
+- Drawn inside the score's own coordinate space (like the section junction marks), so they
+  travel horizontally with the notation for free during a pan, a coast or a glide. Only the
+  vertical offset is computed against the viewport — a marker has to stay over the bars it
+  loops while staying pinned to the bottom of the screen.
+- **Shown only while paused.** Playing **slides the strip down off the bottom of the
+  screen**, and pausing brings it back up. Nothing fades: these are physical objects at the
+  edge of the page, and a thing that leaves by moving is easier to follow than one that
+  dissolves. The strip travels as one, so the rows stay in formation, and far enough that
+  the topmost row's shadow clears the edge too.
+- **Hierarchy by row**, longer bits lower. Rows are *packed*: two bits at opposite ends of
+  the piece share a row, while a bit nested inside a longer one always sits above it.
+  Capped at **3 rows** (`BIT_MAX_ROWS`); deeper nesting collapses onto the last row, so the
+  strip can never crowd the notation. The **lowest occupied** row is anchored against the
+  screen edge, so a piece with one bit does not float its pill three rows up. Packing is
+  pure (`domain/bits.ts`).
+- A marker reads as **the page pushed up from behind** — a bump in the paper, lit from
+  above, not a card lying on it. Built from layered `inset` shadows: a lit crown, an
+  underside curving back down, the crease where it meets the flat page, and what it casts
+  below. Deliberately **no outline**: a ring is what made an earlier version read as a
+  floating badge, because a real deformation of a surface has no edge, only curvature.
+- Its body sits **a shade below page white**, which is what makes the top edge visible at
+  all: the brightest face of a bump lit from above is its upper slope, and nothing can be
+  brighter than white paper. A second directional cue — a concave crease *above* the
+  marker, where the page bends up into it — marks that edge without becoming a border.
+- The **armed** bit is the identical figure in **navy** — same shading, different hue — so
+  the two states read as one object lit differently rather than two components. A sheen
+  rather than a saturated fill, which at the bottom of the screen would pull the eye off
+  the notation.
+- A marker is **inset from each end** of its bit's true span, so two bits meeting at a
+  barline read as two markers with air between them rather than one continuous bar. The
+  marker is an index entry; the loop shade is what states the bounds precisely. A very
+  short bit's marker is floored at a tappable width and centred on its span, and the row
+  packing is fed the **drawn** spans so neither the inset nor the floor can make two
+  neighbours collide.
+- **Tapping** a marker enters its bit, or leaves it if it is the armed one;
+  **long-pressing** one prompts to delete that bit; **dragging** from one pans the score. A marker never
+  claims the gesture the way a loop handle does — it reuses the score's own tap-versus-drag
+  test, so a wide marker is not a strip the score cannot be dragged from.
+
+### The music outside a bit is not de-emphasised
+
+An earlier version greyed it, per onset, in a lighter grey than the inactive hand. It was
+removed: the colouring pass walks the whole `GraphicSheet` and calls `setColor` on every
+note, so entering or leaving a bit visibly interrupted the score on anything long enough to
+matter. The loop shade and the marker already say where the bit is, and interrupting
+practice to restate it is the wrong trade. Note colour means the hand filter and nothing
+else.
+
 ## Play button
 
 - The play affordance is a **translucent disc in the middle of the screen**, sitting on the cursor,
@@ -136,9 +250,16 @@ The entire piece is rendered in a **single horizontal line** — all measures la
   rest in the strip beside a landscape phone's camera — still on screen.
 - The slide uses `useNativeDriver: false` — required for correctness, not speed. See
   `compound-docs/expo-rn-setup.md` § "Native-driver animations flicker on release".
+- **Only the top of the toolbar swaps in bit mode.** Metronome, hand and speed stay where
+  they are and stay live — a bit owns those three settings, and editing them from inside it
+  is the point. Back and the loop button are replaced by **leave bit** and **delete bit**.
+  There is deliberately no Back button in bit mode: leaving the bit is the way out, and one
+  extra tap to the Dashboard is cheaper than a control that abandons a bit silently.
 - Controls (top to bottom):
   - **Back button** — navigates back to the Dashboard.
   - **Loop button** (icon: loop-icon when inactive; × when active)
+  - **Save-as-bit button** — a brick-plus icon, present only while a loop is armed. Saves
+    the loop as a bit and enters it. See "Bits" above.
   - **Metronome toggle** — when enabled, clicks every quarter note; first beat of each measure
     accented (higher pitch, louder). Works for any time signature.
   - **Hand selector** — collapses to current selection label + hand icon (teal when filtering
@@ -179,6 +300,9 @@ Slices: `activePieceId`, `webViewReady`, `isLoadingScore`, `scoreError`, `isPlay
 `currentSectionIndex: number | null` (driven by `SECTION_INDEX` from the WebView, which owns position),
 `scoreMoving: boolean` (driven by `SCORE_MOTION` from the WebView, which owns the gesture),
 `loop: { start, end } | null`,
+`activeBitId: string | null` (driven by `BIT_ENTERED` from the WebView, which owns the
+armed loop), `preBitSettings: PracticeSettings | null` (hand/speed/metronome as they were
+before the first bit was entered, restored on leaving),
 `displayMode: 'one-line' | 'standard'` (global preference; `'one-line'` in MVP, no UI to change it yet).
 
 ## Acceptance criteria
@@ -238,4 +362,32 @@ Slices: `activePieceId`, `webViewReady`, `isLoadingScore`, `scoreError`, `isPlay
       is armed.
 - [x] The label rolls up to a strip while playing and unrolls on pause, animated in both directions.
 - [x] Section junctions are marked in the score with a two-sided color fade and a crisp seam.
+- [x] A loop can be saved as a bit with one tap, which enters the new bit; the bit records
+  the hand, speed and metronome in force at that moment.
+- [x] Bits persist across app restarts, stored as ticks on the piece and resolved back onto
+  the note grid at load (`domain/bits.ts`, `score-web/bitResolve.ts`).
+- [x] Saving over a span an existing bit already covers enters that bit instead of creating
+  a second one — including a loop over the other pass of a repeat.
+- [x] Bits are marked as raised white pills along the bottom of the screen, packed into at
+  most 3 rows with longer bits lower and nested bits stacked above their container; the
+  lowest occupied row sits a fixed distance from the screen edge.
+- [x] Markers are shown only while paused, sliding down off the bottom of the screen on
+  play and back up on pause; they travel with the score while it is panned.
+- [x] Tapping a marker enters that bit and the score glides to its start; tapping the
+  armed marker leaves the bit; dragging from a marker pans the score instead.
+- [x] Every marker reads as a bump in the page — inset shading, no outline; the armed one
+  is the same figure in navy. Its loop handles are drawn but inert, show no grip glyph, and
+  do not move when tapped.
+- [x] Long-pressing a marker prompts to delete that bit, armed or not; there is no delete
+  button in the toolbar.
+- [x] Markers are inset from each end of their span, so bits meeting at a barline do not
+  produce touching markers.
+- [x] A create that would need a fourth overlapping marker row is refused with a message
+  rather than collapsing onto an occupied row.
+- [x] Writing a bit — creating, deleting, or changing its settings — does **not** reload
+  the score.
+- [x] Changing hand, speed or metronome inside a bit writes back to it immediately;
+  leaving restores the settings from before the first bit was entered.
+- [x] Deleting a bit is confirmed first; the bit toolbar offers leave and delete in place
+  of back and loop.
 - [ ] Works **offline** once the piece is loaded from local storage. *(Phase 2)*

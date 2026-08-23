@@ -1,6 +1,7 @@
 import * as Crypto from 'expo-crypto';
 import { create } from 'zustand';
 
+import type { Bit } from '@domain/bits';
 import type { Piece } from '@domain/piece';
 import { scrapeMusicXmlMetadata, scrapeTempoBpm, validateMusicXml } from '@domain/musicxml';
 import { sectionsFromXml } from '@domain/sectionEditing';
@@ -42,6 +43,12 @@ interface PiecesState {
       sections?: Section[];
     },
   ) => Promise<void>;
+  /**
+   * Replaces a piece's bits. Separate from `updatePiece` because the PlayView writes
+   * bits on its own — creating one, deleting one, or changing one's practice settings —
+   * and has no business restating the title and composer to do it.
+   */
+  setBits: (id: string, bits: Bit[]) => Promise<void>;
   touchPiece: (id: string) => Promise<void>;
   deletePiece: (id: string) => Promise<void>;
   clearImportError: () => void;
@@ -118,6 +125,18 @@ export const usePiecesStore = create<PiecesState>()((set, get) => ({
     // present but unset, which is the common case: most edits do not touch sections.
     const updated: Piece = { ...existing, ...updates };
     if (updates.sections === undefined) updated.sections = existing.sections;
+    // Bits are never part of a metadata edit — they are written through `setBits` — so
+    // carry them across rather than letting `update()` see undefined and skip the column.
+    updated.bits = existing.bits;
+    await pieceRepository.update(updated);
+    set({ piecesById: { ...piecesById, [id]: updated } });
+  },
+
+  setBits: async (id, bits) => {
+    const { piecesById } = get();
+    const existing = piecesById[id];
+    if (!existing) return;
+    const updated: Piece = { ...existing, bits };
     await pieceRepository.update(updated);
     set({ piecesById: { ...piecesById, [id]: updated } });
   },

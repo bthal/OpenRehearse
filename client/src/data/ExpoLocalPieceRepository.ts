@@ -1,6 +1,7 @@
 import * as FileSystem from 'expo-file-system/legacy';
 import * as SQLite from 'expo-sqlite';
 
+import { normaliseBits, type Bit } from '@domain/bits';
 import type { Piece } from '@domain/piece';
 import { normaliseSections } from '@domain/sectionEditing';
 import type { Section } from '@domain/sections';
@@ -24,6 +25,8 @@ interface PieceRow {
   target_bpm: number | null;
   /** JSON-encoded Section[]; NULL for pieces imported before detection existed. */
   sections: string | null;
+  /** JSON-encoded Bit[]; NULL until the piece's first bit is saved. */
+  bits: string | null;
 }
 
 export class ExpoLocalPieceRepository implements PieceRepository {
@@ -52,6 +55,7 @@ export class ExpoLocalPieceRepository implements PieceRepository {
       'ALTER TABLE pieces ADD COLUMN imported_bpm INTEGER',
       'ALTER TABLE pieces ADD COLUMN target_bpm INTEGER',
       'ALTER TABLE pieces ADD COLUMN sections TEXT',
+      'ALTER TABLE pieces ADD COLUMN bits TEXT',
     ]) {
       try {
         await db.execAsync(sql);
@@ -68,7 +72,7 @@ export class ExpoLocalPieceRepository implements PieceRepository {
   }
 
   private static readonly SELECT_COLUMNS =
-    'id, title, composer, xml_filename, imported_at, last_opened_at, imported_bpm, target_bpm, sections';
+    'id, title, composer, xml_filename, imported_at, last_opened_at, imported_bpm, target_bpm, sections, bits';
 
   /**
    * A corrupt sections blob degrades the piece to "never analysed" rather than
@@ -81,6 +85,19 @@ export class ExpoLocalPieceRepository implements PieceRepository {
       return Array.isArray(parsed) ? (parsed as Section[]) : undefined;
     } catch {
       return undefined;
+    }
+  }
+
+  /**
+   * A corrupt bits blob costs the user their saved loops, not their piece — the same
+   * trade `parseSections` makes, and for the same reason.
+   */
+  private static parseBits(raw: string | null): Bit[] {
+    if (raw == null) return [];
+    try {
+      return normaliseBits(JSON.parse(raw));
+    } catch {
+      return [];
     }
   }
 
@@ -104,6 +121,9 @@ export class ExpoLocalPieceRepository implements PieceRepository {
       ...(r.imported_bpm != null ? { importedBpm: r.imported_bpm } : {}),
       ...(r.target_bpm != null ? { targetBpm: r.target_bpm } : {}),
       sections,
+      // Normalised on read like sections, so nothing downstream has to defend against a
+      // half-written bit. A null column stays null until the user saves their first bit.
+      bits: ExpoLocalPieceRepository.parseBits(r.bits),
     };
   }
 
@@ -141,7 +161,7 @@ export class ExpoLocalPieceRepository implements PieceRepository {
     try {
       const db = await this.getDb();
       await db.runAsync(
-        'INSERT INTO pieces (id, title, composer, xml_filename, imported_at, imported_bpm, target_bpm, sections) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+        'INSERT INTO pieces (id, title, composer, xml_filename, imported_at, imported_bpm, target_bpm, sections, bits) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
         piece.id,
         piece.title,
         piece.composer ?? null,
@@ -150,6 +170,7 @@ export class ExpoLocalPieceRepository implements PieceRepository {
         piece.importedBpm ?? null,
         piece.targetBpm ?? null,
         piece.sections ? JSON.stringify(piece.sections) : null,
+        piece.bits && piece.bits.length > 0 ? JSON.stringify(piece.bits) : null,
       );
     } catch (err) {
       // Roll back the file write to avoid orphaned XML files
@@ -164,11 +185,15 @@ export class ExpoLocalPieceRepository implements PieceRepository {
       // COALESCE so update() can add or replace sections but never erase them: a caller
       // holding a Piece that never went through rowToPiece has `sections` undefined,
       // and that must leave the stored blob alone rather than wiping the user's edits.
-      'UPDATE pieces SET title = ?, composer = ?, target_bpm = ?, sections = COALESCE(?, sections) WHERE id = ?',
+      // Same COALESCE guard for bits, with one difference that matters: an *empty*
+      // array is still written, as '[]'. Deleting a piece's last bit has to be able to
+      // clear the column, so only `undefined` means "leave it alone".
+      'UPDATE pieces SET title = ?, composer = ?, target_bpm = ?, sections = COALESCE(?, sections), bits = COALESCE(?, bits) WHERE id = ?',
       piece.title,
       piece.composer ?? null,
       piece.targetBpm ?? null,
       piece.sections ? JSON.stringify(piece.sections) : null,
+      piece.bits ? JSON.stringify(piece.bits) : null,
       piece.id,
     );
   }

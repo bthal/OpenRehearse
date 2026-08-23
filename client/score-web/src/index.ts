@@ -12,6 +12,9 @@ import {
   setCountIn,
   setSections,
   seekSection,
+  setBits,
+  createBit,
+  leaveBit,
 } from './playback';
 import type { OutboundMessage } from './types';
 
@@ -118,6 +121,27 @@ w.__rn_set_sections = (json: string) => {
 
 w.__rn_seek_section = (direction: number) => {
   seekSection(direction);
+};
+
+// Sent after LOADED for the same reason as the sections: bits are stored in ticks and
+// resolve against the note grid, which initPlayback builds during the load.
+w.__rn_set_bits = (json: string) => {
+  try {
+    const parsed: unknown = JSON.parse(json);
+    setBits(Array.isArray(parsed) ? (parsed as import('../../src/domain/bits').Bit[]) : []);
+  } catch {
+    setBits([]);
+  }
+};
+
+// The id is minted natively: `crypto.randomUUID` cannot be relied on in every WebView
+// this ships to, and a bit's handle has to be stable enough to store.
+w.__rn_create_bit = (id: string) => {
+  createBit(id);
+};
+
+w.__rn_leave_bit = () => {
+  leaveBit();
 };
 
 const container = document.getElementById('osmd');

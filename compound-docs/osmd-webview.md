@@ -221,6 +221,15 @@ apart. `#osmd` has `will-change: transform` and so forms a stacking context: the
 `z-index: 9` orders it against the shade and handles inside `#osmd`, while `#cursor-line` — a
 sibling of `#osmd-wrapper` — always paints above regardless, which is the order you want.
 
+The bit marker strip joins that list, and brings one hazard the others do not have: the
+strip is rebuilt from `resolvedBits`, and `activeBitId` is what puts the *native* toolbar
+into bit mode. Leaving either behind across a load gives the next score a toolbar offering
+to leave and delete a bit that is not armed. `disposePlayback` clears the container's
+children, `bitsInput`, `resolvedBits`, `activeBitId` and `osmdOffsetTopPx`, and drops the
+`hidden` class so a score loaded while the previous one was playing does not come up with
+invisible markers. Clearing `activeBitId` is not enough on its own — see the load-effect
+landmine below for why it has to be announced.
+
 ## WebView bridge message protocol
 
 Web→Native: web page calls `window.ReactNativeWebView.postMessage(data)`; native receives via `onMessage` prop.
@@ -243,6 +252,169 @@ against the *previous* score's data (or none at all). PlayView therefore injects
 
 Native never computes section positions itself: it sends indices and receives `SECTION_INDEX` back.
 Keeping the tick math on one side is what stops the label and the seek target from disagreeing.
+
+### `SET_BITS` must be sent after `LOADED`, for the same reason
+
+Bits are persisted in ticks and resolve against the note grid, which does not exist until
+`initPlayback` has walked the cursor. Same rule as `SET_SECTIONS`, same failure if broken:
+every bit silently resolves against an empty grid and no markers appear.
+
+### There is no ENTER_BIT message, on purpose
+
+Bits are entered by tapping a marker, and markers are DOM elements inside the WebView — so
+the web side both detects the gesture and performs the entry, and native only ever hears
+about it afterwards through `BIT_ENTERED`. An `ENTER_BIT` inbound message existed briefly
+and was never injected by anything; it is gone. Native's half of the bit protocol is
+`SET_BITS`, `CREATE_BIT` and `LEAVE_BIT` — the three things it genuinely originates.
+
+### Bit ids are minted natively, not in the WebView
+
+`window.crypto.randomUUID` is not dependable across the Android WebView versions this
+ships to, and a bit's id has to survive being written to SQLite. So `CREATE_BIT` carries an
+id native generated with `expo-crypto`, and the web side answers with `BIT_CREATED` holding
+the two tick bounds — the half of the record only it can supply, since `loopRegion` lives
+there. Neither side owns the whole bit.
+
+### Bit markers must not claim the touch the way loop handles do
+
+`.loop-handle` calls `stopPropagation()` on `touchstart` and owns the gesture. Doing the
+same for a marker would be wrong: a marker is as wide as the passage it loops, so a long
+bit would turn a large strip under the staff into a region the score cannot be dragged
+from. Markers instead let the touch bubble to `#osmd-wrapper` and reuse its existing
+tap-versus-drag test — the touchstart target is remembered, and only a touch that never
+passed the movement threshold is read as entering the bit.
+
+The corollary is that the container must be `pointer-events: none` with the punches
+`pointer-events: auto`, so the gaps between markers stay transparent, and that hidden
+markers must also be `pointer-events: none` — an `opacity: 0` element still answers hit
+tests, and a marker is invisible exactly when tapping it would be wrong.
+
+### An armed bit's handles are inert by an early return, not a flag
+
+A bit's bounds cannot be edited — the way to change one is to delete it and draw it again.
+The handles are still drawn (they frame the region), so the drag has to be refused: the
+`touchstart` listener returns early when `activeBitId !== null`, *after* `stopPropagation`,
+so the touch is still consumed by the handle and does not pan the score out from under the
+finger. `initLoopHandles` runs once at init and is not conditional, which is why the guard
+lives in the listener rather than at wiring time.
+
+Refusing the drag is only half of it: an inert handle that still shows its grip glyph
+advertises an interaction that does nothing. The `.inert` class hides the glyph, and it is
+set and cleared through `setHandlesInert` at every place the handles are shown or hidden —
+never inferred at render time — so it cannot drift from `activeBitId`.
+
+**And bailing out of `touchstart` is not enough on its own.** The other three listeners on
+the element still fire, and `touchend` glided the overlay from `continuousPx` — a value
+only `touchstart` ever writes, so on the first touch of a session it was still `0`. Tapping
+an inert handle therefore flew *both* handles in from the left edge of the score. The guard
+is now a per-gesture `dragActive` flag set in `touchstart` and tested by every later
+listener, rather than each one re-reading `activeBitId`: a flag cannot go stale mid-gesture,
+and it makes "this gesture never started" the single thing they all agree on. Any early
+return from a `touchstart` needs the same treatment.
+
+### An embossed shape on white paper needs a body darker than the page
+
+The bit markers are meant to read as the page pushed up from behind. The obvious recipe —
+white fill, white `inset` highlight along the top, dark `inset` underneath — produces a
+pill with **no visible top edge**, and it took a round of iteration to see why: a bump lit
+from above is brightest on its upper slope, and on a white page there is nothing brighter
+than the page for that slope to be. The highlight is white on white and the silhouette
+simply stops.
+
+Two cues fix it, and both are needed. The body drops a step below page white (`#F4F4F8`),
+which gives the crown something to be bright against and gives the shape an outline-free
+silhouette. And a **directional outer shadow above** the element renders the concave crease
+where the flat page bends up into the bump — directional, so it reads as curvature rather
+than as the border that made an earlier version look like a floating badge.
+
+Generalises past this feature: any same-colour-as-background emboss needs the raised face
+offset *away* from the background's own value, in whichever direction leaves room. On a
+dark ground the same shape wants a body lighter than the page.
+
+### The marker strip's exit travel is computed, not a CSS constant
+
+Playing slides the strip below the bottom edge; `#osmd-wrapper`'s `overflow: hidden` is
+what makes that genuinely off-screen. The distance cannot live in the stylesheet, because
+it depends on how many marker rows are occupied — a one-row strip travels far less than a
+three-row one. So `renderBitPunches` computes it alongside the row layout and
+`applyPunchTransform` writes it.
+
+Two consequences. The transform goes on the *container*, not the pills: one animated
+property for the whole strip, and each pill keeps its own `top` so the rows stay in
+formation on the way down. And visibility has to be tracked in a module flag rather than
+read back off the DOM, because a relayout can happen while the strip is off screen — a bit
+created during a count-in, a rotation mid-playback — and the new travel distance must be
+applied without snapping the strip back into view.
+
+Note also that an off-screen pill is *clipped, not hidden*: it would still answer a touch,
+so the `hidden` class still has to switch `pointer-events` off.
+
+### Long press on a marker shares the wrapper's gesture, and must consume it
+
+Deleting a bit is a long press on its marker. The timer is armed in the wrapper's
+`touchstart` (only when the target is a `.bit-punch` and nothing is playing) and cancelled
+the moment the finger travels past the pan threshold, on lift, and on `touchcancel`.
+
+The part worth remembering is the flag: once the timer has fired, `touchend` must return
+*before* its tap branch. Otherwise one press both prompts for deletion and arms the bit —
+two answers to one gesture, with a dialog over a score that just jumped.
+
+### FAILED: greying the music outside an armed bit
+
+Bits once greyed everything outside them, per onset — each `GraphicalStaffEntry`'s own
+`AbsolutePosition.x` compared against the loop's pixel bounds, in a lighter grey than
+`HAND_GREY` so the two kinds of de-emphasis stayed distinguishable.
+
+It worked and it was removed anyway. `applyHandColors` walks the entire `GraphicSheet` and
+calls `setColor` on every note; the hand filter pays that cost once per hand change, which
+is rare and already a heavy operation. Entering and leaving a bit is neither — it is the
+most frequent thing a user does in bit mode — and on a score long enough for bits to be
+worth having, the walk is a visible interruption every time. Practice flow lost to a cue
+the loop shade and the marker strip already gave.
+
+If it is ever revived, the cost is the thing to solve first, not the colour: a partial walk
+bounded to the measures whose pixels changed, or a CSS overlay that dims without touching
+the notation at all.
+
+### LANDMINE: never let the score-load effect depend on the `piece` object
+
+`sendXml` closed over `piece` and the effect that calls it listed `sendXml` as a
+dependency. Every write to the piece replaces the object in `piecesStore`, so that
+arrangement reloaded the entire score on each write.
+
+Harmless for as long as nothing on the PlayView wrote to the piece. Bits write constantly —
+on create, on delete, and on every hand/speed/metronome change made from inside one — and
+the failure was spectacular and looked nothing like its cause:
+
+- a "Loading score" overlay flashing over the score mid-practice;
+- `disposePlayback` wiping `loopRegion`, `resolvedBits` and the web-side `activeBitId`, so
+  the loop shade, the handles and the whole marker strip vanished;
+- the *native* `activeBitId` surviving all of it, so the toolbar stayed in bit mode;
+- and the leave button doing nothing, because `leaveBit` returned early on a web-side
+  `activeBitId` that was already null.
+
+Two fixes, both needed. The effect is keyed on `piece?.xmlFilename` — the XML is immutable
+after import, so its filename changing is the only thing that genuinely means "different
+score" — and `sendXml` reads the piece from a ref so its own dependencies stay stable.
+Separately, `disposePlayback` now *posts* `BIT_ENTERED: null` rather than only clearing its
+own variable: `activeBitId` exists on both sides of the bridge, and any load has to disarm
+both.
+
+The general rule: on a screen that writes to the record it renders, an effect that reloads
+something expensive must depend on the *identity* of what it loads, never on the record.
+
+### The marker strip is horizontally score-relative and vertically viewport-relative
+
+The pills live inside `#osmd` so the score's single `translateX` carries them over the bars
+they loop for free — the same trick `#section-marks` uses. But they are pinned to the bottom
+of the *screen*, which `#osmd` knows nothing about: it is absolutely positioned at a `top`
+that `recomputeViewportMetrics` computes to centre the staff.
+
+So the strip needs both frames. `osmdOffsetTopPx` mirrors whatever was written to
+`osmdEl.style.top`, and `window.innerHeight - osmdOffsetTopPx` is the viewport's bottom edge
+in `#osmd`'s own coordinates. Anything that moves the staff vertically has to re-lay the
+strip out, which is why `onViewportResize` re-resolves the bits rather than only repainting
+them.
 
 ### LANDMINE: a web-side section index is not a native-side section index
 

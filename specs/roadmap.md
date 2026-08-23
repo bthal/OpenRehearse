@@ -46,7 +46,8 @@ Phases are **sequential**; within a phase, items can be parallelized when they d
 - [x] **Metronome** aligned with transport; oscillator click track in WebView with downbeat detection; toolbar toggle.
 - [x] **Practice-time tracking** with a day-based heatmap at the bottom of the dashboard; see `specs/features/dashboard.md` § "Practice-time tracking".
 - [x] **Section detection** at import, with a colored section label and prev/next navigation in PlayView; see `specs/features/section-detection.md`. Editing sections is not included.
-- **Saved bits** / multiple loops / hierarchical practice (per original vision).
+- Multiple *simultaneous* loops / hierarchical practice decks (per original vision).
+  Saved bits themselves have shipped — `specs/features/playview.md` § "Bits (saved loops)".
 - **iOS** build and TestFlight when ready.
 - **Auth & cross-device sync** — only after scope is explicitly re-opened; not in MVP.
 - **PDF import via OMR** — requires a server-side Audiveris (or equivalent) endpoint; on-device OMR is not feasible at production quality. See `specs/features/import.md` § "Post-MVP: PDF import via OMR" for the full design and edge-case inventory.

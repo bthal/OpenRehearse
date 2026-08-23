@@ -1,9 +1,18 @@
 import { create } from 'zustand';
 
-export type TempoMultiplier = 0.5 | 0.75 | 1.0;
-export const TEMPO_MULTIPLIERS: TempoMultiplier[] = [0.5, 0.75, 1.0];
+import {
+  ACTIVE_HANDS,
+  TEMPO_MULTIPLIERS,
+  type ActiveHand,
+  type PracticeSettings,
+  type TempoMultiplier,
+} from '@domain/practiceSettings';
 
-export type ActiveHand = 'both' | 'right' | 'left';
+// These moved to the domain when saved bits started storing them — a bit records the
+// practice settings it was saved with, and the domain may not import from state.
+// Re-exported here so screens keep importing them from where they always have.
+export { ACTIVE_HANDS, TEMPO_MULTIPLIERS };
+export type { ActiveHand, PracticeSettings, TempoMultiplier };
 
 interface PlayViewState {
   activePieceId: string | null;
@@ -33,6 +42,24 @@ interface PlayViewState {
    * gesture; the centred play button hides while it is true.
    */
   scoreMoving: boolean;
+  /**
+   * The bit currently being practised, or null in ordinary play view. Driven by
+   * BIT_ENTERED from the WebView, which owns the armed loop.
+   *
+   * Non-null puts the toolbar in bit mode: no back button, no loop button, and a
+   * leave/delete pair in their place.
+   */
+  activeBitId: string | null;
+  /**
+   * Hand, speed and metronome as they were just before the first bit was entered,
+   * restored on leaving.
+   *
+   * A bit owns its practice settings, so entering one overwrites the live ones. Without
+   * this snapshot, visiting a slow left-hand bit would silently leave the whole piece
+   * slow and left-handed with nothing on screen to explain it. Captured once — hopping
+   * bit to bit must not overwrite it with the previous bit's values.
+   */
+  preBitSettings: PracticeSettings | null;
 
   setActivePieceId: (id: string | null) => void;
   setWebViewReady: (ready: boolean) => void;
@@ -46,6 +73,8 @@ interface PlayViewState {
   setActiveHand: (h: ActiveHand) => void;
   setCurrentSectionIndex: (index: number | null) => void;
   setScoreMoving: (moving: boolean) => void;
+  setActiveBitId: (id: string | null) => void;
+  setPreBitSettings: (settings: PracticeSettings | null) => void;
   reset: () => void;
 }
 
@@ -62,6 +91,8 @@ const initial = {
   activeHand: 'both' as ActiveHand,
   currentSectionIndex: null,
   scoreMoving: false,
+  activeBitId: null,
+  preBitSettings: null,
 };
 
 export const usePlayViewStore = create<PlayViewState>()((set) => ({
@@ -78,5 +109,7 @@ export const usePlayViewStore = create<PlayViewState>()((set) => ({
   setActiveHand: (h) => set({ activeHand: h }),
   setCurrentSectionIndex: (index) => set({ currentSectionIndex: index }),
   setScoreMoving: (moving) => set({ scoreMoving: moving }),
+  setActiveBitId: (id) => set({ activeBitId: id }),
+  setPreBitSettings: (settings) => set({ preBitSettings: settings }),
   reset: () => set(initial),
 }));

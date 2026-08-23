@@ -10,19 +10,23 @@ import {
   mdiMusicNoteOutline,
   mdiRepeat,
   mdiSpeedometer,
+  mdiToyBrickPlus,
 } from '@mdi/js';
+import * as Crypto from 'expo-crypto';
 import { router, Stack, useLocalSearchParams } from 'expo-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Animated, ActivityIndicator, Text, TouchableOpacity, View } from 'react-native';
+import { Alert, Animated, ActivityIndicator, Text, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import WebView, { type WebViewMessageEvent } from 'react-native-webview';
 import { useTranslation } from 'react-i18next';
 
 import { AppIcon } from '@components/AppIcon';
+import { BitModeButtons } from '@components/BitModeButtons';
 import { CenterPlayButton } from '@components/CenterPlayButton';
 import { SectionLabel } from '@components/SectionLabel';
 import { ToolbarShell } from '@components/ToolbarShell';
 import { pieceRepository } from '@data/index';
+import { BIT_MAX_ROWS, type Bit } from '@domain/bits';
 import type { Section } from '@domain/sections';
 import { Colors, SectionColors } from '@theme/colors';
 import { SCORE_WEB_HTML } from '@score-web/html';
@@ -30,8 +34,10 @@ import type { WebToNativeMessage } from '@score-web/messageProtocol';
 import { useCountInSync } from '@score-web/useCountInSync';
 import { usePiecesStore } from '@state/piecesStore';
 import {
+  ACTIVE_HANDS,
   TEMPO_MULTIPLIERS,
   type ActiveHand,
+  type PracticeSettings,
   type TempoMultiplier,
   usePlayViewStore,
 } from '@state/playViewStore';
@@ -45,8 +51,6 @@ const MULTIPLIER_LABEL: Record<number, string> = {
 const SPEED_PANEL_WIDTH = 132;
 const HAND_PANEL_WIDTH = 132; // 3 × 44 px
 
-const HAND_OPTIONS: ActiveHand[] = ['both', 'left', 'right'];
-
 const HAND_ICON: Record<ActiveHand, string> = {
   both: mdiHandClap,
   left: mdiHandBackLeft,
@@ -59,6 +63,7 @@ export default function PlayView() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const piece = usePiecesStore((s) => (id ? s.piecesById[id] : undefined));
   const touchPiece = usePiecesStore((s) => s.touchPiece);
+  const setPieceBits = usePiecesStore((s) => s.setBits);
 
   const webViewReady = usePlayViewStore((s) => s.webViewReady);
   const isLoadingScore = usePlayViewStore((s) => s.isLoadingScore);
@@ -71,6 +76,8 @@ export default function PlayView() {
   const activeHand = usePlayViewStore((s) => s.activeHand);
   const currentSectionIndex = usePlayViewStore((s) => s.currentSectionIndex);
   const scoreMoving = usePlayViewStore((s) => s.scoreMoving);
+  const activeBitId = usePlayViewStore((s) => s.activeBitId);
+  const preBitSettings = usePlayViewStore((s) => s.preBitSettings);
 
   const setWebViewReady = usePlayViewStore((s) => s.setWebViewReady);
   const setLoadingScore = usePlayViewStore((s) => s.setLoadingScore);
@@ -83,6 +90,8 @@ export default function PlayView() {
   const setActiveHand = usePlayViewStore((s) => s.setActiveHand);
   const setCurrentSectionIndex = usePlayViewStore((s) => s.setCurrentSectionIndex);
   const setScoreMoving = usePlayViewStore((s) => s.setScoreMoving);
+  const setActiveBitId = usePlayViewStore((s) => s.setActiveBitId);
+  const setPreBitSettings = usePlayViewStore((s) => s.setPreBitSettings);
   const reset = usePlayViewStore((s) => s.reset);
 
   const [speedOpen, setSpeedOpen] = useState(false);
@@ -106,16 +115,44 @@ export default function PlayView() {
   // as the 100% reference the multiplier applies to. Undefined → fall back to the
   // score BPM reported by the WebView.
   const overrideBpmRef = useRef<number | undefined>(undefined);
+  // Read by sendXml, which must not depend on the piece object itself — see the load
+  // effect below.
+  const pieceRef = useRef(piece);
   const sectionsRef = useRef<Section[] | undefined>(undefined);
+  // Bits and the three practice settings are all read from inside the message handler
+  // and the write-back helpers, which must not be recreated on every settings change.
+  const bitsRef = useRef<Bit[] | undefined>(undefined);
+  const activeBitIdRef = useRef<string | null>(null);
+  const activeHandRef = useRef<ActiveHand>('both');
+  const metronomeOnRef = useRef(false);
+  const preBitSettingsRef = useRef<PracticeSettings | null>(null);
   useEffect(() => {
     scoreBpmRef.current = scoreBpm;
   }, [scoreBpm]);
+  useEffect(() => {
+    pieceRef.current = piece;
+  }, [piece]);
   useEffect(() => {
     sectionsRef.current = piece?.sections;
   }, [piece?.sections]);
   useEffect(() => {
     tempoMultiplierRef.current = tempoMultiplier;
   }, [tempoMultiplier]);
+  useEffect(() => {
+    bitsRef.current = piece?.bits;
+  }, [piece?.bits]);
+  useEffect(() => {
+    activeBitIdRef.current = activeBitId;
+  }, [activeBitId]);
+  useEffect(() => {
+    activeHandRef.current = activeHand;
+  }, [activeHand]);
+  useEffect(() => {
+    metronomeOnRef.current = metronomeOn;
+  }, [metronomeOn]);
+  useEffect(() => {
+    preBitSettingsRef.current = preBitSettings;
+  }, [preBitSettings]);
   useEffect(() => {
     overrideBpmRef.current = piece?.targetBpm ?? piece?.importedBpm;
   }, [piece?.targetBpm, piece?.importedBpm]);
@@ -124,6 +161,57 @@ export default function PlayView() {
   useEffect(() => {
     if (id) void touchPiece(id);
   }, [id, touchPiece]);
+
+  /**
+   * Applies a set of practice settings, injecting only what actually differs.
+   *
+   * The guard is not an optimisation: `__rn_set_active_hand` rebuilds the Tone.Part and
+   * commits any glide in flight, so re-asserting the hand a bit was already using would
+   * snap the score to the bit instead of letting it slide there. Metronome has no setter
+   * on the web side either — only a toggle — so "differs" is the only safe test.
+   */
+  const applyPracticeSettings = useCallback(
+    (next: PracticeSettings) => {
+      if (next.hand !== activeHandRef.current) {
+        setActiveHand(next.hand);
+        webViewRef.current?.injectJavaScript(
+          `window.__rn_set_active_hand(${JSON.stringify(next.hand)});void 0;`,
+        );
+      }
+      if (next.tempoMultiplier !== tempoMultiplierRef.current) {
+        setTempoMultiplier(next.tempoMultiplier);
+        const reference = overrideBpmRef.current ?? scoreBpmRef.current;
+        webViewRef.current?.injectJavaScript(
+          `window.__rn_set_tempo(${Math.round(reference * next.tempoMultiplier)});void 0;`,
+        );
+      }
+      if (next.metronome !== metronomeOnRef.current) {
+        setMetronomeOn(next.metronome);
+        webViewRef.current?.injectJavaScript('window.__rn_toggle_metronome();void 0;');
+      }
+    },
+    [setActiveHand, setTempoMultiplier, setMetronomeOn],
+  );
+
+  /**
+   * Persists a practice-setting change onto the armed bit.
+   *
+   * A bit is a live preset, not a snapshot with a save button — changing the hand inside
+   * one means the bit is now a left-hand bit. Deliberately does *not* re-send the bit
+   * list to the WebView: the score draws nothing from these fields.
+   */
+  const writeBackToActiveBit = useCallback(
+    (patch: Partial<Pick<Bit, 'hand' | 'tempoMultiplier' | 'metronome'>>) => {
+      const bitId = activeBitIdRef.current;
+      const bits = bitsRef.current;
+      if (!id || bitId === null || !bits) return;
+      void setPieceBits(
+        id,
+        bits.map((bit) => (bit.id === bitId ? { ...bit, ...patch } : bit)),
+      );
+    },
+    [id, setPieceBits],
+  );
 
   const toggleSpeed = useCallback(() => {
     const opening = !speedOpen;
@@ -207,29 +295,65 @@ export default function PlayView() {
       webViewRef.current?.injectJavaScript(
         `window.__rn_set_active_hand(${JSON.stringify(hand)});void 0;`,
       );
+      writeBackToActiveBit({ hand });
     },
-    [setActiveHand, handAnim],
+    [setActiveHand, handAnim, writeBackToActiveBit],
   );
 
   const sendXml = useCallback(async () => {
-    if (!piece) return;
+    const current = pieceRef.current;
+    if (!current) return;
     setLoadingScore(true);
     setScoreError(null);
     try {
-      const xml = await pieceRepository.readXml(piece);
+      const xml = await pieceRepository.readXml(current);
       // injectJavaScript is the correct native→web channel; see compound-docs/osmd-webview.md
       webViewRef.current?.injectJavaScript(`window.__rn_load_xml(${JSON.stringify(xml)});void 0;`);
     } catch (err) {
       setLoadingScore(false);
       setScoreError(err instanceof Error ? err.message : t('playView.failedToReadScore'));
     }
-  }, [piece, setLoadingScore, setScoreError, t]);
+  }, [setLoadingScore, setScoreError, t]);
 
+  // Keyed on the XML file, deliberately not on `piece`.
+  //
+  // The piece object is replaced on every write to it, and the PlayView writes to it
+  // constantly now that bits exist — creating one, deleting one, or changing a hand or
+  // speed from inside one. Depending on `piece` here (which is what closing over it in
+  // `sendXml` amounted to) reloaded the entire score on each of those: a "Loading score"
+  // flash, `disposePlayback` wiping the armed bit and the marker strip on the web side
+  // while the native toolbar still believed it was in a bit, and a leave button that then
+  // did nothing because the web side had nothing left to leave.
+  //
+  // The XML is immutable after import, so its filename changing is the only thing that
+  // genuinely means "load a different score".
   useEffect(() => {
-    if (webViewReady) void sendXml();
-  }, [webViewReady, sendXml]);
+    if (webViewReady && piece?.xmlFilename) void sendXml();
+  }, [webViewReady, piece?.xmlFilename, sendXml]);
 
   useCountInSync(webViewRef, webViewReady);
+
+  /**
+   * Deletes a bit, by id rather than "the armed one": a long press reaches any marker on
+   * the strip, and deleting a bit you are not currently inside is the common case.
+   */
+  const deleteBit = useCallback(
+    (bitId: string) => {
+      if (!id) return;
+      const remaining = (bitsRef.current ?? []).filter((bit) => bit.id !== bitId);
+      // Leave first, and only when it is the armed bit being deleted: leaving is what
+      // clears the loop and restores the settings, and it can only do that while the bit
+      // it is holding still exists. Then redraw the strip without it.
+      if (activeBitIdRef.current === bitId) {
+        webViewRef.current?.injectJavaScript('window.__rn_leave_bit();void 0;');
+      }
+      webViewRef.current?.injectJavaScript(
+        `window.__rn_set_bits(${JSON.stringify(JSON.stringify(remaining))});void 0;`,
+      );
+      void setPieceBits(id, remaining);
+    },
+    [id, setPieceBits],
+  );
 
   const handleMessage = useCallback(
     (event: WebViewMessageEvent) => {
@@ -268,6 +392,11 @@ export default function PlayView() {
           webViewRef.current?.injectJavaScript(
             `window.__rn_set_sections(${JSON.stringify(JSON.stringify(payload))});void 0;`,
           );
+          // Same rule, same reason: bits are stored in ticks and resolve against the
+          // note grid the load just built.
+          webViewRef.current?.injectJavaScript(
+            `window.__rn_set_bits(${JSON.stringify(JSON.stringify(bitsRef.current ?? []))});void 0;`,
+          );
           break;
         }
         case 'ERROR':
@@ -292,6 +421,74 @@ export default function PlayView() {
         case 'SCORE_MOTION':
           setScoreMoving(msg.payload);
           break;
+        case 'BIT_CREATED': {
+          if (!id) break;
+          // The practice state at creation *is* the bit's setting: the passage was
+          // already being worked on this way, which is the reason it is worth saving.
+          const created: Bit = {
+            id: msg.payload.id,
+            startTicks: msg.payload.startTicks,
+            endTicks: msg.payload.endTicks,
+            hand: activeHandRef.current,
+            tempoMultiplier: tempoMultiplierRef.current,
+            metronome: metronomeOnRef.current,
+          };
+          void setPieceBits(id, [...(bitsRef.current ?? []), created]);
+          break;
+        }
+        case 'BIT_LIMIT_REACHED':
+          // The marker strip is capped, and a refused create has to say so — silently
+          // collapsing the new marker onto an occupied row would leave a bit the user
+          // cannot see or reach.
+          Alert.alert(
+            t('playView.bitLimitTitle'),
+            t('playView.bitLimitMessage', { max: BIT_MAX_ROWS }),
+            [{ text: t('common.ok') }],
+          );
+          break;
+        case 'BIT_LONG_PRESSED': {
+          // Long press is the delete gesture, and it is still confirmed: it is the only
+          // way to change a bit, but a bit costs two handle drags to place, and a press
+          // held a moment too long over the strip should not lose one.
+          const pressedId = msg.payload.id;
+          Alert.alert(t('playView.deleteBitTitle'), t('playView.deleteBitMessage'), [
+            { text: t('common.cancel'), style: 'cancel' },
+            {
+              text: t('common.remove'),
+              style: 'destructive',
+              onPress: () => deleteBit(pressedId),
+            },
+          ]);
+          break;
+        }
+        case 'BIT_ENTERED': {
+          const enteredId = msg.payload?.id ?? null;
+          if (enteredId === null) {
+            // Leaving restores the settings from before the *first* bit was entered, so
+            // a visit never silently leaves the whole piece slow or one-handed.
+            const restore = preBitSettingsRef.current;
+            setActiveBitId(null);
+            setPreBitSettings(null);
+            if (restore) applyPracticeSettings(restore);
+            break;
+          }
+          // Captured once. Hopping bit to bit must not overwrite the snapshot with the
+          // previous bit's values, or leaving would restore those instead.
+          if (preBitSettingsRef.current === null) {
+            setPreBitSettings({
+              hand: activeHandRef.current,
+              tempoMultiplier: tempoMultiplierRef.current,
+              metronome: metronomeOnRef.current,
+            });
+          }
+          setActiveBitId(enteredId);
+          // Absent for a bit created a moment ago: BIT_CREATED's store write has not
+          // landed yet. Nothing to apply in that case — a new bit's settings are the
+          // ones already in force.
+          const entered = bitsRef.current?.find((bit) => bit.id === enteredId);
+          if (entered) applyPracticeSettings(entered);
+          break;
+        }
       }
     },
     [
@@ -302,6 +499,13 @@ export default function PlayView() {
       setLoopActive,
       setCurrentSectionIndex,
       setScoreMoving,
+      setActiveBitId,
+      setPreBitSettings,
+      applyPracticeSettings,
+      setPieceBits,
+      id,
+      t,
+      deleteBit,
     ],
   );
 
@@ -314,8 +518,9 @@ export default function PlayView() {
       const reference = overrideBpmRef.current ?? scoreBpmRef.current;
       const bpm = Math.round(reference * m);
       webViewRef.current?.injectJavaScript(`window.__rn_set_tempo(${bpm});void 0;`);
+      writeBackToActiveBit({ tempoMultiplier: m });
     },
-    [setTempoMultiplier, isPlaying],
+    [setTempoMultiplier, isPlaying, writeBackToActiveBit],
   );
 
   const handleLoopToggle = useCallback(() => {
@@ -331,11 +536,30 @@ export default function PlayView() {
   const handleMetronomeToggle = useCallback(() => {
     webViewRef.current?.injectJavaScript('window.__rn_toggle_metronome();void 0;');
     setMetronomeOn(!metronomeOn);
-  }, [metronomeOn, setMetronomeOn]);
+    writeBackToActiveBit({ metronome: !metronomeOn });
+  }, [metronomeOn, setMetronomeOn, writeBackToActiveBit]);
+
+  /**
+   * Saves the live loop as a bit. The id is minted here because `crypto.randomUUID` is
+   * not dependable in every WebView this ships to, and a bit's handle has to survive
+   * being written to disk.
+   */
+  const handleCreateBit = useCallback(() => {
+    webViewRef.current?.injectJavaScript(
+      `window.__rn_create_bit(${JSON.stringify(Crypto.randomUUID())});void 0;`,
+    );
+  }, []);
+
+  const handleLeaveBit = useCallback(() => {
+    webViewRef.current?.injectJavaScript('window.__rn_leave_bit();void 0;');
+  }, []);
 
   const referenceBpm = piece?.targetBpm ?? piece?.importedBpm ?? scoreBpm;
   const effectiveBpm = Math.round(referenceBpm * tempoMultiplier);
   const scoreReady = webViewReady && !isLoadingScore && !scoreError;
+  // Bit mode. The WebView owns the armed loop, so this follows BIT_ENTERED rather than
+  // being set by the tap that caused it.
+  const inBit = activeBitId !== null;
 
   const sections = piece?.sections;
   // A single section is the "no readable form" case: every piece has at least one
@@ -411,22 +635,66 @@ export default function PlayView() {
             playing, leaving the notation alone; tapping the score brings it back. */}
           {scoreReady && (
             <ToolbarShell ref={toolbarRef} hidden={isPlaying}>
-              {/* Back */}
-              <TouchableOpacity onPress={() => router.back()} hitSlop={12} className="p-1">
-                <AppIcon path={mdiArrowLeft} size={24} color={Colors.icon} />
-              </TouchableOpacity>
+              {/* Only the top of the toolbar swaps between modes. Metronome, hand and
+                speed are shared and keep their positions, because a bit owns those
+                three settings and editing them from inside it is the point. */}
+              {inBit ? (
+                <BitModeButtons onLeave={handleLeaveBit} />
+              ) : (
+                <>
+                  {/* Back */}
+                  <TouchableOpacity
+                    onPress={() => router.back()}
+                    hitSlop={12}
+                    className="p-1"
+                    accessibilityRole="button"
+                    accessibilityLabel={t('playView.back')}
+                  >
+                    <AppIcon path={mdiArrowLeft} size={24} color={Colors.icon} />
+                  </TouchableOpacity>
 
-              {/* Loop select / clear */}
-              <TouchableOpacity onPress={handleLoopToggle} hitSlop={8} className="p-1.5">
-                <AppIcon
-                  path={loopActive ? mdiClose : mdiRepeat}
-                  size={26}
-                  color={loopActive ? Colors.primary : Colors.icon}
-                />
-              </TouchableOpacity>
+                  {/* Loop select / clear */}
+                  <TouchableOpacity
+                    onPress={handleLoopToggle}
+                    hitSlop={8}
+                    className="p-1.5"
+                    accessibilityRole="button"
+                    accessibilityLabel={
+                      loopActive ? t('playView.clearLoop') : t('playView.createLoop')
+                    }
+                  >
+                    <AppIcon
+                      path={loopActive ? mdiClose : mdiRepeat}
+                      size={26}
+                      color={loopActive ? Colors.primary : Colors.icon}
+                    />
+                  </TouchableOpacity>
+
+                  {/* Save the loop as a bit. Present only while there is a loop to save,
+                    so it takes a slot rather than replacing the loop button — clearing a
+                    loop must stay possible without saving it first. */}
+                  {loopActive && (
+                    <TouchableOpacity
+                      onPress={handleCreateBit}
+                      hitSlop={8}
+                      className="p-1.5"
+                      accessibilityRole="button"
+                      accessibilityLabel={t('playView.createBit')}
+                    >
+                      <AppIcon path={mdiToyBrickPlus} size={26} color={Colors.icon} />
+                    </TouchableOpacity>
+                  )}
+                </>
+              )}
 
               {/* Metronome toggle */}
-              <TouchableOpacity onPress={handleMetronomeToggle} hitSlop={8} className="p-1.5">
+              <TouchableOpacity
+                onPress={handleMetronomeToggle}
+                hitSlop={8}
+                className="p-1.5"
+                accessibilityRole="button"
+                accessibilityLabel={t('playView.metronome')}
+              >
                 <AppIcon
                   path={metronomeOn ? mdiMetronome : mdiMetronomeTick}
                   size={26}
@@ -436,7 +704,13 @@ export default function PlayView() {
 
               {/* Hand selector trigger */}
               <View ref={handTriggerRef}>
-                <TouchableOpacity onPress={toggleHand} hitSlop={8} className="p-1.5">
+                <TouchableOpacity
+                  onPress={toggleHand}
+                  hitSlop={8}
+                  className="p-1.5"
+                  accessibilityRole="button"
+                  accessibilityLabel={t('playView.handSelection')}
+                >
                   <AppIcon
                     path={HAND_ICON[activeHand]}
                     size={22}
@@ -451,6 +725,8 @@ export default function PlayView() {
                   onPress={toggleSpeed}
                   hitSlop={8}
                   className="items-center px-2 py-1"
+                  accessibilityRole="button"
+                  accessibilityLabel={t('playView.speed')}
                 >
                   <View style={{ height: 22, justifyContent: 'center', alignItems: 'center' }}>
                     {speedOpen ? (
@@ -581,7 +857,7 @@ export default function PlayView() {
               shadowOffset: { width: 2, height: 0 },
             }}
           >
-            {HAND_OPTIONS.map((hand) => {
+            {ACTIVE_HANDS.map((hand) => {
               const isActive = activeHand === hand;
               return (
                 <TouchableOpacity

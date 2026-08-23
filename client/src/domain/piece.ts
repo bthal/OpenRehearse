@@ -1,3 +1,4 @@
+import type { Bit } from './bits';
 import type { Section } from './sections';
 
 export interface Piece {
@@ -35,6 +36,16 @@ export interface Piece {
    * `specs/features/section-detection.md`.
    */
   sections?: Section[];
+  /**
+   * Loop regions the user saved on this piece, in no particular order — bits are
+   * nameless and unordered, and the marker strip derives its own layout from their
+   * spans (`domain/bits.ts`).
+   *
+   * Optional for the same reason `sections` is: a piece in flight during import has
+   * none yet. Anything that has been through `PieceRepository` has run `normaliseBits`
+   * and carries an array, empty or not.
+   */
+  bits?: Bit[];
 }
 
 /**
@@ -48,11 +59,4 @@ export function isPieceComplete(piece: Piece): boolean {
   const hasComposer = (piece.composer ?? '').trim() !== '';
   const hasSpeed = piece.importedBpm != null || piece.targetBpm != null;
   return hasTitle && hasComposer && hasSpeed;
-}
-
-/** Loop region in musical time. Unit is determined by the score renderer (Phase 3). */
-export interface Bit {
-  pieceId: string;
-  start: number;
-  end: number;
 }
