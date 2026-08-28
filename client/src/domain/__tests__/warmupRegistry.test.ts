@@ -114,6 +114,7 @@ describe('routines containing an unrecognised exercise', () => {
   // threw, taking the whole routine down rather than the one block.
   const routine: Routine = {
     id: 'r',
+    instrument: 'piano' as const,
     title: 'r',
     blocks: [
       {

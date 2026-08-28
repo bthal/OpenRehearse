@@ -40,6 +40,7 @@ function pickupScore(count = 12): string {
 
 const piece: Piece = {
   id: 'p1',
+  instrument: 'piano' as const,
   title: 'Prelude',
   composer: 'Bach',
   xmlFilename: 'p1.xml',

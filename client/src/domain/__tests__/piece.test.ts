@@ -3,6 +3,7 @@ import { isPieceComplete, type Piece } from '../piece';
 function makePiece(overrides: Partial<Piece> = {}): Piece {
   return {
     id: 'p1',
+    instrument: 'piano' as const,
     title: 'Prelude',
     composer: 'Bach',
     xmlFilename: 'p1.xml',

@@ -1,10 +1,45 @@
 import type { Bit } from './bits';
+import type { InstrumentId } from './instrumentRegistry';
 import type { Section } from './sections';
 
 export interface Piece {
   id: string;
   title: string;
   composer: string | null;
+  /**
+   * The instrument this piece is practised on. Governs the samples it sounds through,
+   * the pitch it sounds at, and whether the hand filter means anything.
+   *
+   * Not optional past the repository: pieces stored before instruments existed are
+   * normalised to `piano` on read (`normaliseInstrumentId`), the same contract
+   * `sections` and `bits` get, so nothing downstream defends against `undefined`.
+   */
+  instrument: InstrumentId;
+  /**
+   * The MusicXML part id being practised, for a score with more than one part.
+   * `undefined` for single-part scores and for anything imported before part
+   * selection existed — both mean "the whole score".
+   *
+   * The part **id**, never its position: positions shift between exports of the same
+   * score, ids do not. Nothing is stripped from the stored XML; this is a filter, so
+   * the choice stays changeable and accompaniment stays possible later.
+   */
+  partId?: string;
+  /**
+   * Semitones added to the engraved score so it is readable on `instrument` — why the
+   * notes moved, not a preference. Derived at import from the instrument and the
+   * file's `<transpose>` element (`defaultBaseTranspose`) and never edited directly;
+   * the user's own shifts go to `transposePracticeSemitones`.
+   *
+   * Defaults to 0, which is also what every piano piece has.
+   */
+  transposeBaseSemitones?: number;
+  /**
+   * Semitones the user added on top, to drill the piece in another key. Editable, and
+   * what the modal's Reset control returns to 0 — leaving the base in place, so reset
+   * on a clarinet piece means "back to how I read this", not "back to concert pitch".
+   */
+  transposePracticeSemitones?: number;
   /** Basename of the XML file in app-private storage — absolute path is a storage concern. */
   xmlFilename: string;
   importedAt: string; // ISO 8601

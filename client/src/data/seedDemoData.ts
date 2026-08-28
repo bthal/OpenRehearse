@@ -5,6 +5,7 @@ import { scrapeMusicXmlMetadata, scrapeTempoBpm } from '@domain/musicxml';
 import { sectionsFromXml } from '@domain/sectionEditing';
 import { SectionColors } from '@theme/colors';
 import { pieceRepository } from './index';
+import { DEFAULT_INSTRUMENT } from '@domain/instrumentRegistry';
 import { extractXmlFromMxl } from './mxlExtract';
 
 // Stable ID so we can check existence without a marker file.
@@ -38,6 +39,9 @@ export async function seedDemoDataIfNeeded(): Promise<void> {
     await pieceRepository.save(
       {
         id: DEMO_PIECE_ID,
+        // The demo stays a piano piece: it exists to prove the app works on a fresh
+        // install, not to be practised. See specs/features/instruments.md.
+        instrument: DEFAULT_INSTRUMENT,
         title: metadata.title || 'Prelude I in C major',
         composer: metadata.composer,
         xmlFilename: DEMO_PIECE_ID + '.xml',

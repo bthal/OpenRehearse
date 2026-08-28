@@ -2,6 +2,7 @@ import * as Crypto from 'expo-crypto';
 import { create } from 'zustand';
 
 import type { Bit } from '@domain/bits';
+import { DEFAULT_INSTRUMENT } from '@domain/instrumentRegistry';
 import type { Piece } from '@domain/piece';
 import { scrapeMusicXmlMetadata, scrapeTempoBpm, validateMusicXml } from '@domain/musicxml';
 import { sectionsFromXml } from '@domain/sectionEditing';
@@ -90,6 +91,9 @@ export const usePiecesStore = create<PiecesState>()((set, get) => ({
       title,
       composer: metadata.composer,
       xmlFilename: id + '.xml',
+      // Instrument detection and the part picker arrive with the import slice; every
+      // score imported until then is a piano piece, as every existing one already is.
+      instrument: DEFAULT_INSTRUMENT,
       importedAt: new Date().toISOString(),
       // Only set when the file actually declares a tempo — a tempo-less score
       // keeps importedBpm undefined and plays at OSMD's own default.

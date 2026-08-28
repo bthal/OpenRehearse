@@ -4,6 +4,7 @@ import type { Routine } from '../routine';
 function makeRoutine(overrides: Partial<Routine> = {}): Routine {
   return {
     id: 'test-id',
+    instrument: 'piano' as const,
     title: 'Test Routine',
     createdAt: '2026-01-01T00:00:00Z',
     blocks: [],

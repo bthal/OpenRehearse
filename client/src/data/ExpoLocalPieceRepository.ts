@@ -2,6 +2,7 @@ import * as FileSystem from 'expo-file-system/legacy';
 import * as SQLite from 'expo-sqlite';
 
 import { normaliseBits, type Bit } from '@domain/bits';
+import { normaliseInstrumentId } from '@domain/instrumentRegistry';
 import type { Piece } from '@domain/piece';
 import { normaliseSections } from '@domain/sectionEditing';
 import type { Section } from '@domain/sections';
@@ -27,6 +28,14 @@ interface PieceRow {
   sections: string | null;
   /** JSON-encoded Bit[]; NULL until the piece's first bit is saved. */
   bits: string | null;
+  /** InstrumentId; NULL for pieces imported before instruments existed (= piano). */
+  instrument: string | null;
+  /** MusicXML part id being practised; NULL means the whole score. */
+  part_id: string | null;
+  /** Semitones making the score readable on the instrument; NULL = 0. */
+  transpose_base: number | null;
+  /** Semitones the user added on top; NULL = 0. */
+  transpose_practice: number | null;
 }
 
 export class ExpoLocalPieceRepository implements PieceRepository {
@@ -56,6 +65,10 @@ export class ExpoLocalPieceRepository implements PieceRepository {
       'ALTER TABLE pieces ADD COLUMN target_bpm INTEGER',
       'ALTER TABLE pieces ADD COLUMN sections TEXT',
       'ALTER TABLE pieces ADD COLUMN bits TEXT',
+      'ALTER TABLE pieces ADD COLUMN instrument TEXT',
+      'ALTER TABLE pieces ADD COLUMN part_id TEXT',
+      'ALTER TABLE pieces ADD COLUMN transpose_base INTEGER',
+      'ALTER TABLE pieces ADD COLUMN transpose_practice INTEGER',
     ]) {
       try {
         await db.execAsync(sql);
@@ -72,7 +85,7 @@ export class ExpoLocalPieceRepository implements PieceRepository {
   }
 
   private static readonly SELECT_COLUMNS =
-    'id, title, composer, xml_filename, imported_at, last_opened_at, imported_bpm, target_bpm, sections, bits';
+    'id, title, composer, xml_filename, imported_at, last_opened_at, imported_bpm, target_bpm, sections, bits, instrument, part_id, transpose_base, transpose_practice';
 
   /**
    * A corrupt sections blob degrades the piece to "never analysed" rather than
@@ -124,6 +137,13 @@ export class ExpoLocalPieceRepository implements PieceRepository {
       // Normalised on read like sections, so nothing downstream has to defend against a
       // half-written bit. A null column stays null until the user saves their first bit.
       bits: ExpoLocalPieceRepository.parseBits(r.bits),
+      // Normalised on read like sections and bits: a NULL column (imported before
+      // instruments existed) and a rotted one both become piano, so nothing past this
+      // point has to ask whether a piece has an instrument.
+      instrument: normaliseInstrumentId(r.instrument),
+      ...(r.part_id ? { partId: r.part_id } : {}),
+      ...(r.transpose_base != null ? { transposeBaseSemitones: r.transpose_base } : {}),
+      ...(r.transpose_practice != null ? { transposePracticeSemitones: r.transpose_practice } : {}),
     };
   }
 
@@ -161,7 +181,7 @@ export class ExpoLocalPieceRepository implements PieceRepository {
     try {
       const db = await this.getDb();
       await db.runAsync(
-        'INSERT INTO pieces (id, title, composer, xml_filename, imported_at, imported_bpm, target_bpm, sections, bits) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        'INSERT INTO pieces (id, title, composer, xml_filename, imported_at, imported_bpm, target_bpm, sections, bits, instrument, part_id, transpose_base, transpose_practice) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
         piece.id,
         piece.title,
         piece.composer ?? null,
@@ -171,6 +191,10 @@ export class ExpoLocalPieceRepository implements PieceRepository {
         piece.targetBpm ?? null,
         piece.sections ? JSON.stringify(piece.sections) : null,
         piece.bits && piece.bits.length > 0 ? JSON.stringify(piece.bits) : null,
+        piece.instrument,
+        piece.partId ?? null,
+        piece.transposeBaseSemitones ?? null,
+        piece.transposePracticeSemitones ?? null,
       );
     } catch (err) {
       // Roll back the file write to avoid orphaned XML files
@@ -188,12 +212,20 @@ export class ExpoLocalPieceRepository implements PieceRepository {
       // Same COALESCE guard for bits, with one difference that matters: an *empty*
       // array is still written, as '[]'. Deleting a piece's last bit has to be able to
       // clear the column, so only `undefined` means "leave it alone".
-      'UPDATE pieces SET title = ?, composer = ?, target_bpm = ?, sections = COALESCE(?, sections), bits = COALESCE(?, bits) WHERE id = ?',
+      // Instrument, part and both transpositions take the same COALESCE guard for the
+      // same reason: a caller holding a Piece that never went through rowToPiece has
+      // them undefined, and that has to leave the stored values alone rather than
+      // resetting the user's clarinet piece to piano at concert pitch.
+      'UPDATE pieces SET title = ?, composer = ?, target_bpm = ?, sections = COALESCE(?, sections), bits = COALESCE(?, bits), instrument = COALESCE(?, instrument), part_id = COALESCE(?, part_id), transpose_base = COALESCE(?, transpose_base), transpose_practice = COALESCE(?, transpose_practice) WHERE id = ?',
       piece.title,
       piece.composer ?? null,
       piece.targetBpm ?? null,
       piece.sections ? JSON.stringify(piece.sections) : null,
       piece.bits ? JSON.stringify(piece.bits) : null,
+      piece.instrument ?? null,
+      piece.partId ?? null,
+      piece.transposeBaseSemitones ?? null,
+      piece.transposePracticeSemitones ?? null,
       piece.id,
     );
   }

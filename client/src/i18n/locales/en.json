@@ -13,6 +13,10 @@
     "couldNotRender": "Could not render score",
     "done": "Done"
   },
+  "instruments": {
+    "piano": "Piano",
+    "clarinetBb": "Clarinet in B♭"
+  },
   "dashboard": {
     "title": "OpenRehearse",
     "warmUps": "Warm-ups",

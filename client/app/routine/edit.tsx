@@ -7,6 +7,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useTranslation } from 'react-i18next';
 
 import { AppIcon } from '@components/AppIcon';
+import { DEFAULT_INSTRUMENT } from '@domain/instrumentRegistry';
 import {
   PAUSE_MEASURES,
   type ExerciseBlock,
@@ -217,6 +218,9 @@ export default function RoutineEditScreen() {
     await saveRoutine({
       id: existingRoutine?.id ?? Crypto.randomUUID(),
       title: title.trim(),
+      // Read-only once set, so an edit must carry the existing value through rather
+      // than re-deriving it. The create-time picker arrives with the warm-up slice.
+      instrument: existingRoutine?.instrument ?? DEFAULT_INSTRUMENT,
       blocks: cleanBlocks,
       createdAt: existingRoutine?.createdAt ?? new Date().toISOString(),
     });
