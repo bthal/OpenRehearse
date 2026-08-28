@@ -130,12 +130,13 @@ export const usePiecesStore = create<PiecesState>()((set, get) => ({
       title,
       composer: metadata.composer,
       xmlFilename: id + '.xml',
-      // Detection answers what the notation actually states and returns null when it
-      // states nothing; the modal then asks, exactly as it does for a missing composer.
-      // An unsettled piece is stored as piano so the field is never absent, but
-      // instrumentConfirmed keeps it incomplete until someone decides.
+      // Detection pre-selects; it does not decide. The modal asks whenever the
+      // selection leaves more than one legal instrument — which is every single-line
+      // score, however confident detection was, and no two-staff one. An unsettled
+      // piece is stored as piano so the field is never absent, but instrumentConfirmed
+      // keeps it incomplete until someone decides.
       instrument: guess.instrument ?? DEFAULT_INSTRUMENT,
-      instrumentConfirmed: guess.instrument !== null,
+      instrumentConfirmed: !guess.mustAskInstrument,
       ...(parts.length > 0 ? { parts } : {}),
       // Why the notes would move: read from the part the user will practise, once
       // that is known. Recomputed on the modal's save if they pick differently.

@@ -136,7 +136,11 @@ export default function Dashboard() {
   function handleEditPiece() {
     const id = selectedPieceIds[0] ?? null;
     setSelectedPieceIds([]);
-    setEditTarget(id ? { id, mode: 'edit' } : null);
+    const piece = id ? piecesById[id] : undefined;
+    // A piece whose import was interrupted before the instrument was settled is still
+    // incomplete, and the instrument is only ever answered in import mode — so Edit
+    // has to reopen that gate rather than a modal that can no longer ask.
+    setEditTarget(id && piece ? { id, mode: isPieceComplete(piece) ? 'edit' : 'import' } : null);
   }
 
   function handleRemovePieces() {

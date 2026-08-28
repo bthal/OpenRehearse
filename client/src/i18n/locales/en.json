@@ -156,8 +156,16 @@
     "instrumentUnknown": "The file does not say — pick the one you play this on.",
     "partLabel": "Part to practise",
     "partRequired": "Choose the part you play",
-    "partHint": "Only this part is shown and heard.",
-    "partFallback": "Part {{number}}"
+    "partHint": "Only this part is shown and heard, and it is fixed once imported.",
+    "partFallback": "Part {{number}}",
+    "instrumentFixed": "For {{instrument}}",
+    "instrumentFixedWithPart": "For {{instrument}} · {{part}}",
+    "instrumentFixedNote": "Chosen at import and kept for the life of the piece.",
+    "instrumentOnlyOption": "The only instrument this part can be practised on ({{reason}}).",
+    "refusalStaves": "two staves",
+    "refusalChords": "contains chords",
+    "refusalVoices": "two voices",
+    "refusalPolyphonic": "more than one line"
   },
   "warmUpRow": {
     "description": "Exercise"

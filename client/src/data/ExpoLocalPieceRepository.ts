@@ -4,6 +4,7 @@ import * as SQLite from 'expo-sqlite';
 import { normaliseBits, type Bit } from '@domain/bits';
 import { normaliseInstrumentId } from '@domain/instrumentRegistry';
 import type { ScorePart } from '@domain/musicxml';
+import { repairPieceInstrument } from '@domain/partCompatibility';
 import type { Piece } from '@domain/piece';
 import { normaliseSections } from '@domain/sectionEditing';
 import type { Section } from '@domain/sections';
@@ -141,6 +142,7 @@ export class ExpoLocalPieceRepository implements PieceRepository {
       ExpoLocalPieceRepository.parseSections(r.sections),
       SectionColors,
     );
+    const parts = ExpoLocalPieceRepository.parseParts(r.parts);
     return {
       id: r.id,
       title: r.title,
@@ -157,12 +159,20 @@ export class ExpoLocalPieceRepository implements PieceRepository {
       // Normalised on read like sections and bits: a NULL column (imported before
       // instruments existed) and a rotted one both become piano, so nothing past this
       // point has to ask whether a piece has an instrument.
-      instrument: normaliseInstrumentId(r.instrument),
+      //
+      // The repair extends the same seam to the compatibility rule. A piece's
+      // instrument is immutable after import, so this is not an edit the user could
+      // have made: it catches rows written before the rule existed, where a clarinet
+      // sitting on a two-staff part would sound every note of every chord through a
+      // one-note sampler. A part carrying no monophony flag is left exactly as it is.
+      instrument: repairPieceInstrument(
+        normaliseInstrumentId(r.instrument),
+        parts,
+        r.part_id ?? undefined,
+      ),
       // A corrupt parts blob costs the part picker its labels, not the piece — the
       // same trade parseSections makes.
-      ...(ExpoLocalPieceRepository.parseParts(r.parts)
-        ? { parts: ExpoLocalPieceRepository.parseParts(r.parts) as ScorePart[] }
-        : {}),
+      ...(parts ? { parts } : {}),
       // NULL means a legacy row: those were piano pieces and never needed asking.
       instrumentConfirmed: r.instrument_confirmed == null ? true : r.instrument_confirmed === 1,
       ...(r.part_id ? { partId: r.part_id } : {}),

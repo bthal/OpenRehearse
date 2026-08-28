@@ -12,7 +12,19 @@ import {
 
 import { useTranslation } from 'react-i18next';
 
-import { INSTRUMENT_IDS, INSTRUMENT_REGISTRY, type InstrumentId } from '@domain/instrumentRegistry';
+import {
+  DEFAULT_INSTRUMENT,
+  INSTRUMENT_IDS,
+  INSTRUMENT_REGISTRY,
+  type InstrumentId,
+} from '@domain/instrumentRegistry';
+import { instrumentFromPartName } from '@domain/instrumentDetect';
+import type { PolyphonyReason } from '@domain/musicxml';
+import {
+  legalInstrumentsForPart,
+  partRefusalReason,
+  practisedPart,
+} from '@domain/partCompatibility';
 import type { Piece } from '@domain/piece';
 import { normaliseSections, sectionsEqual } from '@domain/sectionEditing';
 import type { Section } from '@domain/sections';
@@ -62,6 +74,24 @@ function valuesEqual(a: FormValues, b: FormValues) {
  * the cap exists so the control has ends, not because 12 is musically special.
  */
 const TRANSPOSE_LIMIT = 12;
+
+/**
+ * The short phrase printed beside an instrument the part rules out — "two staves",
+ * "contains chords". A part whose verdict was stored without a reason falls back to
+ * the general statement rather than to a cause nobody observed.
+ */
+function refusalLabelKey(reason: PolyphonyReason | null): string {
+  switch (reason) {
+    case 'staves':
+      return 'pieceEdit.refusalStaves';
+    case 'chords':
+      return 'pieceEdit.refusalChords';
+    case 'voices':
+      return 'pieceEdit.refusalVoices';
+    default:
+      return 'pieceEdit.refusalPolyphonic';
+  }
+}
 
 const INPUT_BASE = 'rounded-lg border bg-slate-50 px-3 py-2 text-base text-slate-950';
 const BORDER_OK = 'border-slate-500/35';
@@ -126,6 +156,37 @@ function PieceEditForm({
   // there is no defensible default, so this gates submit exactly like a blank composer.
   const parts = piece.parts ?? [];
   const partError = parts.length > 1 && values.partId === '';
+
+  // Which line is being practised decides which instruments are possible, so the whole
+  // instrument block is derived from the part rather than held in state.
+  const selectedPart = practisedPart(parts, values.partId === '' ? undefined : values.partId);
+  const legalInstruments = legalInstrumentsForPart(selectedPart);
+  const askInstrument = legalInstruments.length > 1;
+  // Why there was nothing to ask — printed under the settled instrument during import
+  // so a one-option answer still explains itself.
+  const soleReason = askInstrument
+    ? null
+    : (INSTRUMENT_IDS.map((id) => partRefusalReason(id, selectedPart)).find((r) => r !== null) ??
+      null);
+  const partIndex = parts.findIndex((p) => p.id === (piece.partId ?? values.partId));
+  const partLabel =
+    (partIndex >= 0 ? parts[partIndex]?.name : null) ??
+    t('pieceEdit.partFallback', { number: Math.max(partIndex, 0) + 1 });
+
+  /**
+   * Choosing a part re-derives the instrument: its name is the best pre-selection
+   * available without reopening the score, and an instrument the new part cannot play
+   * has to give way rather than sit there selected and illegal.
+   */
+  function choosePart(id: string) {
+    setValues((prev) => {
+      const part = parts.find((p) => p.id === id);
+      const legal = legalInstrumentsForPart(part);
+      const preferred = instrumentFromPartName(part?.name) ?? prev.instrument;
+      const instrument = legal.includes(preferred) ? preferred : (legal[0] ?? DEFAULT_INSTRUMENT);
+      return { ...prev, partId: id, instrument };
+    });
+  }
   const isComplete = !titleError && !composerError && !speedError && !partError;
   const isDirty = !valuesEqual(values, initial) || sectionsDirty;
   // Import must be completed regardless of "dirtiness"; edit only saves real changes.
@@ -169,11 +230,9 @@ function PieceEditForm({
       });
       // Second write, deliberately: settling these re-reads the score to derive the
       // reading transposition, which the metadata edit above has no business doing.
-      if (
-        values.instrument !== piece.instrument ||
-        values.partId !== (piece.partId ?? '') ||
-        piece.instrumentConfirmed === false
-      ) {
+      // Import only — after that the instrument and the part are what the piece is,
+      // not settings on it, so there is nothing here to write again.
+      if (mode === 'import') {
         await setInstrumentAndPart(
           piece.id,
           values.instrument,
@@ -277,38 +336,10 @@ function PieceEditForm({
           ) : null}
         </View>
 
-        {/* Instrument — a segmented row rather than a dropdown: with a short registry
-          every option fits, and seeing them all is what makes a wrong detection
-          obvious at a glance. */}
-        <View className="gap-1">
-          <Text className="text-[13px] font-semibold opacity-[0.85] text-slate-950">
-            {t('pieceEdit.instrumentLabel')}
-          </Text>
-          <View className="flex-row flex-wrap gap-2">
-            {INSTRUMENT_IDS.map((id) => {
-              const selected = values.instrument === id;
-              return (
-                <Pressable
-                  key={id}
-                  className={`rounded-lg border px-3 py-2 ${
-                    selected ? 'border-slate-950 bg-slate-950' : 'border-slate-500/35 bg-slate-50'
-                  }`}
-                  onPress={() => setValues((prev) => ({ ...prev, instrument: id }))}
-                >
-                  <Text className={`text-[13px] ${selected ? 'text-white' : 'text-slate-950'}`}>
-                    {t(INSTRUMENT_REGISTRY[id].labelKey)}
-                  </Text>
-                </Pressable>
-              );
-            })}
-          </View>
-          {piece.instrumentConfirmed === false ? (
-            <Text className="text-[12px] text-slate-500">{t('pieceEdit.instrumentUnknown')}</Text>
-          ) : null}
-        </View>
-
-        {/* Part — only when there is genuinely something to choose. */}
-        {parts.length > 1 ? (
+        {/* Part, then instrument — in that order, because which line you practise is
+          what decides which instruments are even possible. Reversing them would let
+          the user answer the second question before the first had constrained it. */}
+        {mode === 'import' && parts.length > 1 ? (
           <View className="gap-1">
             <Text className="text-[13px] font-semibold opacity-[0.85] text-slate-950">
               {t('pieceEdit.partLabel')}
@@ -322,7 +353,7 @@ function PieceEditForm({
                     className={`rounded-lg border px-3 py-2 ${
                       selected ? 'border-slate-950 bg-slate-950' : 'border-slate-500/35 bg-slate-50'
                     }`}
-                    onPress={() => setValues((prev) => ({ ...prev, partId: part.id }))}
+                    onPress={() => choosePart(part.id)}
                   >
                     <Text className={`text-[13px] ${selected ? 'text-white' : 'text-slate-950'}`}>
                       {part.name ?? t('pieceEdit.partFallback', { number: index + 1 })}
@@ -338,6 +369,82 @@ function PieceEditForm({
             )}
           </View>
         ) : null}
+
+        {/* Instrument — asked only when the selection leaves a genuine choice. A part
+          the clarinet cannot play has exactly one legal answer, so the modal states it
+          instead of putting a question with one option. Illegal instruments are shown
+          disabled with what rules them out, never hidden: a clarinettist looking for
+          their instrument has to find out that the score is the problem. */}
+        {mode === 'import' && askInstrument ? (
+          <View className="gap-1">
+            <Text className="text-[13px] font-semibold opacity-[0.85] text-slate-950">
+              {t('pieceEdit.instrumentLabel')}
+            </Text>
+            <View className="flex-row flex-wrap gap-2">
+              {INSTRUMENT_IDS.map((id) => {
+                const selected = values.instrument === id;
+                const refusal = partRefusalReason(id, selectedPart);
+                const disabled = refusal !== null || !legalInstruments.includes(id);
+                return (
+                  <Pressable
+                    key={id}
+                    disabled={disabled}
+                    className={`rounded-lg border px-3 py-2 ${
+                      disabled
+                        ? 'border-slate-500/20 bg-slate-500/12'
+                        : selected
+                          ? 'border-slate-950 bg-slate-950'
+                          : 'border-slate-500/35 bg-slate-50'
+                    }`}
+                    onPress={() => setValues((prev) => ({ ...prev, instrument: id }))}
+                  >
+                    <Text
+                      className={`text-[13px] ${
+                        disabled ? 'text-slate-400' : selected ? 'text-white' : 'text-slate-950'
+                      }`}
+                    >
+                      {t(INSTRUMENT_REGISTRY[id].labelKey)}
+                    </Text>
+                    {disabled ? (
+                      <Text className="text-[11px] text-slate-400">
+                        {t(refusalLabelKey(refusal))}
+                      </Text>
+                    ) : null}
+                  </Pressable>
+                );
+              })}
+            </View>
+            <Text className="text-[12px] text-slate-500">
+              {piece.instrumentConfirmed === false
+                ? t('pieceEdit.instrumentUnknown')
+                : t('pieceEdit.instrumentFixedNote')}
+            </Text>
+          </View>
+        ) : (
+          /* Read-only: the instrument is settled at import and never changes, so a
+            piece can never become one its own score cannot support. The part is named
+            too when there was something to choose. */
+          <View className="gap-1">
+            <Text className="text-[13px] font-semibold opacity-[0.85] text-slate-950">
+              {t('pieceEdit.instrumentLabel')}
+            </Text>
+            <Text className="text-[13px] text-slate-950">
+              {parts.length > 1
+                ? t('pieceEdit.instrumentFixedWithPart', {
+                    instrument: t(INSTRUMENT_REGISTRY[values.instrument].labelKey),
+                    part: partLabel,
+                  })
+                : t('pieceEdit.instrumentFixed', {
+                    instrument: t(INSTRUMENT_REGISTRY[values.instrument].labelKey),
+                  })}
+            </Text>
+            <Text className="text-[12px] text-slate-500">
+              {mode === 'import' && soleReason !== null
+                ? t('pieceEdit.instrumentOnlyOption', { reason: t(refusalLabelKey(soleReason)) })
+                : t('pieceEdit.instrumentFixedNote')}
+            </Text>
+          </View>
+        )}
 
         {/* Transposition — one stepper showing base + practice, because two rows doing
           the same arithmetic would only invite the question of which is which. Reset
