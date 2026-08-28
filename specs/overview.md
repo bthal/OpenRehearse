@@ -2,7 +2,7 @@
 
 ## What the app does
 
-1. **Dashboard** — Lists the user's **pieces** and offers **import** of new scores (uncompressed MusicXML 2.x–4.x, `.xml`). Warm-ups are scoped by instrument; the piece list is not.
+1. **Dashboard** — Lists the user's **pieces** and offers **import** of new scores (uncompressed MusicXML 2.x–4.x, `.xml`). A header control scopes the whole screen — warm-ups, routines and pieces — to one instrument or to all of them; it filters that screen and nothing else.
 2. **PlayView** — Renders the score (via OpenSheetMusicDisplay), plays **synthesized** audio from the score, shows the **OSMD standard cursor** moving smoothly, displays the **piece title** engraved by OSMD, and supports **one active loop** ("**bit**") at a time. **Tempo is adjustable** from the first implementation.
 
 ## Terminology
@@ -11,7 +11,7 @@
 |------|--------|
 | **Piece** | One musical work in the user's library (imported from MusicXML). |
 | **Bit** | A contiguous segment of a piece used as the **single active loop** for practice (e.g. two measures or a short phrase). |
-| **Instrument** | What a piece or routine is practised on — piano or Bb clarinet. Decides the samples, the sounding pitch, the staff layout and which exercises exist. See `features/instruments.md`. |
+| **Instrument** | What a piece or routine is practised on — piano or Bb clarinet. Decides the samples, the sounding pitch, the staff layout and which exercises exist. Settled at import and fixed thereafter; a one-line instrument only takes a one-line part. See `features/instruments.md`. |
 | **Reading transposition** | Semitones added to the engraved score so it reads on your instrument. Derived at import; distinct from the practice transposition you choose yourself. |
 
 ## MVP boundaries
