@@ -12,6 +12,7 @@ import {
 
 import { useTranslation } from 'react-i18next';
 
+import { INSTRUMENT_IDS, INSTRUMENT_REGISTRY, type InstrumentId } from '@domain/instrumentRegistry';
 import type { Piece } from '@domain/piece';
 import { normaliseSections, sectionsEqual } from '@domain/sectionEditing';
 import type { Section } from '@domain/sections';
@@ -32,6 +33,9 @@ export type PieceEditMode = 'edit' | 'import';
 interface FormValues {
   title: string;
   composer: string;
+  instrument: InstrumentId;
+  /** '' means unchosen, which only a multi-part score can be. */
+  partId: string;
   targetSpeed: string; // digits only; '' when the piece has no known tempo
   /**
    * The user's own shift only — the reading transposition stays on the piece and is
@@ -45,6 +49,8 @@ function valuesEqual(a: FormValues, b: FormValues) {
   return (
     a.title === b.title &&
     a.composer === b.composer &&
+    a.instrument === b.instrument &&
+    a.partId === b.partId &&
     a.targetSpeed === b.targetSpeed &&
     a.transposePractice === b.transposePractice
   );
@@ -76,6 +82,7 @@ function PieceEditForm({
 }) {
   const { t } = useTranslation();
   const updatePiece = usePiecesStore((s) => s.updatePiece);
+  const setInstrumentAndPart = usePiecesStore((s) => s.setInstrumentAndPart);
 
   // Prefill the target speed with the user's override, else the imported tempo,
   // clamped into the valid range so a known starting value always passes validation.
@@ -84,6 +91,8 @@ function PieceEditForm({
     () => ({
       title: piece.title,
       composer: piece.composer ?? '',
+      instrument: piece.instrument,
+      partId: piece.partId ?? '',
       transposePractice: piece.transposePracticeSemitones ?? 0,
       targetSpeed: defaultTargetBpm != null ? String(clampTargetBpm(defaultTargetBpm)) : '',
     }),
@@ -113,7 +122,11 @@ function PieceEditForm({
   const speedRaw = values.targetSpeed.trim();
   const speedError = speedRaw === '' || !isValidTargetBpm(Number(speedRaw));
 
-  const isComplete = !titleError && !composerError && !speedError;
+  // A multi-part score cannot be practised until the user says which line is theirs;
+  // there is no defensible default, so this gates submit exactly like a blank composer.
+  const parts = piece.parts ?? [];
+  const partError = parts.length > 1 && values.partId === '';
+  const isComplete = !titleError && !composerError && !speedError && !partError;
   const isDirty = !valuesEqual(values, initial) || sectionsDirty;
   // Import must be completed regardless of "dirtiness"; edit only saves real changes.
   // `sectionsPendingInvalid` matters because tapping Save does not reliably blur a
@@ -154,6 +167,19 @@ function PieceEditForm({
         // Omitted unless touched, so an unrelated title edit never rewrites sections.
         ...(sectionsDirty ? { sections } : {}),
       });
+      // Second write, deliberately: settling these re-reads the score to derive the
+      // reading transposition, which the metadata edit above has no business doing.
+      if (
+        values.instrument !== piece.instrument ||
+        values.partId !== (piece.partId ?? '') ||
+        piece.instrumentConfirmed === false
+      ) {
+        await setInstrumentAndPart(
+          piece.id,
+          values.instrument,
+          values.partId === '' ? undefined : values.partId,
+        );
+      }
       onClose();
     } catch {
       setFormError(t('pieceEdit.saveFailed'));
@@ -250,6 +276,68 @@ function PieceEditForm({
             </Text>
           ) : null}
         </View>
+
+        {/* Instrument — a segmented row rather than a dropdown: with a short registry
+          every option fits, and seeing them all is what makes a wrong detection
+          obvious at a glance. */}
+        <View className="gap-1">
+          <Text className="text-[13px] font-semibold opacity-[0.85] text-slate-950">
+            {t('pieceEdit.instrumentLabel')}
+          </Text>
+          <View className="flex-row flex-wrap gap-2">
+            {INSTRUMENT_IDS.map((id) => {
+              const selected = values.instrument === id;
+              return (
+                <Pressable
+                  key={id}
+                  className={`rounded-lg border px-3 py-2 ${
+                    selected ? 'border-slate-950 bg-slate-950' : 'border-slate-500/35 bg-slate-50'
+                  }`}
+                  onPress={() => setValues((prev) => ({ ...prev, instrument: id }))}
+                >
+                  <Text className={`text-[13px] ${selected ? 'text-white' : 'text-slate-950'}`}>
+                    {t(INSTRUMENT_REGISTRY[id].labelKey)}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </View>
+          {piece.instrumentConfirmed === false ? (
+            <Text className="text-[12px] text-slate-500">{t('pieceEdit.instrumentUnknown')}</Text>
+          ) : null}
+        </View>
+
+        {/* Part — only when there is genuinely something to choose. */}
+        {parts.length > 1 ? (
+          <View className="gap-1">
+            <Text className="text-[13px] font-semibold opacity-[0.85] text-slate-950">
+              {t('pieceEdit.partLabel')}
+            </Text>
+            <View className="flex-row flex-wrap gap-2">
+              {parts.map((part, index) => {
+                const selected = values.partId === part.id;
+                return (
+                  <Pressable
+                    key={part.id}
+                    className={`rounded-lg border px-3 py-2 ${
+                      selected ? 'border-slate-950 bg-slate-950' : 'border-slate-500/35 bg-slate-50'
+                    }`}
+                    onPress={() => setValues((prev) => ({ ...prev, partId: part.id }))}
+                  >
+                    <Text className={`text-[13px] ${selected ? 'text-white' : 'text-slate-950'}`}>
+                      {part.name ?? t('pieceEdit.partFallback', { number: index + 1 })}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+            {partError ? (
+              <Text className={FIELD_ERROR_TEXT}>{t('pieceEdit.partRequired')}</Text>
+            ) : (
+              <Text className="text-[12px] text-slate-500">{t('pieceEdit.partHint')}</Text>
+            )}
+          </View>
+        ) : null}
 
         {/* Transposition — one stepper showing base + practice, because two rows doing
           the same arithmetic would only invite the question of which is which. Reset

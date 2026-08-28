@@ -2,11 +2,12 @@ import * as Crypto from 'expo-crypto';
 import { create } from 'zustand';
 
 import type { Bit } from '@domain/bits';
-import { DEFAULT_INSTRUMENT, defaultBaseTranspose } from '@domain/instrumentRegistry';
+import { guessImportInstrument, readingTransposeFor } from '@domain/instrumentDetect';
+import { DEFAULT_INSTRUMENT, type InstrumentId } from '@domain/instrumentRegistry';
 import type { Piece } from '@domain/piece';
 import {
   scrapeMusicXmlMetadata,
-  scrapePartTranspose,
+  scrapeScoreParts,
   scrapeTempoBpm,
   validateMusicXml,
 } from '@domain/musicxml';
@@ -54,6 +55,15 @@ interface PiecesState {
        * why the notes moved in the first place.
        */
       transposePracticeSemitones?: number;
+      /**
+       * Set together, and never independently: choosing a part can change which
+       * instrument the score is for, and both change the reading transposition, so
+       * the caller recomputes all three at once.
+       */
+      instrument?: InstrumentId;
+      instrumentConfirmed?: boolean;
+      partId?: string;
+      transposeBaseSemitones?: number;
     },
   ) => Promise<void>;
   /**
@@ -61,6 +71,21 @@ interface PiecesState {
    * bits on its own — creating one, deleting one, or changing one's practice settings —
    * and has no business restating the title and composer to do it.
    */
+  /**
+   * Settles the instrument and the practised part together, and re-derives the reading
+   * transposition from the score.
+   *
+   * Separate from `updatePiece` because it is the one edit that has to go back to the
+   * XML: the reading transposition depends on the chosen part's `<transpose>`, and the
+   * modal has no business reading a 5 MB file to work that out. The user's practice
+   * offset is deliberately left alone — changing which part you practise does not undo
+   * a key you chose to drill in.
+   */
+  setInstrumentAndPart: (
+    id: string,
+    instrument: InstrumentId,
+    partId: string | undefined,
+  ) => Promise<void>;
   setBits: (id: string, bits: Bit[]) => Promise<void>;
   touchPiece: (id: string) => Promise<void>;
   deletePiece: (id: string) => Promise<void>;
@@ -98,19 +123,26 @@ export const usePiecesStore = create<PiecesState>()((set, get) => ({
     const title = metadata.title || fallbackTitle;
     const id = Crypto.randomUUID();
     const importedBpm = scrapeTempoBpm(file.content);
+    const parts = scrapeScoreParts(file.content);
+    const guess = guessImportInstrument(file.content, parts);
     const piece: Piece = {
       id,
       title,
       composer: metadata.composer,
       xmlFilename: id + '.xml',
-      // Instrument detection and the part picker arrive with the import slice; every
-      // score imported until then is a piano piece, as every existing one already is.
-      instrument: DEFAULT_INSTRUMENT,
-      // Why the notes would move, decided once from the instrument and what the
-      // engraver declared. 0 for every piano piece; the rule lives in the registry.
-      transposeBaseSemitones: defaultBaseTranspose(
-        DEFAULT_INSTRUMENT,
-        scrapePartTranspose(file.content),
+      // Detection answers what the notation actually states and returns null when it
+      // states nothing; the modal then asks, exactly as it does for a missing composer.
+      // An unsettled piece is stored as piano so the field is never absent, but
+      // instrumentConfirmed keeps it incomplete until someone decides.
+      instrument: guess.instrument ?? DEFAULT_INSTRUMENT,
+      instrumentConfirmed: guess.instrument !== null,
+      ...(parts.length > 0 ? { parts } : {}),
+      // Why the notes would move: read from the part the user will practise, once
+      // that is known. Recomputed on the modal's save if they pick differently.
+      transposeBaseSemitones: readingTransposeFor(
+        file.content,
+        guess.instrument ?? DEFAULT_INSTRUMENT,
+        guess.partId,
       ),
       importedAt: new Date().toISOString(),
       // Only set when the file actually declares a tempo — a tempo-less score
@@ -150,6 +182,29 @@ export const usePiecesStore = create<PiecesState>()((set, get) => ({
     // Bits are never part of a metadata edit — they are written through `setBits` — so
     // carry them across rather than letting `update()` see undefined and skip the column.
     updated.bits = existing.bits;
+    await pieceRepository.update(updated);
+    set({ piecesById: { ...piecesById, [id]: updated } });
+  },
+
+  setInstrumentAndPart: async (id, instrument, partId) => {
+    const { piecesById } = get();
+    const existing = piecesById[id];
+    if (!existing) return;
+    let transposeBaseSemitones = existing.transposeBaseSemitones ?? 0;
+    try {
+      const xml = await pieceRepository.readXml(existing);
+      transposeBaseSemitones = readingTransposeFor(xml, instrument, partId);
+    } catch {
+      // An unreadable score should not block the choice: keep the existing reading
+      // transposition rather than silently resetting it to 0.
+    }
+    const updated: Piece = {
+      ...existing,
+      instrument,
+      instrumentConfirmed: true,
+      ...(partId ? { partId } : {}),
+      transposeBaseSemitones,
+    };
     await pieceRepository.update(updated);
     set({ piecesById: { ...piecesById, [id]: updated } });
   },

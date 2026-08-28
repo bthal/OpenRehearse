@@ -64,3 +64,30 @@ describe('engravedTranspose', () => {
     expect(hasPracticeTranspose(makePiece({ transposePracticeSemitones: -1 }))).toBe(true);
   });
 });
+
+describe('completeness with instrument and part', () => {
+  it('is incomplete while the instrument is only a guess', () => {
+    // Detection returned null; the modal has to ask before this is practisable.
+    expect(isPieceComplete(makePiece({ instrumentConfirmed: false }))).toBe(false);
+  });
+
+  it('treats a legacy piece with no flag as settled', () => {
+    // Everything imported before instruments existed was a piano piece and always was.
+    expect(isPieceComplete(makePiece())).toBe(true);
+  });
+
+  it('is incomplete while a multi-part score has no chosen part', () => {
+    const piece = makePiece({
+      parts: [
+        { id: 'P1', name: 'Flute' },
+        { id: 'P2', name: 'Piano' },
+      ],
+    });
+    expect(isPieceComplete(piece)).toBe(false);
+    expect(isPieceComplete({ ...piece, partId: 'P2' })).toBe(true);
+  });
+
+  it('never asks about the part of a single-part score', () => {
+    expect(isPieceComplete(makePiece({ parts: [{ id: 'P1', name: 'Piano' }] }))).toBe(true);
+  });
+});

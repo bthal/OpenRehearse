@@ -315,8 +315,12 @@ export default function PlayView() {
         (js) => webViewRef.current?.injectJavaScript(js),
         current.instrument,
       );
-      // Must precede the load: OSMD transposes between load() and render(), and the
-      // note grid is derived from the rendered layout.
+      // Both must precede the load: the part is resolved and hidden, and OSMD
+      // transposes, between load() and render() — and the note grid is derived from
+      // the rendered layout, so neither can follow it.
+      webViewRef.current?.injectJavaScript(
+        `window.__rn_set_part(${JSON.stringify(current.partId ?? '')});void 0;`,
+      );
       webViewRef.current?.injectJavaScript(
         `window.__rn_set_transpose(${engravedTranspose(current)});void 0;`,
       );

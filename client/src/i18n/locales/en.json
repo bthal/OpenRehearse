@@ -151,7 +151,13 @@
     "transposeReading": "Includes {{value}} so it reads on your instrument",
     "transposeReset": "Reset",
     "transposeUp": "Transpose up a semitone",
-    "transposeDown": "Transpose down a semitone"
+    "transposeDown": "Transpose down a semitone",
+    "instrumentLabel": "Instrument",
+    "instrumentUnknown": "The file does not say — pick the one you play this on.",
+    "partLabel": "Part to practise",
+    "partRequired": "Choose the part you play",
+    "partHint": "Only this part is shown and heard.",
+    "partFallback": "Part {{number}}"
   },
   "warmUpRow": {
     "description": "Exercise"

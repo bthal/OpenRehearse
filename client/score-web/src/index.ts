@@ -16,6 +16,7 @@ import {
   createBit,
   leaveBit,
   setInstrumentAudio,
+  setPractisedInstrument,
 } from './playback';
 import type { OutboundMessage } from './types';
 
@@ -61,6 +62,18 @@ w.__rn_set_instrument_audio = (urlsJson: string, offsetSemitones: number) => {
  */
 let engravedTransposeSemitones = 0;
 
+/**
+ * The MusicXML part id being practised, or '' for the whole score.
+ *
+ * Resolved against the loaded sheet rather than stored as an index, because a part's
+ * position shifts between exports of the same score while its id does not.
+ */
+let practisedPartId = '';
+
+w.__rn_set_part = (partId: string) => {
+  practisedPartId = typeof partId === 'string' ? partId : '';
+};
+
 w.__rn_set_transpose = (semitones: number) => {
   engravedTransposeSemitones = Number.isFinite(semitones) ? Math.round(semitones) : 0;
 };
@@ -96,6 +109,17 @@ w.__rn_load_xml = async (xml: string, scheduleJson?: string) => {
     const container = document.getElementById('osmd')!;
     container.style.width = '10000px';
     await osmd.load(xml);
+    // Show and sound one part only. Hiding is what the render needs; the extraction
+    // pass gets the same instrument passed explicitly (setPractisedInstrument), so the
+    // two never disagree about which line is being practised.
+    const instruments = osmd.Sheet.Instruments;
+    const practised = practisedPartId
+      ? (instruments.find((i) => i.IdString === practisedPartId) ?? null)
+      : null;
+    if (practised) {
+      for (const instrument of instruments) instrument.Visible = instrument === practised;
+    }
+    setPractisedInstrument(practised);
     if (engravedTransposeSemitones !== 0) {
       // OSMD ships TransposeCalculator in the free build but leaves it unset; without
       // it, Sheet.Transpose is silently ignored (OSMD logs a hint and moves on).

@@ -3,6 +3,7 @@ import * as SQLite from 'expo-sqlite';
 
 import { normaliseBits, type Bit } from '@domain/bits';
 import { normaliseInstrumentId } from '@domain/instrumentRegistry';
+import type { ScorePart } from '@domain/musicxml';
 import type { Piece } from '@domain/piece';
 import { normaliseSections } from '@domain/sectionEditing';
 import type { Section } from '@domain/sections';
@@ -36,6 +37,10 @@ interface PieceRow {
   transpose_base: number | null;
   /** Semitones the user added on top; NULL = 0. */
   transpose_practice: number | null;
+  /** JSON-encoded ScorePart[]; NULL for pieces imported before part selection. */
+  parts: string | null;
+  /** 0/1; NULL for legacy rows, which were piano pieces and always were. */
+  instrument_confirmed: number | null;
 }
 
 export class ExpoLocalPieceRepository implements PieceRepository {
@@ -69,6 +74,8 @@ export class ExpoLocalPieceRepository implements PieceRepository {
       'ALTER TABLE pieces ADD COLUMN part_id TEXT',
       'ALTER TABLE pieces ADD COLUMN transpose_base INTEGER',
       'ALTER TABLE pieces ADD COLUMN transpose_practice INTEGER',
+      'ALTER TABLE pieces ADD COLUMN parts TEXT',
+      'ALTER TABLE pieces ADD COLUMN instrument_confirmed INTEGER',
     ]) {
       try {
         await db.execAsync(sql);
@@ -85,7 +92,7 @@ export class ExpoLocalPieceRepository implements PieceRepository {
   }
 
   private static readonly SELECT_COLUMNS =
-    'id, title, composer, xml_filename, imported_at, last_opened_at, imported_bpm, target_bpm, sections, bits, instrument, part_id, transpose_base, transpose_practice';
+    'id, title, composer, xml_filename, imported_at, last_opened_at, imported_bpm, target_bpm, sections, bits, instrument, part_id, transpose_base, transpose_practice, parts, instrument_confirmed';
 
   /**
    * A corrupt sections blob degrades the piece to "never analysed" rather than
@@ -111,6 +118,16 @@ export class ExpoLocalPieceRepository implements PieceRepository {
       return normaliseBits(JSON.parse(raw));
     } catch {
       return [];
+    }
+  }
+
+  private static parseParts(raw: string | null): ScorePart[] | undefined {
+    if (raw == null) return undefined;
+    try {
+      const parsed: unknown = JSON.parse(raw);
+      return Array.isArray(parsed) ? (parsed as ScorePart[]) : undefined;
+    } catch {
+      return undefined;
     }
   }
 
@@ -141,6 +158,13 @@ export class ExpoLocalPieceRepository implements PieceRepository {
       // instruments existed) and a rotted one both become piano, so nothing past this
       // point has to ask whether a piece has an instrument.
       instrument: normaliseInstrumentId(r.instrument),
+      // A corrupt parts blob costs the part picker its labels, not the piece — the
+      // same trade parseSections makes.
+      ...(ExpoLocalPieceRepository.parseParts(r.parts)
+        ? { parts: ExpoLocalPieceRepository.parseParts(r.parts) as ScorePart[] }
+        : {}),
+      // NULL means a legacy row: those were piano pieces and never needed asking.
+      instrumentConfirmed: r.instrument_confirmed == null ? true : r.instrument_confirmed === 1,
       ...(r.part_id ? { partId: r.part_id } : {}),
       ...(r.transpose_base != null ? { transposeBaseSemitones: r.transpose_base } : {}),
       ...(r.transpose_practice != null ? { transposePracticeSemitones: r.transpose_practice } : {}),
@@ -181,7 +205,7 @@ export class ExpoLocalPieceRepository implements PieceRepository {
     try {
       const db = await this.getDb();
       await db.runAsync(
-        'INSERT INTO pieces (id, title, composer, xml_filename, imported_at, imported_bpm, target_bpm, sections, bits, instrument, part_id, transpose_base, transpose_practice) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        'INSERT INTO pieces (id, title, composer, xml_filename, imported_at, imported_bpm, target_bpm, sections, bits, instrument, part_id, transpose_base, transpose_practice, parts, instrument_confirmed) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
         piece.id,
         piece.title,
         piece.composer ?? null,
@@ -195,6 +219,8 @@ export class ExpoLocalPieceRepository implements PieceRepository {
         piece.partId ?? null,
         piece.transposeBaseSemitones ?? null,
         piece.transposePracticeSemitones ?? null,
+        piece.parts ? JSON.stringify(piece.parts) : null,
+        piece.instrumentConfirmed === false ? 0 : 1,
       );
     } catch (err) {
       // Roll back the file write to avoid orphaned XML files
@@ -216,7 +242,7 @@ export class ExpoLocalPieceRepository implements PieceRepository {
       // same reason: a caller holding a Piece that never went through rowToPiece has
       // them undefined, and that has to leave the stored values alone rather than
       // resetting the user's clarinet piece to piano at concert pitch.
-      'UPDATE pieces SET title = ?, composer = ?, target_bpm = ?, sections = COALESCE(?, sections), bits = COALESCE(?, bits), instrument = COALESCE(?, instrument), part_id = COALESCE(?, part_id), transpose_base = COALESCE(?, transpose_base), transpose_practice = COALESCE(?, transpose_practice) WHERE id = ?',
+      'UPDATE pieces SET title = ?, composer = ?, target_bpm = ?, sections = COALESCE(?, sections), bits = COALESCE(?, bits), instrument = COALESCE(?, instrument), part_id = COALESCE(?, part_id), transpose_base = COALESCE(?, transpose_base), transpose_practice = COALESCE(?, transpose_practice), parts = COALESCE(?, parts), instrument_confirmed = COALESCE(?, instrument_confirmed) WHERE id = ?',
       piece.title,
       piece.composer ?? null,
       piece.targetBpm ?? null,
@@ -226,6 +252,8 @@ export class ExpoLocalPieceRepository implements PieceRepository {
       piece.partId ?? null,
       piece.transposeBaseSemitones ?? null,
       piece.transposePracticeSemitones ?? null,
+      piece.parts ? JSON.stringify(piece.parts) : null,
+      piece.instrumentConfirmed == null ? null : piece.instrumentConfirmed ? 1 : 0,
       piece.id,
     );
   }

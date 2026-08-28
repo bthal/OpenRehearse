@@ -22,8 +22,20 @@ Let users add **pieces** from **MusicXML 2.x–4.x** files, both uncompressed (`
    `specs/features/section-detection.md`). This is best-effort and **never fails an import** — an
    unreadable form stores an empty list and the piece simply shows no section label.
 6. Persist **full XML** (or path to copied file) under app storage; save **metadata** record (id, title, composer, createdAt, localUri or internal path).
-7. **Complete required metadata**: a piece needs a title, a composer, and a target speed
-   (`isPieceComplete`). If the file omits any of these (e.g. no tempo marking, no composer),
+7. **Detect the instrument and the part** (`domain/instrumentDetect.ts`). The part name is
+   trusted first — it is the engraver's own statement of intent and the only signal many
+   exports carry — then the GM `<midi-program>` (72 = clarinet, 1–8 = piano). `<transpose>` is
+   **not** a signal: a chromatic of −2 is a Bb clarinet, a Bb trumpet and a soprano sax alike, so
+   it identifies a transposition and never an instrument. Detection returns *nothing* rather than
+   a fallback when the notation says nothing, because a confident wrong guess is worse here than a
+   question. The `<part-list>` is stored on the piece (like `sections`) so the edit modal can offer
+   the picker later without re-reading the score.
+8. **Complete required metadata**: a piece needs a title, a composer, and a target speed
+   (`isPieceComplete`), plus a settled **instrument** and — for a score with more than one part —
+   a chosen **part**. A multi-part score always asks, however confident detection is: the app
+   cannot know which line the user practises, and picking the first would quietly hand a
+   clarinettist the flute part. If the file omits any of these (e.g. no tempo marking, no
+   composer),
    open the edit modal in **"Input needed"** mode — non-dismissable, missing fields marked, the
    **Import** button disabled until all are provided. A fully-described file imports with no prompt.
    A **Cancel** action in this mode discards the in-progress piece (nothing is kept).
@@ -47,6 +59,9 @@ Let users add **pieces** from **MusicXML 2.x–4.x** files, both uncompressed (`
 - [ ] Title, composer, and tempo are scraped and stored on import.
 - [x] Sections are detected and stored on import; detection failure never blocks the import.
 - [ ] A file missing title, composer, or tempo opens a non-dismissable "Input needed" modal; import completes only once all required fields are provided.
+- [ ] A score whose instrument the notation does not state opens the same modal with the
+      instrument picker; a recognisable single-part score imports with no prompt.
+- [ ] A multi-part score always shows the part picker, and only the chosen part renders and sounds.
 
 ## Post-MVP: PDF import via OMR
 

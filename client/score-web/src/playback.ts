@@ -1,5 +1,5 @@
 import * as Tone from 'tone';
-import type { OpenSheetMusicDisplay } from 'opensheetmusicdisplay';
+import type { Instrument, OpenSheetMusicDisplay } from 'opensheetmusicdisplay';
 import { ArpeggioType, ArticulationEnum } from 'opensheetmusicdisplay';
 import type { OutboundMessage } from './types';
 import { resolveSections } from '../../src/score-web/sectionResolve';
@@ -65,6 +65,24 @@ let sampleUrls: Record<string, string> = {};
  * sounding pitch, so the offset is what maps a read note onto it.
  */
 let soundingOffsetSemitones = 0;
+
+/**
+ * The part being practised, when the score has more than one.
+ *
+ * OSMD's `NotesUnderCursor(instrument)` filters by `Voice.Parent.IdString`, so this is
+ * an explicit filter rather than a side effect of hiding — hiding is what the *render*
+ * needs, and the two are set together in the load path. Null means the whole score,
+ * which is every single-part piece and everything imported before part selection.
+ *
+ * Note for a future accompaniment mode: `Instrument.Visible = false` cascades to every
+ * Voice, and OSMD's visible-entry collection gates on `Voice.Visible`, so hiding a part
+ * silences it. Sounding a hidden part needs the independent `Audible` flag instead.
+ */
+let practisedInstrument: Instrument | null = null;
+
+export function setPractisedInstrument(instrument: Instrument | null): void {
+  practisedInstrument = instrument;
+}
 
 /** Native → web: the practised instrument's samples and its sounding offset. */
 export function setInstrumentAudio(urls: Record<string, string>, offsetSemitones: number): void {
@@ -495,7 +513,11 @@ function buildTimelines(osmd: OpenSheetMusicDisplay): {
     let fermataExtraTicks = 0;
 
     try {
-      const notes = osmd.cursor.NotesUnderCursor();
+      // Scoped to the practised part when there is one: a multi-part score would
+      // otherwise sound every line through the one sampler.
+      const notes = practisedInstrument
+        ? osmd.cursor.NotesUnderCursor(practisedInstrument)
+        : osmd.cursor.NotesUnderCursor();
       const baseTicks = Math.round(expandedQuarters * TONE_PPQ);
 
       // Separate notes into plain vs. arpeggio groups (keyed by the shared Arpeggio object).

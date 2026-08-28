@@ -324,3 +324,65 @@ export function scrapePartTranspose(content: string, partId?: string): number | 
   if (!Number.isFinite(chromatic) && !Number.isFinite(octaveChange)) return null;
   return semitones;
 }
+
+export interface ScorePart {
+  /** The `<score-part>` id — stable across re-exports, unlike its position. */
+  id: string;
+  /** `<part-name>`, or null when the file leaves it blank. */
+  name: string | null;
+}
+
+/**
+ * The parts declared in `<part-list>`, in score order.
+ *
+ * Used to decide whether the import flow has to ask which line the user practises,
+ * and to label the choices. A single-part score returns one entry, which the picker
+ * takes as "nothing to ask".
+ *
+ * `<part-group>` elements are ignored: they describe bracketing, not playable lines,
+ * and grouping has no bearing on which part someone practises.
+ */
+export function scrapeScoreParts(content: string): ScorePart[] {
+  const stripped = stripBom(content);
+  const list = stripped.match(/<part-list\b[^>]*>([\s\S]*?)<\/part-list>/i);
+  if (!list) return [];
+
+  const parts: ScorePart[] = [];
+  const seen = new Set<string>();
+  const blocks = (list[1] ?? '').matchAll(
+    /<score-part\b[^>]*\bid\s*=\s*["']([^"']+)["'][^>]*>([\s\S]*?)<\/score-part>/gi,
+  );
+  for (const block of blocks) {
+    const id = block[1];
+    if (!id || seen.has(id)) continue;
+    seen.add(id);
+    const raw = block[2]?.match(/<part-name\b[^>]*>([\s\S]*?)<\/part-name>/i)?.[1];
+    const name = raw?.replace(/<[^>]*>/g, '').trim();
+    parts.push({ id, name: name ? name : null });
+  }
+  return parts;
+}
+
+/**
+ * The GM program a part declares (`<midi-program>`, 1-128), or null.
+ *
+ * MusicXML numbers these from 1, so Acoustic Grand Piano is 1 and Clarinet is 72 —
+ * one higher than the 0-based values most synth documentation uses.
+ */
+export function scrapeMidiProgram(content: string, partId?: string): number | null {
+  const stripped = stripBom(content);
+  let scope = stripped;
+  if (partId != null && partId !== '') {
+    const escaped = partId.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const block = stripped.match(
+      new RegExp(
+        `<score-part\\b[^>]*\\bid\\s*=\\s*["']${escaped}["'][^>]*>([\\s\\S]*?)</score-part>`,
+        'i',
+      ),
+    );
+    if (!block) return null;
+    scope = block[1] ?? '';
+  }
+  const program = Number(scope.match(/<midi-program>\s*(\d+)\s*<\/midi-program>/i)?.[1]);
+  return Number.isFinite(program) ? program : null;
+}

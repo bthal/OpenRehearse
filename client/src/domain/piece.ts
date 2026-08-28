@@ -1,5 +1,6 @@
 import type { Bit } from './bits';
 import type { InstrumentId } from './instrumentRegistry';
+import type { ScorePart } from './musicxml';
 import type { Section } from './sections';
 
 export interface Piece {
@@ -25,6 +26,26 @@ export interface Piece {
    * the choice stays changeable and accompaniment stays possible later.
    */
   partId?: string;
+  /**
+   * The score's `<part-list>`, read once at import — the same
+   * compute-at-import-so-nothing-re-parses-the-score contract `sections` has, and it
+   * earns its place for the same reason: the edit modal has to offer the part picker
+   * with real labels, and re-reading a 5 MB file to draw a dropdown would be absurd.
+   *
+   * Length drives the question: more than one part and the user must choose, because
+   * the app cannot know which line they practise. Absent on anything imported before
+   * part selection existed, which is treated as "nothing to choose".
+   */
+  parts?: ScorePart[];
+  /**
+   * Whether the instrument is settled rather than assumed.
+   *
+   * Detection returns null when the notation says nothing, and a confident wrong guess
+   * is worse here than a question — so an unsettled piece is *incomplete* and the
+   * "Input needed" modal asks, exactly as it does for a missing composer. Legacy rows
+   * normalise to true: they were piano pieces and always were.
+   */
+  instrumentConfirmed?: boolean;
   /**
    * Semitones added to the engraved score so it is readable on `instrument` — why the
    * notes moved, not a preference. Derived at import from the instrument and the
@@ -93,7 +114,23 @@ export function isPieceComplete(piece: Piece): boolean {
   const hasTitle = piece.title.trim() !== '';
   const hasComposer = (piece.composer ?? '').trim() !== '';
   const hasSpeed = piece.importedBpm != null || piece.targetBpm != null;
-  return hasTitle && hasComposer && hasSpeed;
+  return hasTitle && hasComposer && hasSpeed && hasInstrument(piece) && hasPart(piece);
+}
+
+/** The instrument is settled — detected confidently, or chosen by the user. */
+export function hasInstrument(piece: Piece): boolean {
+  return piece.instrumentConfirmed !== false;
+}
+
+/**
+ * A part is chosen, or there was never anything to choose.
+ *
+ * Single-part scores and anything imported before part selection existed both mean
+ * "the whole score", so only a genuinely multi-part piece can be missing an answer.
+ */
+export function hasPart(piece: Piece): boolean {
+  const parts = piece.parts ?? [];
+  return parts.length <= 1 || (piece.partId ?? '') !== '';
 }
 
 /**
