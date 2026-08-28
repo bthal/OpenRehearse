@@ -1,4 +1,4 @@
-import { OpenSheetMusicDisplay, PageFormat } from 'opensheetmusicdisplay';
+import { OpenSheetMusicDisplay, PageFormat, TransposeCalculator } from 'opensheetmusicdisplay';
 import {
   initPlayback,
   startPlayback,
@@ -49,6 +49,22 @@ w.__rn_set_instrument_audio = (urlsJson: string, offsetSemitones: number) => {
   }
 };
 
+/**
+ * Semitones the engraved score is shifted by — the piece's base plus its practice
+ * offset, already summed on the native side.
+ *
+ * Applied between `load()` and `render()`, which is the only window that works: the
+ * note grid, the cursor steps and every barline pixel are derived from the *rendered*
+ * layout in `initPlayback`, and transposing changes accidentals and key signatures and
+ * therefore measure widths. Transposing after the grid is built would leave the two
+ * describing different scores. Bits are stored as ticks, so they survive it untouched.
+ */
+let engravedTransposeSemitones = 0;
+
+w.__rn_set_transpose = (semitones: number) => {
+  engravedTransposeSemitones = Number.isFinite(semitones) ? Math.round(semitones) : 0;
+};
+
 w.__rn_load_xml = async (xml: string, scheduleJson?: string) => {
   if (!osmd) {
     postToNative({ type: 'ERROR', payload: 'OSMD not ready' });
@@ -80,6 +96,13 @@ w.__rn_load_xml = async (xml: string, scheduleJson?: string) => {
     const container = document.getElementById('osmd')!;
     container.style.width = '10000px';
     await osmd.load(xml);
+    if (engravedTransposeSemitones !== 0) {
+      // OSMD ships TransposeCalculator in the free build but leaves it unset; without
+      // it, Sheet.Transpose is silently ignored (OSMD logs a hint and moves on).
+      if (!osmd.TransposeCalculator) osmd.TransposeCalculator = new TransposeCalculator();
+      osmd.Sheet.Transpose = engravedTransposeSemitones;
+      osmd.updateGraphic();
+    }
     osmd.render();
     // Trim container to the SVG's actual rendered width (container.scrollWidth would
     // still be 10000px since we set it before render; query the SVG directly).

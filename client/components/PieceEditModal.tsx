@@ -1,4 +1,4 @@
-import { mdiClose } from '@mdi/js';
+import { mdiClose, mdiMinus, mdiPlus } from '@mdi/js';
 import { useCallback, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
@@ -33,11 +33,29 @@ interface FormValues {
   title: string;
   composer: string;
   targetSpeed: string; // digits only; '' when the piece has no known tempo
+  /**
+   * The user's own shift only — the reading transposition stays on the piece and is
+   * never edited here. The stepper displays the two summed; this is the half that
+   * Reset clears. See specs/features/instruments.md § Transposition.
+   */
+  transposePractice: number;
 }
 
 function valuesEqual(a: FormValues, b: FormValues) {
-  return a.title === b.title && a.composer === b.composer && a.targetSpeed === b.targetSpeed;
+  return (
+    a.title === b.title &&
+    a.composer === b.composer &&
+    a.targetSpeed === b.targetSpeed &&
+    a.transposePractice === b.transposePractice
+  );
 }
+
+/**
+ * How far the stepper travels either side of the reading transposition. An octave is
+ * already well past useful on a wind instrument and comfortably past the sample set;
+ * the cap exists so the control has ends, not because 12 is musically special.
+ */
+const TRANSPOSE_LIMIT = 12;
 
 const INPUT_BASE = 'rounded-lg border bg-slate-50 px-3 py-2 text-base text-slate-950';
 const BORDER_OK = 'border-slate-500/35';
@@ -66,6 +84,7 @@ function PieceEditForm({
     () => ({
       title: piece.title,
       composer: piece.composer ?? '',
+      transposePractice: piece.transposePracticeSemitones ?? 0,
       targetSpeed: defaultTargetBpm != null ? String(clampTargetBpm(defaultTargetBpm)) : '',
     }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -103,6 +122,20 @@ function PieceEditForm({
   const canSubmit =
     isComplete && !sectionsPendingInvalid && !saving && (mode === 'import' || isDirty);
 
+  const transposeBase = piece.transposeBaseSemitones ?? 0;
+  const transposeTotal = transposeBase + values.transposePractice;
+
+  // i18next pluralises on |count| while the sign is interpolated separately: a bare
+  // `count: -2` lands in the 'other' bucket correctly but leaves the minus unprinted,
+  // and 0 wants words rather than "0 semitones".
+  const semitoneLabel = (semitones: number) =>
+    semitones === 0
+      ? t('pieceEdit.transposeNone')
+      : t('pieceEdit.transposeSemitones', {
+          count: Math.abs(semitones),
+          signed: `${semitones > 0 ? '+' : '−'}${Math.abs(semitones)}`,
+        });
+
   const onSectionsValidityChange = useCallback(
     (pending: boolean) => setSectionsPendingInvalid(pending),
     [],
@@ -117,6 +150,7 @@ function PieceEditForm({
         title: values.title.trim(),
         composer: values.composer.trim(),
         targetBpm: Number(speedRaw),
+        transposePracticeSemitones: values.transposePractice,
         // Omitted unless touched, so an unrelated title edit never rewrites sections.
         ...(sectionsDirty ? { sections } : {}),
       });
@@ -216,6 +250,63 @@ function PieceEditForm({
             </Text>
           ) : null}
         </View>
+
+        {/* Transposition — one stepper showing base + practice, because two rows doing
+          the same arithmetic would only invite the question of which is which. Reset
+          clears the user's half and leaves the reading transposition alone. */}
+        {mode === 'edit' ? (
+          <View className="gap-1">
+            <Text className="text-[13px] font-semibold opacity-[0.85] text-slate-950">
+              {t('pieceEdit.transposeLabel')}
+            </Text>
+            <View className="flex-row items-center gap-3">
+              <Pressable
+                className="h-10 w-10 items-center justify-center rounded-lg border border-slate-500/35 bg-slate-50"
+                disabled={values.transposePractice <= -TRANSPOSE_LIMIT}
+                onPress={() =>
+                  setValues((prev) => ({
+                    ...prev,
+                    transposePractice: Math.max(-TRANSPOSE_LIMIT, prev.transposePractice - 1),
+                  }))
+                }
+                accessibilityLabel={t('pieceEdit.transposeDown')}
+              >
+                <AppIcon path={mdiMinus} size={20} color={Colors.text} />
+              </Pressable>
+              <Text className="min-w-[64px] text-center text-base font-semibold text-slate-950">
+                {semitoneLabel(transposeTotal)}
+              </Text>
+              <Pressable
+                className="h-10 w-10 items-center justify-center rounded-lg border border-slate-500/35 bg-slate-50"
+                disabled={values.transposePractice >= TRANSPOSE_LIMIT}
+                onPress={() =>
+                  setValues((prev) => ({
+                    ...prev,
+                    transposePractice: Math.min(TRANSPOSE_LIMIT, prev.transposePractice + 1),
+                  }))
+                }
+                accessibilityLabel={t('pieceEdit.transposeUp')}
+              >
+                <AppIcon path={mdiPlus} size={20} color={Colors.text} />
+              </Pressable>
+              {values.transposePractice !== 0 ? (
+                <Pressable
+                  className="ml-auto rounded-lg border border-slate-500/35 px-3 py-2"
+                  onPress={() => setValues((prev) => ({ ...prev, transposePractice: 0 }))}
+                >
+                  <Text className="text-[13px] text-slate-950">
+                    {t('pieceEdit.transposeReset')}
+                  </Text>
+                </Pressable>
+              ) : null}
+            </View>
+            {transposeBase !== 0 ? (
+              <Text className="text-[12px] text-slate-500">
+                {t('pieceEdit.transposeReading', { value: semitoneLabel(transposeBase) })}
+              </Text>
+            ) : null}
+          </View>
+        ) : null}
 
         {/* Sections — collapsed by default; the common edit here is the title. */}
         {mode === 'edit' ? (

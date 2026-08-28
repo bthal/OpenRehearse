@@ -21,6 +21,7 @@ import WebView, { type WebViewMessageEvent } from 'react-native-webview';
 import { useTranslation } from 'react-i18next';
 
 import { AppIcon } from '@components/AppIcon';
+import { engravedTranspose } from '@domain/piece';
 import { injectInstrumentAudio } from '@score-web/instrumentAudio';
 import { BitModeButtons } from '@components/BitModeButtons';
 import { CenterPlayButton } from '@components/CenterPlayButton';
@@ -313,6 +314,11 @@ export default function PlayView() {
       await injectInstrumentAudio(
         (js) => webViewRef.current?.injectJavaScript(js),
         current.instrument,
+      );
+      // Must precede the load: OSMD transposes between load() and render(), and the
+      // note grid is derived from the rendered layout.
+      webViewRef.current?.injectJavaScript(
+        `window.__rn_set_transpose(${engravedTranspose(current)});void 0;`,
       );
       webViewRef.current?.injectJavaScript(`window.__rn_load_xml(${JSON.stringify(xml)});void 0;`);
     } catch (err) {

@@ -95,3 +95,23 @@ export function isPieceComplete(piece: Piece): boolean {
   const hasSpeed = piece.importedBpm != null || piece.targetBpm != null;
   return hasTitle && hasComposer && hasSpeed;
 }
+
+/**
+ * Semitones the engraved score is shifted by: why the notes moved, plus whatever the
+ * user added on top.
+ *
+ * Both fields are optional on disk and default to 0, so this is also the one place
+ * that knows a piece with neither is simply untransposed. The UI shows this sum in a
+ * single stepper; the two components stay separate underneath so Reset can clear the
+ * user's experiment without also discarding the reading transposition — which on a
+ * clarinet piece is the difference between "back to how I read this" and "back to
+ * concert pitch". See `specs/features/instruments.md` § Transposition.
+ */
+export function engravedTranspose(piece: Piece): number {
+  return (piece.transposeBaseSemitones ?? 0) + (piece.transposePracticeSemitones ?? 0);
+}
+
+/** Whether Reset would change anything — i.e. the user has shifted this piece at all. */
+export function hasPracticeTranspose(piece: Piece): boolean {
+  return (piece.transposePracticeSemitones ?? 0) !== 0;
+}

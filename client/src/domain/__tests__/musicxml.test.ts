@@ -2,6 +2,7 @@ import {
   MAX_XML_BYTES,
   scrapeMusicXmlMetadata,
   scrapeTempoBpm,
+  scrapePartTranspose,
   validateMusicXml,
 } from '../musicxml';
 
@@ -225,5 +226,65 @@ describe('scrapeTempoBpm', () => {
   test('handles a BOM-prefixed document', () => {
     const xml = '﻿' + makeScore('4.0', 'score-partwise', '<sound tempo="72"/>');
     expect(scrapeTempoBpm(xml)).toBe(72);
+  });
+});
+
+describe('scrapePartTranspose', () => {
+  const wrap = (parts: string) => `<score-partwise version="4.0">${parts}</score-partwise>`;
+  const part = (id: string, attributes: string) =>
+    `<part id="${id}"><measure number="1"><attributes>${attributes}</attributes></measure></part>`;
+
+  it('reads a Bb clarinet declaration', () => {
+    const xml = wrap(
+      part('P1', '<transpose><diatonic>-1</diatonic><chromatic>-2</chromatic></transpose>'),
+    );
+    expect(scrapePartTranspose(xml)).toBe(-2);
+  });
+
+  it('returns null when the part declares no transposition', () => {
+    // Not 0: "nobody said" is what tells a concert-pitch score apart from one already
+    // written for its instrument. See defaultBaseTranspose.
+    expect(scrapePartTranspose(wrap(part('P1', '<divisions>1</divisions>')))).toBeNull();
+  });
+
+  it('distinguishes an explicit zero from a missing element', () => {
+    const xml = wrap(part('P1', '<transpose><chromatic>0</chromatic></transpose>'));
+    expect(scrapePartTranspose(xml)).toBe(0);
+  });
+
+  it('counts octave-change, as a bass clarinet needs', () => {
+    const xml = wrap(
+      part(
+        'P1',
+        '<transpose><chromatic>-2</chromatic><octave-change>-1</octave-change></transpose>',
+      ),
+    );
+    expect(scrapePartTranspose(xml)).toBe(-14);
+  });
+
+  it('reads the named part, not the first one', () => {
+    const xml = wrap(
+      part('P1', '<divisions>1</divisions>') +
+        part('P2', '<transpose><chromatic>-2</chromatic></transpose>'),
+    );
+    expect(scrapePartTranspose(xml, 'P2')).toBe(-2);
+    expect(scrapePartTranspose(xml, 'P1')).toBeNull();
+    // Unscoped finds the first declaration anywhere.
+    expect(scrapePartTranspose(xml)).toBe(-2);
+  });
+
+  it('reports nothing declared for a part id that is not in the file', () => {
+    // Reading some other part's element would silently transpose the wrong line.
+    const xml = wrap(part('P1', '<transpose><chromatic>-2</chromatic></transpose>'));
+    expect(scrapePartTranspose(xml, 'P9')).toBeNull();
+  });
+
+  it('tolerates single quotes and extra attributes on the part element', () => {
+    const xml = `<score-partwise><part id='P2' foo="bar"><measure><attributes><transpose><chromatic>-9</chromatic></transpose></attributes></measure></part></score-partwise>`;
+    expect(scrapePartTranspose(xml, 'P2')).toBe(-9);
+  });
+
+  it('treats a childless transpose element as no declaration', () => {
+    expect(scrapePartTranspose(wrap(part('P1', '<transpose></transpose>')))).toBeNull();
   });
 });

@@ -2,9 +2,14 @@ import * as Crypto from 'expo-crypto';
 import { create } from 'zustand';
 
 import type { Bit } from '@domain/bits';
-import { DEFAULT_INSTRUMENT } from '@domain/instrumentRegistry';
+import { DEFAULT_INSTRUMENT, defaultBaseTranspose } from '@domain/instrumentRegistry';
 import type { Piece } from '@domain/piece';
-import { scrapeMusicXmlMetadata, scrapeTempoBpm, validateMusicXml } from '@domain/musicxml';
+import {
+  scrapeMusicXmlMetadata,
+  scrapePartTranspose,
+  scrapeTempoBpm,
+  validateMusicXml,
+} from '@domain/musicxml';
 import { sectionsFromXml } from '@domain/sectionEditing';
 import type { Section } from '@domain/sections';
 import { SectionColors } from '@theme/colors';
@@ -42,6 +47,13 @@ interface PiecesState {
       targetBpm?: number;
       /** Omit to leave the piece's sections untouched. */
       sections?: Section[];
+      /**
+       * The user's own transposition. The reading transposition is derived at import
+       * and is deliberately not editable here — the modal shows their sum but only
+       * ever writes this half, so Reset can clear an experiment without discarding
+       * why the notes moved in the first place.
+       */
+      transposePracticeSemitones?: number;
     },
   ) => Promise<void>;
   /**
@@ -94,6 +106,12 @@ export const usePiecesStore = create<PiecesState>()((set, get) => ({
       // Instrument detection and the part picker arrive with the import slice; every
       // score imported until then is a piano piece, as every existing one already is.
       instrument: DEFAULT_INSTRUMENT,
+      // Why the notes would move, decided once from the instrument and what the
+      // engraver declared. 0 for every piano piece; the rule lives in the registry.
+      transposeBaseSemitones: defaultBaseTranspose(
+        DEFAULT_INSTRUMENT,
+        scrapePartTranspose(file.content),
+      ),
       importedAt: new Date().toISOString(),
       // Only set when the file actually declares a tempo — a tempo-less score
       // keeps importedBpm undefined and plays at OSMD's own default.

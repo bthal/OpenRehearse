@@ -143,7 +143,15 @@
       "editSection": "Edit {{name}}",
       "splitAction": "Split section",
       "deleteAction": "Delete section"
-    }
+    },
+    "transposeLabel": "Transposition",
+    "transposeNone": "As written",
+    "transposeSemitones_one": "{{signed}} semitone",
+    "transposeSemitones_other": "{{signed}} semitones",
+    "transposeReading": "Includes {{value}} so it reads on your instrument",
+    "transposeReset": "Reset",
+    "transposeUp": "Transpose up a semitone",
+    "transposeDown": "Transpose down a semitone"
   },
   "warmUpRow": {
     "description": "Exercise"

@@ -270,3 +270,57 @@ export function scrapeTempoBpm(content: string): number | null {
 
   return null;
 }
+
+/**
+ * The `<transpose>` written into a part, in semitones, or `null` when the part
+ * declares none.
+ *
+ * `null` and `0` are genuinely different answers, which is the whole reason this
+ * returns a nullable rather than defaulting. A part carrying `<transpose>` — even an
+ * explicit zero — is one whose engraver stated the relationship between what is
+ * written and what sounds, so it is already in the key its player reads. A part with
+ * no element at all said nothing, and for a transposing instrument that means the
+ * score is at concert pitch and has to be moved. `defaultBaseTranspose` in
+ * `instrumentRegistry.ts` is where that decision is made; this only reports the fact.
+ *
+ * `<octave-change>` counts: a bass clarinet is `chromatic -2` plus `octave-change -1`,
+ * which is −14 semitones, not −2.
+ *
+ * Scoped to `partId` when given, because a multi-part score can hold several
+ * transposing instruments and only the practised one's declaration is relevant.
+ * Follows `scrapeTempoBpm` in using targeted extraction over structural parsing:
+ * the input is already-validated MusicXML and we need one element, not a tree.
+ */
+export function scrapePartTranspose(content: string, partId?: string): number | null {
+  const stripped = stripBom(content);
+
+  let scope = stripped;
+  if (partId != null && partId !== '') {
+    // Attribute order and quoting vary between exporters, so match the id attribute
+    // rather than assuming `<part id="P1">` verbatim.
+    const escaped = partId.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const part = stripped.match(
+      new RegExp(`<part\\b[^>]*\\bid\\s*=\\s*["']${escaped}["'][^>]*>([\\s\\S]*?)</part>`, 'i'),
+    );
+    // A part id that is not in the file is a caller bug, not a silent concert-pitch
+    // score: report "nothing declared" rather than reading a different part's element.
+    if (!part) return null;
+    scope = part[1] ?? '';
+  }
+
+  const block = scope.match(/<transpose\b[^>]*>([\s\S]*?)<\/transpose>/i);
+  if (!block) return null;
+
+  const body = block[1] ?? '';
+  const chromatic = Number(body.match(/<chromatic>\s*(-?[\d.]+)\s*<\/chromatic>/i)?.[1]);
+  const octaveChange = Number(body.match(/<octave-change>\s*(-?[\d.]+)\s*<\/octave-change>/i)?.[1]);
+
+  const semitones =
+    (Number.isFinite(chromatic) ? chromatic : 0) +
+    (Number.isFinite(octaveChange) ? octaveChange * 12 : 0);
+
+  // A <transpose> with neither child is malformed; treat it as no declaration at all
+  // rather than as an explicit zero, which would suppress the concert-pitch default.
+  if (!Number.isFinite(chromatic) && !Number.isFinite(octaveChange)) return null;
+  return semitones;
+}
