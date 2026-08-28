@@ -50,12 +50,17 @@ describe('detectInstrument', () => {
 });
 
 describe('guessImportInstrument', () => {
+  const mono = (id: string, name: string) => ({ id, name, monophonic: true });
+  const poly = (id: string, name: string, reason: 'staves' | 'chords' | 'voices' = 'staves') => ({
+    id,
+    name,
+    monophonic: false,
+    polyphonyReason: reason,
+  });
+
   it('always asks which part on a multi-part score', () => {
     const xml = score(scorePart('P1', 'Clarinet') + scorePart('P2', 'Piano'));
-    const guess = guessImportInstrument(xml, [
-      { id: 'P1', name: 'Clarinet' },
-      { id: 'P2', name: 'Piano' },
-    ]);
+    const guess = guessImportInstrument(xml, [mono('P1', 'Clarinet'), poly('P2', 'Piano')]);
     // Even though both parts are individually recognisable, the app cannot know which
     // line the user practises — guessing "the first" hands a clarinettist the wrong one.
     expect(guess.mustAskPart).toBe(true);
@@ -63,9 +68,11 @@ describe('guessImportInstrument', () => {
     expect(guess.mustAskInstrument).toBe(true);
   });
 
-  it('imports a recognisable single-part score without asking anything', () => {
+  it('imports a two-staff score without asking, because only one answer is legal', () => {
+    // Not because detection was confident — a piano score has no second candidate, so
+    // there is no question to put.
     const xml = score(scorePart('P1', 'Piano', midi(1)));
-    const guess = guessImportInstrument(xml, [{ id: 'P1', name: 'Piano' }]);
+    const guess = guessImportInstrument(xml, [poly('P1', 'Piano')]);
     expect(guess).toMatchObject({
       instrument: 'piano',
       mustAskPart: false,
@@ -75,9 +82,31 @@ describe('guessImportInstrument', () => {
     expect(guess.partId).toBeUndefined();
   });
 
-  it('asks about the instrument when a single part is unrecognisable', () => {
+  it('settles an unnamed two-staff score on piano rather than asking', () => {
     const xml = score(scorePart('P1', 'Part 1'));
-    const guess = guessImportInstrument(xml, [{ id: 'P1', name: 'Part 1' }]);
+    const guess = guessImportInstrument(xml, [poly('P1', 'Part 1', 'chords')]);
+    expect(guess).toMatchObject({ instrument: 'piano', mustAskInstrument: false });
+  });
+
+  it('always asks about a single-line score, however confident detection was', () => {
+    // This is the one case where a wrong answer is both possible and irreversible, so
+    // detection pre-selects and the user decides.
+    const xml = score(scorePart('P1', 'Clarinet in B♭', midi(72)));
+    const guess = guessImportInstrument(xml, [mono('P1', 'Clarinet in B♭')]);
+    expect(guess).toMatchObject({ instrument: 'clarinetBb', mustAskInstrument: true });
+  });
+
+  it('drops a detection the part cannot support', () => {
+    // A two-staff part called "Clarinet" is a piano piece, whatever it is called.
+    const xml = score(scorePart('P1', 'Clarinet', midi(72)));
+    const guess = guessImportInstrument(xml, [poly('P1', 'Clarinet')]);
+    expect(guess).toMatchObject({ instrument: 'piano', mustAskInstrument: false });
+  });
+
+  it('asks about the instrument when a single line is unrecognisable', () => {
+    const xml = score(scorePart('P1', 'Part 1'));
+    const guess = guessImportInstrument(xml, [mono('P1', 'Part 1')]);
+    expect(guess.instrument).toBeNull();
     expect(guess.mustAskInstrument).toBe(true);
     expect(guess.mustAskPart).toBe(false);
   });
