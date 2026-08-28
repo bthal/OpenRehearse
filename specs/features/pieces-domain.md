@@ -23,16 +23,21 @@
 - `instrument` — what the piece is practised on. **Not optional past the repository**: rows stored
   before instruments existed normalise to `piano` on read (`normaliseInstrumentId`), the same
   contract `sections` and `bits` get, so no consumer defends against `undefined` and no migration
-  runs.
+  runs. **Immutable after import**, and repaired on read: a one-line instrument stored against a
+  part recorded as polyphonic reads back as piano (`repairPieceInstrument`).
 - Optional: `parts` — the score's `<part-list>`, read once at import. More than one part means the
-  user must choose which line they practise, and the edit modal needs the labels without re-reading
-  a 5 MB file.
+  user must choose which line they practise, and the modal needs the labels without re-reading a
+  5 MB file. Each entry also carries `monophonic` — whether that part is a single line — plus the
+  reason when it is not, settled once at import so no reader has to parse a score. Both are
+  optional: they are genuinely absent on parts written by earlier builds, where absent means
+  "nobody looked" rather than "polyphonic".
 - Optional: `partId` — the MusicXML part **id** being practised (never its position, which shifts
-  between exports). Absent means the whole score. Nothing is stripped from the stored XML; this is
-  a filter, so the choice stays changeable.
-- Optional: `instrumentConfirmed` — whether the instrument is settled rather than assumed.
-  Detection returns nothing when the notation says nothing, and such a piece is *incomplete* so the
-  "Input needed" modal asks. Absent means true: legacy rows were piano pieces and always were.
+  between exports). Absent means the whole score. Fixed at import alongside the instrument. Nothing
+  is stripped from the stored XML; this is a filter, so accompaniment stays possible later.
+- Optional: `instrumentConfirmed` — whether the instrument is settled rather than assumed. It is
+  unsettled whenever more than one instrument is legal for the chosen part, which makes the piece
+  *incomplete* so the "Input needed" modal asks. Absent means true: legacy rows were piano pieces
+  and always were.
 - Optional: `transposeBaseSemitones` — semitones that make the score readable on the instrument.
   Derived at import from the instrument and the part's `<transpose>`; never edited directly.
 - Optional: `transposePracticeSemitones` — semitones the user added to drill the piece elsewhere.
