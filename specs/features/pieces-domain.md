@@ -20,6 +20,25 @@
   flight during import — anything returned by `PieceRepository` has run `normaliseSections` and
   carries at least one section, each with a valid `#RRGGBB` color.
 
+- `instrument` — what the piece is practised on. **Not optional past the repository**: rows stored
+  before instruments existed normalise to `piano` on read (`normaliseInstrumentId`), the same
+  contract `sections` and `bits` get, so no consumer defends against `undefined` and no migration
+  runs.
+- Optional: `parts` — the score's `<part-list>`, read once at import. More than one part means the
+  user must choose which line they practise, and the edit modal needs the labels without re-reading
+  a 5 MB file.
+- Optional: `partId` — the MusicXML part **id** being practised (never its position, which shifts
+  between exports). Absent means the whole score. Nothing is stripped from the stored XML; this is
+  a filter, so the choice stays changeable.
+- Optional: `instrumentConfirmed` — whether the instrument is settled rather than assumed.
+  Detection returns nothing when the notation says nothing, and such a piece is *incomplete* so the
+  "Input needed" modal asks. Absent means true: legacy rows were piano pieces and always were.
+- Optional: `transposeBaseSemitones` — semitones that make the score readable on the instrument.
+  Derived at import from the instrument and the part's `<transpose>`; never edited directly.
+- Optional: `transposePracticeSemitones` — semitones the user added to drill the piece elsewhere.
+  The modal shows the two summed but writes only this one, so Reset returns to how the piece reads
+  rather than to concert pitch. See `specs/features/instruments.md` § Transposition.
+
 ### Bit (saved loop)
 
 A loop the user saved on a piece, so a passage does not have to be drawn again next
@@ -59,7 +78,7 @@ session. Stored as a JSON array on the piece (`Piece.bits`), normalised on read 
 
 ## Extensibility (future)
 
-- **Named** bits, hierarchical decks, per-bit practice statistics, instrument profiles —
+- **Named** bits, hierarchical decks, per-bit practice statistics —
   extend this model with new fields (or promote `bits` to its own table) without renaming
   **Piece** / **Bit**. Bits are deliberately nameless today: see
   `specs/features/playview.md`.

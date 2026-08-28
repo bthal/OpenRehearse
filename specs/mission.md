@@ -8,4 +8,4 @@ The app prioritizes **focused repetition** (loop a phrase or transition), **clea
 
 - A student can **import** a piece, open **PlayView**, set **tempo**, hear **audio that matches the notation**, and **loop one active region** with the cursor and loop boundaries behaving predictably.
 - The experience is **usable offline** after import.
-- The codebase stays **modular** so future work (Anki-like bits, hierarchy, other instruments) extends the same domain model rather than replacing it.
+- The codebase stays **modular** so future work (Anki-like bits, hierarchy, further instruments) extends the same domain model rather than replacing it. Instruments now do exactly that: `INSTRUMENT_REGISTRY` is a row plus a sample set, not a refactor.

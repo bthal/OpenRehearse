@@ -530,3 +530,47 @@ and breaks the manual single-line `PageWidth`).
 **not** cover `playback.ts`. Type-check it separately with `cd score-web && npx tsc --noEmit`, and
 rebuild the bundle after any `score-web/` change (see “`score-web/` edits are invisible until the
 bundle is rebuilt” in [`tone-playback.md`](tone-playback.md)).
+
+## Transposition and part filtering both belong between `load()` and `render()`
+
+**PATTERN:** `osmd.load(xml)` → resolve/hide parts → set `Sheet.Transpose` → `updateGraphic()` →
+`osmd.render()` → `initPlayback()`.
+
+```typescript
+await osmd.load(xml);
+const practised = instruments.find((i) => i.IdString === partId) ?? null;
+if (practised) for (const i of instruments) i.Visible = i === practised;
+setPractisedInstrument(practised);
+if (semitones !== 0) {
+  if (!osmd.TransposeCalculator) osmd.TransposeCalculator = new TransposeCalculator();
+  osmd.Sheet.Transpose = semitones;
+  osmd.updateGraphic();
+}
+osmd.render();
+initPlayback(osmd);
+```
+
+**LANDMINE:** that window is not a stylistic choice. `initPlayback` derives the note grid, the
+cursor steps and every barline pixel from the *rendered* layout, and transposing changes
+accidentals and key signatures and therefore measure widths. Transposing after the grid is built
+leaves the two describing different scores. Bits are stored as ticks, so they survive it untouched
+— which is also why a transposition change never invalidates saved loops.
+
+**LANDMINE:** OSMD ships `TransposeCalculator` in the free build but leaves `osmd.TransposeCalculator`
+unset. Without it `Sheet.Transpose` is silently ignored — OSMD logs an info line and renders the
+original. Import it from the package root (`export * from "./Plugins"`).
+
+**LANDMINE:** `Instrument.Visible = false` **cascades to every Voice**, and OSMD's
+`getVisibleEntries` gates on `ParentVoice.Visible`. So hiding a part also *silences* it. That is
+what the current one-part-only behaviour wants, but a future accompaniment mode cannot use
+`Visible` to hide-but-still-sound — it needs the independent `Audible` flag, which
+`CurrentAudibleVoiceEntries` reads.
+
+**PATTERN:** `NotesUnderCursor(instrument)` takes an optional `Instrument` and filters by
+`ParentVoice.Parent.IdString`. Passing it explicitly is preferred over relying on the `Visible`
+cascade, so render and playback cannot end up disagreeing about which line is being practised.
+
+**LANDMINE:** OSMD reads `<transpose><chromatic>` into `instrument.PlaybackTranspose` and **never
+applies it to pitches** — nothing in the bundle consumes that property. So `note.halfTone` is always
+the *written* pitch, and any sounding-pitch offset is the caller's job. Do not add the file's
+`<transpose>` on top of the instrument's own interval; that double-counts.

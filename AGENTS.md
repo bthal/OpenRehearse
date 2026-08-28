@@ -7,9 +7,11 @@ This repository uses **`specs/`** as the source of truth for product intent and 
 
 ## What this is
 
-Practice companion for piano students: import MusicXML, render the score via OSMD, synthesize audio
-from the notation, keep the OSMD cursor aligned with playback, and loop one active passage (a
-"bit") for focused repetition. Offline after import. Scores stay on-device — never uploaded.
+Practice companion for instrumentalists: import MusicXML, render the score via OSMD, synthesize
+audio from the notation, keep the OSMD cursor aligned with playback, and loop one active passage (a
+"bit") for focused repetition. Piano and Bb clarinet ship; a piece carries its instrument, the part
+being practised, and its transposition. Offline — sample sets are bundled and nothing is fetched at
+runtime. Scores stay on-device — never uploaded.
 
 ```
 RN native shell (Expo Router screens, Zustand)
@@ -40,8 +42,10 @@ RN/OSMD/Tone imports. See `specs/architecture.md` for the authoritative version.
 | Audio + cursor sync | `specs/features/playback-synthesis.md`, `specs/features/playview.md` |
 | State & domain | `specs/features/pieces-domain.md` |
 | Warm-up exercises | `specs/features/warmup.md` |
+| Instruments, transposition, part selection | `specs/features/instruments.md` |
 | Routines (build + playback) | `specs/features/warmup.md` (Routines section) |
 | Adding a persisted setting | `compound-docs/settings-persistence.md` |
+| Samples, sounding pitch, offline audio | `specs/features/instruments.md` § Audio, `compound-docs/tone-playback.md` |
 | Colours, typography, logo, icons | `specs/brand.md`, `compound-docs/brand-assets.md` |
 
 ## Module map (where code goes)
@@ -149,6 +153,11 @@ The `/commit` command runs a guided pass over all of this: assess scope → read
 
 - **MusicXML**: **`.xml`** (uncompressed) and **`.mxl`** (compressed); both **2.x–4.x**; reject other formats clearly.
 - **Scores**: **local device only** in MVP — **do not** upload MusicXML to any server.
+- **Instruments**: `INSTRUMENT_REGISTRY` (`src/domain/instrumentRegistry.ts`) is the **only**
+  enumeration — never switch on an instrument name. It owns the sample set, written range,
+  staff layout, sounding interval and exercise list. Playback sounds the **sounding** pitch, not the
+  written one. Sample sets are **bundled**, never fetched. Other parts of a multi-part score are
+  **filtered, never stripped** — the XML is stored whole.
 - **Loops**: **one** active loop; handles **continuously draggable** but **discretised to the note
   grid** (bounds are half-open `[A, B)`, minimum one quarter note); **immediate jump** at wrap.
   Saved loops ("**bits**") do not change that: a bit is *stored bounds plus practice settings*,

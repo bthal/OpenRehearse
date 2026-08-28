@@ -46,6 +46,11 @@ Phases are **sequential**; within a phase, items can be parallelized when they d
 - [x] **Metronome** aligned with transport; oscillator click track in WebView with downbeat detection; toolbar toggle.
 - [x] **Practice-time tracking** with a day-based heatmap at the bottom of the dashboard; see `specs/features/dashboard.md` § "Practice-time tracking".
 - [x] **Section detection** at import, with a colored section label and prev/next navigation in PlayView; see `specs/features/section-detection.md`. Editing sections is not included.
+- [x] **Instruments** — piano and Bb clarinet, with per-piece part selection and transposition,
+  bundled offline sample sets, and instrument-scoped warm-ups and routines. See
+  `specs/features/instruments.md`.
+- **Accompaniment**: sound the parts you are not practising as a piano reduction. The part filter
+  and the two-note-stream seam are in place; `Instrument.Audible` is the flag to use.
 - Multiple *simultaneous* loops / hierarchical practice decks (per original vision).
   Saved bits themselves have shipped — `specs/features/playview.md` § "Bits (saved loops)".
 - **iOS** build and TestFlight when ready.
