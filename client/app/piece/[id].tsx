@@ -21,6 +21,7 @@ import WebView, { type WebViewMessageEvent } from 'react-native-webview';
 import { useTranslation } from 'react-i18next';
 
 import { AppIcon } from '@components/AppIcon';
+import { injectInstrumentAudio } from '@score-web/instrumentAudio';
 import { BitModeButtons } from '@components/BitModeButtons';
 import { CenterPlayButton } from '@components/CenterPlayButton';
 import { SectionLabel } from '@components/SectionLabel';
@@ -308,6 +309,11 @@ export default function PlayView() {
     try {
       const xml = await pieceRepository.readXml(current);
       // injectJavaScript is the correct native→web channel; see compound-docs/osmd-webview.md
+      // Samples first: the Sampler is built during the load, so they cannot follow it.
+      await injectInstrumentAudio(
+        (js) => webViewRef.current?.injectJavaScript(js),
+        current.instrument,
+      );
       webViewRef.current?.injectJavaScript(`window.__rn_load_xml(${JSON.stringify(xml)});void 0;`);
     } catch (err) {
       setLoadingScore(false);
@@ -619,6 +625,9 @@ export default function PlayView() {
             source={{ html: SCORE_WEB_HTML, baseUrl: 'file:///android_asset/' }}
             originWhitelist={['*']}
             allowUniversalAccessFromFileURLs={true}
+            // Samples are bundled assets served over file://; react-native-webview
+            // defaults allowFileAccess to false, which would block the Sampler.
+            allowFileAccess={true}
             onLoadEnd={() => setWebViewReady(true)}
             onMessage={handleMessage}
             scrollEnabled={false}

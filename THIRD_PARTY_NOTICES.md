@@ -102,6 +102,37 @@ Source: https://github.com/Templarian/MaterialDesign-JS
 
 ---
 
+## Instrument samples — piano and clarinet
+
+Both sample sets are bundled in the APK under `client/assets/samples/` and are the only
+audio the app plays; nothing is fetched at runtime. They are thinned to roughly one
+sample per minor third, which is all `Tone.Sampler` needs to cover a full range.
+
+### Salamander Grand Piano
+
+Bundled in `client/assets/samples/salamander-piano/` (30 files, ~2.0 MB).
+
+**Licence:** **Creative Commons Attribution 3.0 (CC BY 3.0)**.
+
+Recorded by Alexander Holm. Obtained from the Tone.js audio collection
+(<https://tonejs.github.io/audio/salamander/>), which previously served them to the app
+over the network; they are now bundled so playback works offline.
+
+### Clarinet — FluidR3_GM
+
+Bundled in `client/assets/samples/fluidr3-clarinet/` (17 files, ~476 KB), spanning
+C3–C7 at sounding pitch.
+
+**Licence:** **Creative Commons Attribution 3.0 (CC BY 3.0)**.
+
+FluidR3_GM soundfont by Frank Wen, rendered to per-note MP3 files by the
+`midi-js-soundfonts` project (<https://github.com/gleitz/midi-js-soundfonts>, MIT), from
+which the files were taken. Note that the other collections in that repository
+(MusyngKite, FatBoy) are **CC BY-SA 3.0** and are deliberately **not** used — no bundled
+asset in this project carries a share-alike obligation.
+
+---
+
 ## Demo piece — Bach Prelude I in C major (BWV 846)
 
 Bundled in `client/assets/demo/bach-prelude-c-major-bwv846.mxl` and pre-imported

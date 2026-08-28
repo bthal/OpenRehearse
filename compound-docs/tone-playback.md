@@ -99,35 +99,48 @@ samplerRef.triggerAttackRelease(noteName, durSec, time);
 
 Piano range after the offset: A0 = 21, C8 = 108 (standard MIDI).
 
-## Tone.Sampler with Salamander piano samples (CDN, WebView cache)
+## Tone.Sampler with bundled samples (expo-asset, not a CDN)
 
-**PATTERN:** `Tone.Sampler` pitch-shifts between recorded samples to cover the full piano range.
-The Salamander Grand Piano sample set hosted by the Tone.js team CDN provides 30 samples (A0–C8)
-at adequate quality. On first play, the WebView fetches and caches them; subsequent offline plays
-use the HTTP cache.
-
-Sharp notes use filename conventions: `D#1 → Ds1.mp3`, `F#1 → Fs1.mp3` (no `#`, use `s`).
+**PATTERN:** `Tone.Sampler` pitch-shifts between recorded samples to cover a full range, so a set
+spaced about a minor third apart is enough. Both sets ship **inside the APK** under
+`client/assets/samples/`, are resolved to `file://` URIs by `expo-asset`, and are pushed into the
+WebView by `injectInstrumentAudio` *before* `__rn_load_xml` — the Sampler is constructed during the
+load, so samples cannot arrive after it. `injectJavaScript` delivers in order, which is what makes
+the two back-to-back calls safe.
 
 ```typescript
-const PIANO_URLS: Record<string, string> = {
-  A0: 'A0.mp3', C1: 'C1.mp3', 'D#1': 'Ds1.mp3', 'F#1': 'Fs1.mp3',
-  // ... through A7, C8
-};
-const sampler = new Tone.Sampler({
-  urls: PIANO_URLS,
-  release: 1,
-  baseUrl: 'https://tonejs.github.io/audio/salamander/',
-}).toDestination();
+// native: src/score-web/instrumentAudio.ts
+await injectInstrumentAudio((js) => webViewRef.current?.injectJavaScript(js), instrument);
+webViewRef.current?.injectJavaScript(`window.__rn_load_xml(${JSON.stringify(xml)});void 0;`);
+
+// web: playback.ts
+sampler = new Tone.Sampler({ urls: sampleUrls, release: 1 }).toDestination();
 await Tone.loaded(); // wait before starting transport or audio is silent
 ```
 
-**LANDMINE:** On Android, the WebView `baseUrl` is usually `'file:///android_asset/'` (needed for
-large inline HTML). A `file://` origin cannot make HTTPS cross-origin requests under Android's
-same-origin policy. This blocks the Sampler from fetching audio samples.
+**HISTORY — why this changed.** Samples used to be fetched from `https://tonejs.github.io/audio/
+salamander/` and kept only in the WebView's HTTP cache. That made "offline after import"
+(`specs/features/offline-storage.md`) true by accident: a cache eviction, or a first play in
+airplane mode, meant silence. Bundling costs ~2.4 MB of APK on a sideloaded release with no update
+channel, and buys an offline story that is actually true.
 
-**Fix:** Set `allowUniversalAccessFromFileURLs={true}` on the `<WebView>` prop. This allows the
-`file://` WebView origin to load HTTPS audio resources. Keep it scoped to internal WebView content;
-never use it if the WebView can load untrusted third-party URLs.
+**LANDMINE:** `allowFileAccess` defaults to **`false`** in react-native-webview and must be set
+explicitly on every WebView that plays audio, or the Sampler silently fetches nothing. It is a
+separate switch from `allowUniversalAccessFromFileURLs`, which is also still required: the WebView's
+`baseUrl` is `file:///android_asset/`, and a `file://` origin needs universal access to read a
+`file://` URI from a different directory.
+
+**LANDMINE:** filename spelling is a per-set convention, not a global one. Salamander writes sharps
+with `s` (`D#1` → `Ds1.mp3`); the FluidR3 clarinet uses flats (`Eb3.mp3`). The Sampler key must be
+the note name Tone.js understands, so the mapping is written out explicitly in
+`src/data/instrumentSamples.ts` — and Metro requires those `require()` paths to be literals anyway,
+so the table cannot be generated. `missingSampleNotes` is tested against the registry so a note
+declared but not bundled fails CI rather than going silent at runtime.
+
+**Sounding vs written pitch.** The Part callback adds the instrument's `transposeSemitones` before
+naming the note, so a Bb clarinet sounds a major 2nd below what is engraved. This is deliberate: the
+app is something you play *along with*, and sounding written pitch would put it a whole tone above
+the person reading the same notes. See `specs/features/instruments.md`.
 
 ## BPM from score: `cursor.Iterator.CurrentBpm`
 

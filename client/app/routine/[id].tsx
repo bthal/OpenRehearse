@@ -16,6 +16,8 @@ import WebView, { type WebViewMessageEvent } from 'react-native-webview';
 import { useTranslation } from 'react-i18next';
 
 import { AppIcon } from '@components/AppIcon';
+import { DEFAULT_INSTRUMENT } from '@domain/instrumentRegistry';
+import { injectInstrumentAudio } from '@score-web/instrumentAudio';
 import { computeRoutineTempoSchedule, generateRoutineXml } from '@domain/routineMusicXml';
 import { SCORE_WEB_HTML } from '@score-web/html';
 import type { WebToNativeMessage } from '@score-web/messageProtocol';
@@ -71,10 +73,16 @@ export default function RoutinePlayView() {
     setLoadingScore(true);
     setScoreError(null);
     const scheduleArg = JSON.stringify(tempoScheduleJson);
-    webViewRef.current?.injectJavaScript(
-      `window.__rn_load_xml(${JSON.stringify(xml)}, ${scheduleArg});void 0;`,
-    );
-  }, [xml, tempoScheduleJson, setLoadingScore, setScoreError, t]);
+    // Samples first: the Sampler is built during the load, so they cannot follow it.
+    void injectInstrumentAudio(
+      (js) => webViewRef.current?.injectJavaScript(js),
+      routine?.instrument ?? DEFAULT_INSTRUMENT,
+    ).then(() => {
+      webViewRef.current?.injectJavaScript(
+        `window.__rn_load_xml(${JSON.stringify(xml)}, ${scheduleArg});void 0;`,
+      );
+    });
+  }, [xml, tempoScheduleJson, routine?.instrument, setLoadingScore, setScoreError, t]);
 
   useEffect(() => {
     if (webViewReady) sendXml();
@@ -160,6 +168,9 @@ export default function RoutinePlayView() {
             source={{ html: SCORE_WEB_HTML, baseUrl: 'file:///android_asset/' }}
             originWhitelist={['*']}
             allowUniversalAccessFromFileURLs={true}
+            // Samples are bundled assets served over file://; react-native-webview
+            // defaults allowFileAccess to false, which would block the Sampler.
+            allowFileAccess={true}
             onLoadEnd={() => setWebViewReady(true)}
             onMessage={handleMessage}
             scrollEnabled={false}

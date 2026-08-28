@@ -2,6 +2,15 @@ import type { Bit } from '@domain/bits';
 
 export type NativeToWebMessage =
   | { type: 'LOAD_XML'; payload: string }
+  /**
+   * The practised instrument's bundled sample URIs (note name → URI) and the
+   * semitone offset from written to sounding pitch. Must be sent before LOAD_XML:
+   * the Sampler is constructed during the load.
+   */
+  | {
+      type: 'SET_INSTRUMENT_AUDIO';
+      payload: { urls: Record<string, string>; soundingOffsetSemitones: number };
+    }
   | { type: 'PLAY' }
   | { type: 'PAUSE' }
   | { type: 'STOP' }

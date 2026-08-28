@@ -23,6 +23,8 @@ import {
 import WebView, { type WebViewMessageEvent } from 'react-native-webview';
 
 import { AppIcon } from '@components/AppIcon';
+import { DEFAULT_INSTRUMENT } from '@domain/instrumentRegistry';
+import { injectInstrumentAudio } from '@score-web/instrumentAudio';
 import { CenterPlayButton } from '@components/CenterPlayButton';
 import { ToolbarShell } from '@components/ToolbarShell';
 import { SCORE_WEB_HTML } from '@score-web/html';
@@ -155,7 +157,16 @@ export default function WarmUpView() {
         octaves,
         peakRepeats,
       });
-      webViewRef.current?.injectJavaScript(`window.__rn_load_xml(${JSON.stringify(xml)});void 0;`);
+      // The warm-up instrument picker arrives with the warm-up slice; until then every
+      // exercise is a piano one, as it has always been.
+      void injectInstrumentAudio(
+        (js) => webViewRef.current?.injectJavaScript(js),
+        DEFAULT_INSTRUMENT,
+      ).then(() => {
+        webViewRef.current?.injectJavaScript(
+          `window.__rn_load_xml(${JSON.stringify(xml)});void 0;`,
+        );
+      });
     } catch (err) {
       setLoadingScore(false);
       setScoreError(err instanceof Error ? err.message : t('warmup.failedToGenerate'));
@@ -379,6 +390,9 @@ export default function WarmUpView() {
             source={{ html: SCORE_WEB_HTML, baseUrl: 'file:///android_asset/' }}
             originWhitelist={['*']}
             allowUniversalAccessFromFileURLs={true}
+            // Samples are bundled assets served over file://; react-native-webview
+            // defaults allowFileAccess to false, which would block the Sampler.
+            allowFileAccess={true}
             onLoadEnd={() => setWebViewReady(true)}
             onMessage={handleMessage}
             scrollEnabled={false}

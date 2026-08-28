@@ -15,6 +15,7 @@ import {
   setBits,
   createBit,
   leaveBit,
+  setInstrumentAudio,
 } from './playback';
 import type { OutboundMessage } from './types';
 
@@ -30,6 +31,23 @@ let osmd: OpenSheetMusicDisplay | null = null;
 // If the OSMD constructor throws it aborts the IIFE; anything assigned after the throw
 // is never set. See compound-docs/osmd-webview.md.
 const w = window as unknown as Record<string, unknown>;
+
+/**
+ * The practised instrument's bundled samples and its sounding offset.
+ *
+ * Must arrive before __rn_load_xml, because the Sampler is built during the load.
+ * injectJavaScript delivers in order, so native sends the two back to back.
+ */
+w.__rn_set_instrument_audio = (urlsJson: string, offsetSemitones: number) => {
+  try {
+    setInstrumentAudio(JSON.parse(urlsJson) as Record<string, string>, offsetSemitones);
+  } catch (err) {
+    postToNative({
+      type: 'ERROR',
+      payload: `instrument audio: ${err instanceof Error ? err.message : String(err)}`,
+    });
+  }
+};
 
 w.__rn_load_xml = async (xml: string, scheduleJson?: string) => {
   if (!osmd) {
