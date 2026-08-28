@@ -84,10 +84,82 @@ export function setPractisedInstrument(instrument: Instrument | null): void {
   practisedInstrument = instrument;
 }
 
+/**
+ * Decoded sample buffers for the current instrument, note name → AudioBuffer.
+ *
+ * Decoded here rather than handed to `Tone.Sampler` as URLs, because Tone loads
+ * buffers with `fetch()` (`ToneAudioBuffer.load`) and **Chromium's Fetch API does not
+ * support the `file:` scheme**. Bundled samples resolve to `file://` URIs, so every
+ * load failed with `TypeError: Failed to fetch` while the Sampler itself reported no
+ * error — and `startPlayback`'s 8-second `Tone.loaded()` race then let playback run on
+ * in silence. XHR carries no such scheme restriction and reads the very same URI.
+ *
+ * This is not a file-permission problem and `allowFileAccess` does not fix it: XHR and
+ * fetch differ on which schemes they will touch, and only fetch refuses `file:`.
+ *
+ * `Sampler` accepts `AudioBuffer` values alongside URL strings, so nothing else about
+ * it changes.
+ */
+let sampleBuffers: Record<string, AudioBuffer> = {};
+
+/** Resolves once the current instrument's samples have decoded (or failed to). */
+let sampleLoadPromise: Promise<void> = Promise.resolve();
+
+/** XHR rather than fetch — see `sampleBuffers`. */
+function readArrayBuffer(url: string): Promise<ArrayBuffer> {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open('GET', url, true);
+    xhr.responseType = 'arraybuffer';
+    xhr.onload = () => {
+      const body = xhr.response as ArrayBuffer | null;
+      // A successful file:// read reports status 0, not 200, so gate on there being a
+      // body rather than on an HTTP status this scheme never sets.
+      if (body && body.byteLength > 0) resolve(body);
+      else reject(new Error(`empty response (status ${xhr.status})`));
+    };
+    xhr.onerror = () => reject(new Error(`XHR failed (status ${xhr.status})`));
+    xhr.send();
+  });
+}
+
+async function decodeSamples(urls: Record<string, string>): Promise<Record<string, AudioBuffer>> {
+  const ctx = Tone.getContext().rawContext as unknown as BaseAudioContext;
+  const entries = await Promise.all(
+    Object.entries(urls).map(async ([note, url]) => {
+      try {
+        const bytes = await readArrayBuffer(url);
+        return [note, await ctx.decodeAudioData(bytes)] as const;
+      } catch {
+        // One unreadable sample costs its own pitch region, not the whole instrument —
+        // Tone.Sampler interpolates from whichever neighbours did load.
+        return null;
+      }
+    }),
+  );
+  const out: Record<string, AudioBuffer> = {};
+  for (const entry of entries) if (entry) out[entry[0]] = entry[1];
+  return out;
+}
+
 /** Native → web: the practised instrument's samples and its sounding offset. */
 export function setInstrumentAudio(urls: Record<string, string>, offsetSemitones: number): void {
   sampleUrls = urls;
   soundingOffsetSemitones = offsetSemitones;
+  sampleBuffers = {};
+  sampleLoadPromise = decodeSamples(urls).then((buffers) => {
+    sampleBuffers = buffers;
+    // The Sampler is built during the score load, which can win the race against
+    // decoding. Adding late arrivals is what makes that ordering non-critical.
+    if (sampler) {
+      for (const [note, buffer] of Object.entries(buffers)) {
+        sampler.add(note as Parameters<typeof sampler.add>[0], buffer);
+      }
+    }
+    if (Object.keys(buffers).length === 0) {
+      postToNative({ type: 'ERROR', payload: 'No instrument samples could be loaded' });
+    }
+  });
 }
 
 
@@ -2429,7 +2501,7 @@ export function initPlayback(
   postToNative({ type: 'SCORE_BPM', payload: initialBpm });
 
   sampler = new Tone.Sampler({
-    urls: sampleUrls,
+    urls: sampleBuffers,
     release: 1,
   }).toDestination();
 
@@ -2530,7 +2602,13 @@ export async function startPlayback(): Promise<void> {
 
   try {
     await Tone.start();
-    await Promise.race([Tone.loaded(), new Promise<void>((r) => setTimeout(r, 8000))]);
+    // Our own decode, not Tone.loaded() alone — the buffers never go through Tone's
+    // loader. The timeout stays: a slow decode should delay the first note rather than
+    // wedge playback entirely.
+    await Promise.race([
+      Promise.all([sampleLoadPromise, Tone.loaded()]),
+      new Promise<void>((r) => setTimeout(r, 8000)),
+    ]);
   } catch {
     // non-fatal
   }

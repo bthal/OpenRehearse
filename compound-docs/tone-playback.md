@@ -113,9 +113,10 @@ the two back-to-back calls safe.
 await injectInstrumentAudio((js) => webViewRef.current?.injectJavaScript(js), instrument);
 webViewRef.current?.injectJavaScript(`window.__rn_load_xml(${JSON.stringify(xml)});void 0;`);
 
-// web: playback.ts
-sampler = new Tone.Sampler({ urls: sampleUrls, release: 1 }).toDestination();
-await Tone.loaded(); // wait before starting transport or audio is silent
+// web: playback.ts — bytes read by XHR, decoded by hand, handed over as AudioBuffers
+const bytes = await readArrayBuffer(url); // XMLHttpRequest, NOT fetch
+sampleBuffers[note] = await ctx.decodeAudioData(bytes);
+sampler = new Tone.Sampler({ urls: sampleBuffers, release: 1 }).toDestination();
 ```
 
 **HISTORY — why this changed.** Samples used to be fetched from `https://tonejs.github.io/audio/
@@ -124,11 +125,31 @@ salamander/` and kept only in the WebView's HTTP cache. That made "offline after
 airplane mode, meant silence. Bundling costs ~2.4 MB of APK on a sideloaded release with no update
 channel, and buys an offline story that is actually true.
 
-**LANDMINE:** `allowFileAccess` defaults to **`false`** in react-native-webview and must be set
-explicitly on every WebView that plays audio, or the Sampler silently fetches nothing. It is a
-separate switch from `allowUniversalAccessFromFileURLs`, which is also still required: the WebView's
-`baseUrl` is `file:///android_asset/`, and a `file://` origin needs universal access to read a
-`file://` URI from a different directory.
+**LANDMINE — the expensive one: `fetch()` cannot read `file:` URLs, and Tone.js loads with
+`fetch()`.** `ToneAudioBuffer.load` calls `fetch(url)`, and Chromium's Fetch API refuses the `file:`
+scheme outright, with a bare `TypeError: Failed to fetch`. Bundled samples resolve to `file://`
+URIs, so **every** sample failed to load while `Tone.Sampler` reported no error of its own. Verified
+on device: XHR against the exact same URI succeeds where `fetch` fails, so this is a Fetch scheme
+restriction and **not** a file-permission problem — no WebView flag fixes it.
+
+The fix is to bypass Tone's loader: read the bytes with `XMLHttpRequest`, decode them with
+`decodeAudioData`, and hand `Tone.Sampler` the resulting `AudioBuffer`s. Its `urls` map accepts
+`ToneAudioBuffer | AudioBuffer | string` per note, so nothing else changes.
+
+Two things made this hard to see, and both are worth remembering:
+- `startPlayback` races `Tone.loaded()` against an 8-second timeout, so a total load failure
+  degrades to *silent playback* rather than an error. The transport still runs and the cursor still
+  advances.
+- The metronome is an oscillator and needs no buffers, so it keeps working. "Metronome yes, notes
+  no" is the signature of a sample-loading failure, not a playback failure.
+
+A successful `file://` XHR reports **`status 0`**, not 200 — gate on the response having a body.
+
+**LANDMINE:** `allowFileAccess` defaults to **`false`** in react-native-webview and is still
+required on every WebView that plays audio, alongside `allowUniversalAccessFromFileURLs`: the
+WebView's `baseUrl` is `file:///android_asset/`, and a `file://` origin needs universal access to
+read a `file://` URI from another directory. These are necessary for the XHR to succeed — they were
+simply never sufficient, because of the Fetch restriction above.
 
 **LANDMINE:** filename spelling is a per-set convention, not a global one. Salamander writes sharps
 with `s` (`D#1` → `Ds1.mp3`); the FluidR3 clarinet uses flats (`Eb3.mp3`). The Sampler key must be
