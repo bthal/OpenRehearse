@@ -18,12 +18,7 @@ import {
   type ExerciseParams,
   type WarmUpType,
 } from '@domain/warmupRegistry';
-import {
-  DEFAULT_INSTRUMENT,
-  INSTRUMENT_IDS,
-  normaliseInstrumentId,
-  type InstrumentId,
-} from '@domain/instrumentRegistry';
+import { DEFAULT_INSTRUMENT, INSTRUMENT_IDS, type InstrumentId } from '@domain/instrumentRegistry';
 
 /**
  * Remembered parameters for one exercise. Every exercise stores the full parameter
@@ -37,15 +32,18 @@ export type ExerciseSettings = ExerciseParams;
 type WarmUpSettings = Record<WarmUpType, ExerciseSettings>;
 
 /**
- * The whole persisted file: which instrument the warm-up section is showing, and a
- * settings block per instrument.
+ * The whole persisted file: a settings block per instrument.
  *
  * Split by instrument because clarinet scales and piano scales are different
  * exercises in different registers — carrying one octave count between them would
  * offer a value the other instrument may not even support.
+ *
+ * Which instrument is being *shown* is deliberately not here any more: that is the
+ * dashboard's scope, it now filters the whole screen rather than this section, and it
+ * lives with the app settings (`settingsRepository`). A file still carrying the old
+ * key is read and the key ignored.
  */
 interface WarmUpFile {
-  instrument: InstrumentId;
   byInstrument: Record<InstrumentId, WarmUpSettings>;
 }
 
@@ -61,19 +59,12 @@ const SETTINGS_PATH = (FileSystem.documentDirectory ?? '') + 'warmup-settings.js
 
 interface WarmUpState {
   /**
-   * The instrument the warm-up section is showing. Scopes that section only — the
-   * library is never filtered by instrument. See `specs/features/instruments.md`.
-   */
-  instrument: InstrumentId;
-  /**
-   * Persisted per-exercise parameters for the *current* instrument, keyed by exercise.
+   * Persisted per-exercise parameters, keyed by instrument and then by exercise.
    *
-   * Kept as a flat slice rather than making every consumer index by instrument first:
-   * switching instrument swaps this wholesale, so the screens read exactly what they
-   * always did.
+   * Indexed by instrument rather than swapped wholesale for a "current" one, because
+   * there is no longer a current instrument to swap on: a warm-up screen is opened
+   * *for* an instrument, which arrives as a route parameter.
    */
-  exercises: WarmUpSettings;
-  /** Every instrument's block, so switching back restores what you had. */
   exercisesByInstrument: Record<InstrumentId, WarmUpSettings>;
 
   webViewReady: boolean;
@@ -90,8 +81,11 @@ interface WarmUpState {
   scoreMoving: boolean;
 
   initSettings: () => Promise<void>;
-  setInstrument: (instrument: InstrumentId) => void;
-  updateExercise: (type: WarmUpType, patch: Partial<ExerciseSettings>) => void;
+  updateExercise: (
+    instrument: InstrumentId,
+    type: WarmUpType,
+    patch: Partial<ExerciseSettings>,
+  ) => void;
   setWebViewReady: (v: boolean) => void;
   setLoadingScore: (v: boolean) => void;
   setScoreError: (v: string | null) => void;
@@ -149,9 +143,7 @@ function coerceBlock(raw: unknown): WarmUpSettings {
 async function loadSettings(): Promise<WarmUpFile> {
   try {
     const info = await FileSystem.getInfoAsync(SETTINGS_PATH);
-    if (!info.exists) {
-      return { instrument: DEFAULT_INSTRUMENT, byInstrument: DEFAULTS_BY_INSTRUMENT };
-    }
+    if (!info.exists) return { byInstrument: DEFAULTS_BY_INSTRUMENT };
     const raw = await FileSystem.readAsStringAsync(SETTINGS_PATH);
     const saved = (JSON.parse(raw) ?? {}) as Record<string, unknown>;
 
@@ -169,9 +161,9 @@ async function loadSettings(): Promise<WarmUpFile> {
       ]),
     ) as Record<InstrumentId, WarmUpSettings>;
 
-    return { instrument: normaliseInstrumentId(saved.instrument), byInstrument };
+    return { byInstrument };
   } catch {
-    return { instrument: DEFAULT_INSTRUMENT, byInstrument: DEFAULTS_BY_INSTRUMENT };
+    return { byInstrument: DEFAULTS_BY_INSTRUMENT };
   }
 }
 
@@ -180,8 +172,6 @@ function saveSettings(file: WarmUpFile): void {
 }
 
 export const useWarmUpStore = create<WarmUpState>()((set, get) => ({
-  instrument: DEFAULT_INSTRUMENT,
-  exercises: DEFAULTS,
   exercisesByInstrument: DEFAULTS_BY_INSTRUMENT,
   webViewReady: false,
   isLoadingScore: false,
@@ -193,29 +183,20 @@ export const useWarmUpStore = create<WarmUpState>()((set, get) => ({
 
   initSettings: async () => {
     const file = await loadSettings();
-    set({
-      instrument: file.instrument,
-      exercisesByInstrument: file.byInstrument,
-      exercises: file.byInstrument[file.instrument],
-    });
+    set({ exercisesByInstrument: file.byInstrument });
   },
 
-  setInstrument: (instrument) => {
-    set((s) => ({ instrument, exercises: s.exercisesByInstrument[instrument] }));
-    const { instrument: current, exercisesByInstrument } = get();
-    saveSettings({ instrument: current, byInstrument: exercisesByInstrument });
-  },
-
-  updateExercise: (type, patch) => {
+  updateExercise: (instrument, type, patch) => {
     set((s) => {
-      const exercises = { ...s.exercises, [type]: { ...s.exercises[type], ...patch } };
+      const block = s.exercisesByInstrument[instrument];
       return {
-        exercises,
-        exercisesByInstrument: { ...s.exercisesByInstrument, [s.instrument]: exercises },
+        exercisesByInstrument: {
+          ...s.exercisesByInstrument,
+          [instrument]: { ...block, [type]: { ...block[type], ...patch } },
+        },
       };
     });
-    const { instrument, exercisesByInstrument } = get();
-    saveSettings({ instrument, byInstrument: exercisesByInstrument });
+    saveSettings({ byInstrument: get().exercisesByInstrument });
   },
 
   setWebViewReady: (v) => set({ webViewReady: v }),

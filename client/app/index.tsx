@@ -1,4 +1,11 @@
-import { mdiCogOutline, mdiDelete, mdiInformation, mdiPencil, mdiPlus } from '@mdi/js';
+import {
+  mdiCogOutline,
+  mdiDelete,
+  mdiInformation,
+  mdiMusicClefTreble,
+  mdiPencil,
+  mdiPlus,
+} from '@mdi/js';
 import { router, Stack, useFocusEffect } from 'expo-router';
 import { useCallback, useState } from 'react';
 import {
@@ -15,8 +22,16 @@ import { useTranslation } from 'react-i18next';
 
 import { AppIcon } from '@components/AppIcon';
 import { BrandMark } from '@components/BrandMark';
-import { INSTRUMENT_IDS, INSTRUMENT_REGISTRY, exercisesFor } from '@domain/instrumentRegistry';
+import { INSTRUMENT_REGISTRY } from '@domain/instrumentRegistry';
+import {
+  filterByInstrument,
+  scopeIncludes,
+  scopeInstrument,
+  warmUpRowsForScope,
+  type InstrumentScope,
+} from '@domain/instrumentScope';
 import { WARM_UP_REGISTRY } from '@domain/warmupRegistry';
+import { InstrumentScopeModal, scopeShortLabelKey } from '@components/InstrumentScopeModal';
 import { useWarmUpStore } from '@state/warmupStore';
 import { PieceEditModal, type PieceEditMode } from '@components/PieceEditModal';
 import { isPieceComplete } from '@domain/piece';
@@ -38,8 +53,6 @@ export default function Dashboard() {
 
   // Pieces state
   const pieceIds = usePiecesStore((s) => s.pieceIds);
-  const warmUpInstrument = useWarmUpStore((s) => s.instrument);
-  const setWarmUpInstrument = useWarmUpStore((s) => s.setInstrument);
   const initWarmUpSettings = useWarmUpStore((s) => s.initSettings);
   const piecesById = usePiecesStore((s) => s.piecesById);
   const isLoading = usePiecesStore((s) => s.isLoading);
@@ -61,6 +74,11 @@ export default function Dashboard() {
   const loadSettings = useSettingsStore((s) => s.loadSettings);
   const [settingsOpen, setSettingsOpen] = useState(false);
 
+  // Instrument scope — a persisted view filter over this screen and nothing else.
+  const scope = useSettingsStore((s) => s.dashboardScope);
+  const setDashboardScope = useSettingsStore((s) => s.setDashboardScope);
+  const [scopeOpen, setScopeOpen] = useState(false);
+
   // Piece selection
   const [editTarget, setEditTarget] = useState<{ id: string; mode: PieceEditMode } | null>(null);
   const [selectedPieceIds, setSelectedPieceIds] = useState<string[]>([]);
@@ -78,9 +96,9 @@ export default function Dashboard() {
     useCallback(() => {
       void seedDemoDataIfNeeded().then(() => loadPieces());
       void loadRoutines();
+      // Carries the dashboard's instrument scope, so the lists below cannot settle
+      // until it resolves.
       void loadSettings();
-      // The warm-up section's instrument is remembered across launches, so the section
-      // cannot render its rows until this resolves.
       void initWarmUpSettings();
       // Re-read on focus so time practised in the play view shows up on return.
       void loadPracticeHistory();
@@ -223,7 +241,28 @@ export default function Dashboard() {
     ]);
   }
 
-  const isEmpty = pieceIds.length === 0;
+  /**
+   * The scope filters what this screen lists — warm-ups, routines and pieces — and
+   * nothing beyond it. It never reaches the PlayView, the heatmap, or an import.
+   */
+  const scopedInstrument = scopeInstrument(scope);
+  const visibleRoutines = filterByInstrument(routines, scope);
+  const visiblePieceIds = pieceIds.filter((id) => {
+    const piece = piecesById[id];
+    return piece ? scopeIncludes(scope, piece.instrument) : false;
+  });
+  const isEmpty = visiblePieceIds.length === 0;
+
+  /**
+   * Changing the scope drops any selection: a bulk Delete must never act on rows that
+   * have just left the screen, and there is no honest way to keep a selection whose
+   * members are no longer visible.
+   */
+  function handleScopeChange(next: InstrumentScope) {
+    setSelectedPieceIds([]);
+    setSelectedRoutineIds([]);
+    setDashboardScope(next);
+  }
 
   return (
     <>
@@ -247,11 +286,25 @@ export default function Dashboard() {
               </Text>
             </View>
 
-            {/* About + settings share one row so the header above can hold nothing
-                but the centred lockup. No bottom margin: the Pressables' own p-2
-                already supplies the gap to the Warm-ups heading, and stacking a
+            {/* Scope + about + settings share one row so the header above can hold
+                nothing but the centred lockup. No bottom margin: the Pressables' own
+                p-2 already supplies the gap to the Warm-ups heading, and stacking a
                 margin on top of it left a visible hole between the two. */}
-            <View className="flex-row justify-end">
+            <View className="flex-row items-center justify-end">
+              {/* Unlike its icon-only neighbours this one prints its value. A filter
+                  that persists across launches has to advertise what it is hiding —
+                  otherwise an empty-looking library is indistinguishable from a
+                  filtered one. */}
+              <Pressable
+                className="mr-1 flex-row items-center gap-1.5 rounded-lg border border-slate-500/35 px-2.5 py-1.5 active:bg-slate-100"
+                onPress={() => setScopeOpen(true)}
+                accessibilityLabel={t('dashboard.scopeLabel')}
+              >
+                <AppIcon path={mdiMusicClefTreble} size={16} color={Colors.iconMuted} />
+                <Text className="text-[13px] font-semibold text-slate-950">
+                  {t(scopeShortLabelKey(scope))}
+                </Text>
+              </Pressable>
               <Pressable
                 className="p-2 active:opacity-60"
                 onPress={() => router.push('/about')}
@@ -271,30 +324,6 @@ export default function Dashboard() {
             {/* Warm-ups section (includes routines) */}
             <View className="mb-6">
               <Text className="text-[22px] font-bold text-slate-950">{t('dashboard.warmUps')}</Text>
-
-              {/* Instrument scope for this section only — the piece list is never
-                filtered by instrument. This is the honest way to show that Hanon does
-                not exist for a clarinet, without a mixed list or duplicated rows. */}
-              <View className="mt-2 flex-row flex-wrap gap-2">
-                {INSTRUMENT_IDS.map((id) => {
-                  const selected = warmUpInstrument === id;
-                  return (
-                    <Pressable
-                      key={id}
-                      className={`rounded-lg border px-3 py-1.5 ${
-                        selected
-                          ? 'border-slate-950 bg-slate-950'
-                          : 'border-slate-500/35 bg-slate-50'
-                      }`}
-                      onPress={() => setWarmUpInstrument(id)}
-                    >
-                      <Text className={`text-[13px] ${selected ? 'text-white' : 'text-slate-950'}`}>
-                        {t(INSTRUMENT_REGISTRY[id].labelKey)}
-                      </Text>
-                    </Pressable>
-                  );
-                })}
-              </View>
 
               {isRoutineSelectionMode ? (
                 <View className="mb-2 mt-1.5 flex-row justify-end gap-2">
@@ -343,7 +372,7 @@ export default function Dashboard() {
                 </View>
               )}
 
-              {routines.map((routine) => (
+              {visibleRoutines.map((routine) => (
                 <RoutineRow
                   key={routine.id}
                   routine={routine}
@@ -357,11 +386,33 @@ export default function Dashboard() {
                 />
               ))}
 
-              {exercisesFor(warmUpInstrument).map((warmUpType) => (
+              {/* A section whose filtered list is empty keeps its heading and says so.
+                Collapsing it would leave the user staring at a screen with no clue
+                that a filter is the reason their routines are missing. */}
+              {visibleRoutines.length === 0 ? (
+                <Text className="py-3 text-sm text-slate-400">
+                  {scopedInstrument
+                    ? t('dashboard.emptyRoutinesScoped', {
+                        instrument: t(INSTRUMENT_REGISTRY[scopedInstrument].shortLabelKey),
+                      })
+                    : t('dashboard.emptyRoutines')}
+                </Text>
+              ) : null}
+
+              {/* Under "All" an exercise appears once per instrument that has it, and
+                the row carries its own instrument to the warm-up screen — tapping
+                "Scales (Clarinet)" must not re-point the dashboard's filter. */}
+              {warmUpRowsForScope(scope).map((row) => (
                 <WarmUpRow
-                  key={warmUpType}
-                  title={t(WARM_UP_REGISTRY[warmUpType].labelKey)}
-                  onPress={() => router.push(`/warmup/${warmUpType}`)}
+                  key={`${row.type}-${row.instrument}`}
+                  title={t(WARM_UP_REGISTRY[row.type].labelKey)}
+                  instrument={row.instrument}
+                  onPress={() =>
+                    router.push({
+                      pathname: '/warmup/[type]',
+                      params: { type: row.type, instrument: row.instrument },
+                    })
+                  }
                 />
               ))}
             </View>
@@ -425,12 +476,16 @@ export default function Dashboard() {
             {/* Pieces list */}
             {isEmpty && !isLoading && !isPicking ? (
               <Text className="py-4 text-center text-sm text-slate-400">
-                {t('dashboard.emptyTitle')}
+                {scopedInstrument
+                  ? t('dashboard.emptyTitleScoped', {
+                      instrument: t(INSTRUMENT_REGISTRY[scopedInstrument].shortLabelKey),
+                    })
+                  : t('dashboard.emptyTitle')}
               </Text>
             ) : (
               <>
                 {(isLoading || isPicking) && <PieceRowSkeleton />}
-                {pieceIds.map((id) => {
+                {visiblePieceIds.map((id) => {
                   const piece = piecesById[id];
                   if (!piece) return null;
                   return (
@@ -455,6 +510,12 @@ export default function Dashboard() {
           </View>
         </ScrollView>
 
+        <InstrumentScopeModal
+          visible={scopeOpen}
+          scope={scope}
+          onSelect={handleScopeChange}
+          onClose={() => setScopeOpen(false)}
+        />
         <SettingsModal visible={settingsOpen} onClose={() => setSettingsOpen(false)} />
         <PieceEditModal
           pieceId={editTarget?.id ?? null}

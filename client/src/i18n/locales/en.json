@@ -15,7 +15,9 @@
   },
   "instruments": {
     "piano": "Piano",
-    "clarinetBb": "Clarinet in B♭"
+    "pianoShort": "Piano",
+    "clarinetBb": "Clarinet in B♭",
+    "clarinetBbShort": "Clarinet"
   },
   "dashboard": {
     "title": "OpenRehearse",
@@ -51,7 +53,14 @@
     "practiceDayHours": "{{date}} · {{hours}} h {{minutes}} min",
     "practiceDayHoursOnly": "{{date}} · {{hours}} h",
     "practiceLess": "Less",
-    "practiceMore": "More"
+    "practiceMore": "More",
+    "scopeLabel": "Instrument",
+    "scopeAll": "All",
+    "scopeHeading": "Show practice material for",
+    "scopeHint": "Filters warm-ups, routines and pieces on this screen only.",
+    "emptyTitleScoped": "No {{instrument}} pieces yet",
+    "emptyRoutines": "No routines yet",
+    "emptyRoutinesScoped": "No {{instrument}} routines yet"
   },
   "playView": {
     "pieceNotFound": "Piece not found.",

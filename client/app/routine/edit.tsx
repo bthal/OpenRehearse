@@ -7,8 +7,16 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useTranslation } from 'react-i18next';
 
 import { AppIcon } from '@components/AppIcon';
-import { INSTRUMENT_REGISTRY, exercisesFor, type InstrumentId } from '@domain/instrumentRegistry';
-import { useWarmUpStore } from '@state/warmupStore';
+import {
+  DEFAULT_INSTRUMENT,
+  INSTRUMENT_IDS,
+  INSTRUMENT_REGISTRY,
+  exercisesFor,
+  supportsExercise,
+  type InstrumentId,
+} from '@domain/instrumentRegistry';
+import { scopeInstrument } from '@domain/instrumentScope';
+import { useSettingsStore } from '@state/settingsStore';
 import {
   PAUSE_MEASURES,
   type ExerciseBlock,
@@ -185,14 +193,17 @@ export default function RoutineEditScreen() {
   // Lazy initializers so we don't need a setState-in-effect pattern
   const [title, setTitle] = useState(() => existingRoutine?.title ?? '');
   /**
-   * Fixed at creation and read-only afterwards: changing it would invalidate every
-   * block whose exercise the new instrument cannot do, and there is no good answer to
-   * what should happen to those. New routines default to whatever the warm-up section
-   * is currently showing, which is almost always what the user means.
+   * Chosen while the routine is new, read-only once it exists: changing it on a saved
+   * routine would invalidate every block whose exercise the new instrument cannot do,
+   * and there is no good answer to what should happen to those.
+   *
+   * A new routine starts on whatever the dashboard is scoped to, which is almost
+   * always what the user means. Under "All" the scope names nothing, so it opens on
+   * the default instrument and the picker is right there to say otherwise.
    */
-  const warmUpInstrument = useWarmUpStore((s) => s.instrument);
-  const [instrument] = useState<InstrumentId>(
-    () => existingRoutine?.instrument ?? warmUpInstrument,
+  const dashboardScope = useSettingsStore((s) => s.dashboardScope);
+  const [instrument, setInstrument] = useState<InstrumentId>(
+    () => existingRoutine?.instrument ?? scopeInstrument(dashboardScope) ?? DEFAULT_INSTRUMENT,
   );
   const [blocks, setBlocks] = useState<BlockWithKey[]>(
     () => existingRoutine?.blocks.map((b) => ({ ...b, _key: Crypto.randomUUID() })) ?? [],
@@ -201,6 +212,19 @@ export default function RoutineEditScreen() {
   const [picker, setPicker] = useState<PickerState | null>(null);
 
   const isEditing = Boolean(id && existingRoutine);
+
+  /**
+   * Switching instrument before the routine is saved drops the blocks the new one
+   * cannot play, rather than refusing the switch or keeping a block that would fail at
+   * playback. It is the same invariant the Add Exercise picker enforces — a routine
+   * never holds a block its instrument cannot do — applied to the other edge.
+   */
+  function chooseInstrument(next: InstrumentId) {
+    if (next === instrument) return;
+    setInstrument(next);
+    setBlocks((prev) => prev.filter((b) => b.type === 'pause' || supportsExercise(next, b.type)));
+    setIsDirty(true);
+  }
   const validationError = validateRoutine(blocks);
   const canSave = title.trim().length > 0 && validationError === null;
 
@@ -513,13 +537,39 @@ export default function RoutineEditScreen() {
                   className="rounded-lg border border-slate-500/35 bg-slate-50 px-4 py-3 text-xl text-slate-950"
                   style={{ textAlign: 'center' }}
                 />
-                {/* Read-only: fixed when the routine is created, because changing it
-                  would invalidate blocks the new instrument cannot play. */}
-                <Text className="mt-2 text-center text-[13px] text-slate-500">
-                  {t('routineEdit.instrumentFixed', {
-                    instrument: t(INSTRUMENT_REGISTRY[instrument].labelKey),
-                  })}
-                </Text>
+                {/* Editable while the routine is new, read-only once it exists —
+                  changing it later would invalidate blocks the new instrument cannot
+                  play. Blocks the new instrument cannot do are dropped on the switch. */}
+                {isEditing ? (
+                  <Text className="mt-2 text-center text-[13px] text-slate-500">
+                    {t('routineEdit.instrumentFixed', {
+                      instrument: t(INSTRUMENT_REGISTRY[instrument].labelKey),
+                    })}
+                  </Text>
+                ) : (
+                  <View className="mt-2 flex-row justify-center gap-2">
+                    {INSTRUMENT_IDS.map((option) => {
+                      const selected = instrument === option;
+                      return (
+                        <Pressable
+                          key={option}
+                          className={`rounded-lg border px-3 py-1.5 ${
+                            selected
+                              ? 'border-slate-950 bg-slate-950'
+                              : 'border-slate-500/35 bg-slate-50'
+                          }`}
+                          onPress={() => chooseInstrument(option)}
+                        >
+                          <Text
+                            className={`text-[13px] ${selected ? 'text-white' : 'text-slate-950'}`}
+                          >
+                            {t(INSTRUMENT_REGISTRY[option].labelKey)}
+                          </Text>
+                        </Pressable>
+                      );
+                    })}
+                  </View>
+                )}
                 {!title && (
                   <View
                     pointerEvents="none"

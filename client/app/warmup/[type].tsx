@@ -24,9 +24,12 @@ import WebView, { type WebViewMessageEvent } from 'react-native-webview';
 
 import { AppIcon } from '@components/AppIcon';
 import {
+  DEFAULT_INSTRUMENT,
   INSTRUMENT_REGISTRY,
   exerciseRootMidi,
+  isInstrumentId,
   maxExerciseOctaves,
+  supportsExercise,
 } from '@domain/instrumentRegistry';
 import { injectInstrumentAudio } from '@score-web/instrumentAudio';
 import { CenterPlayButton } from '@components/CenterPlayButton';
@@ -76,17 +79,32 @@ const HAND_ICON: Record<WarmUpHand, string> = {
 
 export default function WarmUpView() {
   const { t } = useTranslation();
-  const { type } = useLocalSearchParams<{ type: string }>();
+  const { type, instrument: instrumentParam } = useLocalSearchParams<{
+    type: string;
+    instrument?: string;
+  }>();
   const warmUpType: WarmUpType = type && isWarmUpType(type) ? type : 'scales';
   const descriptor = WARM_UP_REGISTRY[warmUpType];
   const title = t(descriptor.labelKey);
 
+  /**
+   * The instrument comes from the route, not from a stored selection: a warm-up row is
+   * opened *for* an instrument, and tapping "Scales (Clarinet)" must not re-point the
+   * dashboard's filter at the clarinet. A missing or nonsensical parameter — a deep
+   * link, or an exercise this instrument does not have — falls back to the default
+   * instrument rather than rendering an exercise nobody can play.
+   */
+  const instrument =
+    isInstrumentId(instrumentParam) && supportsExercise(instrumentParam, warmUpType)
+      ? instrumentParam
+      : DEFAULT_INSTRUMENT;
+
   const initSettings = useWarmUpStore((s) => s.initSettings);
-  const settings = useWarmUpStore((s) => s.exercises[warmUpType]);
+  const settings = useWarmUpStore((s) => s.exercisesByInstrument[instrument][warmUpType]);
   const updateExercise = useWarmUpStore((s) => s.updateExercise);
   const updateSettings = useCallback(
-    (patch: Partial<typeof settings>) => updateExercise(warmUpType, patch),
-    [updateExercise, warmUpType],
+    (patch: Partial<typeof settings>) => updateExercise(instrument, warmUpType, patch),
+    [updateExercise, instrument, warmUpType],
   );
 
   const webViewReady = useWarmUpStore((s) => s.webViewReady);
@@ -148,7 +166,6 @@ export default function WarmUpView() {
   // only. Depending on `settings` wholesale would reload the score on every tempo
   // change, which handleBpmChange goes out of its way to avoid.
   const { exercise, pitchClass, mode, hand, octaves, peakRepeats } = settings;
-  const instrument = useWarmUpStore((s) => s.instrument);
   // The picker only offers what fits, but a value stored while another instrument was
   // selected can outlive that choice — so the generator is given the clamped value
   // rather than trusting what is on disk.

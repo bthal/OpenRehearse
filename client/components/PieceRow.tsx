@@ -5,6 +5,7 @@ import { Animated, Pressable, Text, View } from 'react-native';
 import type { Piece } from '@domain/piece';
 import { Colors } from '@theme/colors';
 import { AppIcon } from './AppIcon';
+import { InstrumentBadge } from './InstrumentBadge';
 
 interface PieceRowProps {
   piece: Piece;
@@ -67,11 +68,14 @@ export function PieceRow({
         <Text className="text-lg font-semibold text-slate-950" numberOfLines={2}>
           {piece.title}
         </Text>
-        {piece.composer ? (
-          <Text className="mt-0.5 text-sm opacity-[0.85] text-slate-950" numberOfLines={1}>
-            {piece.composer}
-          </Text>
-        ) : null}
+        <View className="mt-0.5 flex-row items-center gap-2">
+          <InstrumentBadge instrument={piece.instrument} />
+          {piece.composer ? (
+            <Text className="flex-1 text-sm opacity-[0.85] text-slate-950" numberOfLines={1}>
+              {piece.composer}
+            </Text>
+          ) : null}
+        </View>
       </View>
 
       {!isSelectionMode ? (

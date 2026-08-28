@@ -22,6 +22,12 @@ import type { WarmUpType } from './warmupRegistry';
 export interface InstrumentDescriptor {
   /** i18n key for the display name. */
   labelKey: string;
+  /**
+   * i18n key for the name in a tight space — a row badge, the dashboard scope button.
+   * "Clarinet in B♭" is the honest name and stays the display one; it is also three
+   * words too long for a chip beside a piece title.
+   */
+  shortLabelKey: string;
   /** Directory name under `assets/samples/`; also the id used in the sample bridge. */
   sampleSet: string;
   /** Sounding-pitch note names the sample set provides, one file each. */
@@ -45,6 +51,7 @@ export interface InstrumentDescriptor {
 export const INSTRUMENT_REGISTRY = {
   piano: {
     labelKey: 'instruments.piano',
+    shortLabelKey: 'instruments.pianoShort',
     sampleSet: 'salamander-piano',
     sampleNotes: PIANO_SAMPLE_NOTES,
     // A0–C8, the standard 88.
@@ -55,6 +62,7 @@ export const INSTRUMENT_REGISTRY = {
   },
   clarinetBb: {
     labelKey: 'instruments.clarinetBb',
+    shortLabelKey: 'instruments.clarinetBbShort',
     sampleSet: 'fluidr3-clarinet',
     sampleNotes: CLARINET_SAMPLE_NOTES,
     // Written E3–C7; sounding D3–Bb6.
