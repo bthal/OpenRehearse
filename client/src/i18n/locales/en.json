@@ -192,7 +192,8 @@
     "measure_other": "{{count}} Measures",
     "peakRepeats": "Peak ×{{times}}",
     "exerciseNo": "No. {{number}}",
-    "swapExercises": "Swap Exercises"
+    "swapExercises": "Swap Exercises",
+    "instrumentFixed": "For {{instrument}}"
   },
   "routineRow": {
     "exercise_one": "{{count}} exercise",

@@ -578,3 +578,34 @@ describe('generateHanonXml', () => {
     }
   });
 });
+
+describe('exercise anchoring for a non-piano instrument', () => {
+  it('leaves the piano at its long-standing C4 anchor when no root is given', () => {
+    const withDefault = generateScaleXml(0, 'major', 'right', 1);
+    const withExplicitC4 = generateScaleXml(0, 'major', 'right', 1, 60);
+    expect(withDefault).toBe(withExplicitC4);
+  });
+
+  it('moves the whole exercise when a different root is given', () => {
+    const c4 = generateScaleXml(0, 'major', 'right', 1, 60);
+    const c5 = generateScaleXml(0, 'major', 'right', 1, 72);
+    expect(c5).not.toBe(c4);
+    // Same shape, an octave up: the C4 version names octave 4, the C5 one octave 5.
+    expect(c4).toContain('<octave>4</octave>');
+    expect(c5).toContain('<octave>5</octave>');
+  });
+
+  it('keeps the left hand an octave below whatever the root is', () => {
+    // The piano's C3 left hand was always C4 - 12; a moved root must preserve that
+    // relationship rather than staying pinned to 48.
+    const moved = generateScaleXml(0, 'major', 'both', 1, 72);
+    expect(moved).toContain('<octave>5</octave>');
+    expect(moved).toContain('<octave>4</octave>');
+  });
+
+  it('emits one part for a single-hand exercise, which is the single-staff case', () => {
+    const single = generateScaleXml(0, 'major', 'right', 1, 60);
+    expect(single.match(/<score-part /g)).toHaveLength(1);
+    expect(generateScaleXml(0, 'major', 'both', 1, 60).match(/<score-part /g)).toHaveLength(2);
+  });
+});

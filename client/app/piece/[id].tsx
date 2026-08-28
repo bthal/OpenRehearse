@@ -101,6 +101,9 @@ export default function PlayView() {
   const [panelLayout, setPanelLayout] = useState({ top: 0, left: 0 });
 
   const [handOpen, setHandOpen] = useState(false);
+  // Two until the score says otherwise, so the control does not flicker in on load
+  // for the overwhelmingly common grand-staff case.
+  const [staffCount, setStaffCount] = useState(2);
   const [handAnim] = useState(() => new Animated.Value(0));
   const [handPanelLayout, setHandPanelLayout] = useState({ top: 0, left: 0 });
 
@@ -395,6 +398,7 @@ export default function PlayView() {
         }
         case 'LOADED': {
           setLoadingScore(false);
+          setStaffCount(msg.payload?.staffCount ?? 2);
           // Only now: the web side resolves section starts against measure metadata
           // that initPlayback builds during the load.
           const loaded = sectionsRef.current ?? [];
@@ -721,22 +725,26 @@ export default function PlayView() {
                 />
               </TouchableOpacity>
 
-              {/* Hand selector trigger */}
-              <View ref={handTriggerRef}>
-                <TouchableOpacity
-                  onPress={toggleHand}
-                  hitSlop={8}
-                  className="p-1.5"
-                  accessibilityRole="button"
-                  accessibilityLabel={t('playView.handSelection')}
-                >
-                  <AppIcon
-                    path={HAND_ICON[activeHand]}
-                    size={22}
-                    color={activeHand !== 'both' ? Colors.primary : Colors.icon}
-                  />
-                </TouchableOpacity>
-              </View>
+              {/* Hand selector trigger — absent on a one-staff score, where left and
+                right mean nothing. Keyed off what actually rendered rather than the
+                instrument, so a single-line file imported as piano is handled too. */}
+              {staffCount > 1 ? (
+                <View ref={handTriggerRef}>
+                  <TouchableOpacity
+                    onPress={toggleHand}
+                    hitSlop={8}
+                    className="p-1.5"
+                    accessibilityRole="button"
+                    accessibilityLabel={t('playView.handSelection')}
+                  >
+                    <AppIcon
+                      path={HAND_ICON[activeHand]}
+                      size={22}
+                      color={activeHand !== 'both' ? Colors.primary : Colors.icon}
+                    />
+                  </TouchableOpacity>
+                </View>
+              ) : null}
 
               {/* Speed trigger — icon when open, current speed label when closed */}
               <View ref={speedTriggerRef}>

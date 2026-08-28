@@ -133,7 +133,11 @@ w.__rn_load_xml = async (xml: string, scheduleJson?: string) => {
     const svgEl = container.querySelector('svg');
     container.style.width = `${svgEl ? svgEl.scrollWidth : container.scrollWidth}px`;
     initPlayback(osmd, externalTempoSchedule);
-    postToNative({ type: 'LOADED' });
+    // Staff count of the part being practised. The hand filter means nothing on one
+    // staff, and applyHandColors assumes staff indices 0 and 1 exist — so the native
+    // side hides the control rather than showing an inert one.
+    const staves = (practised ?? instruments[0])?.Staves.length ?? 2;
+    postToNative({ type: 'LOADED', payload: { staffCount: staves } });
   } catch (err) {
     postToNative({ type: 'ERROR', payload: err instanceof Error ? err.message : String(err) });
   }

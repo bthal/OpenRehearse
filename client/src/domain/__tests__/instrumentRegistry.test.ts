@@ -3,7 +3,9 @@ import {
   INSTRUMENT_IDS,
   INSTRUMENT_REGISTRY,
   defaultBaseTranspose,
+  exerciseRootMidi,
   exercisesFor,
+  maxExerciseOctaves,
   instrumentDescriptor,
   isInWrittenRange,
   isInstrumentId,
@@ -124,5 +126,39 @@ describe('isInWrittenRange', () => {
     expect(isInWrittenRange('piano', 21)).toBe(true); // A0
     expect(isInWrittenRange('piano', 108)).toBe(true); // C8
     expect(isInWrittenRange('piano', 20)).toBe(false);
+  });
+});
+
+describe('exercise placement within an instrument’s range', () => {
+  it('leaves the piano anchored at C4, as it always was', () => {
+    expect(exerciseRootMidi('piano', 0)).toBe(60);
+    expect(exerciseRootMidi('piano', 11)).toBe(71);
+    expect(maxExerciseOctaves('piano', 11)).toBe(3);
+  });
+
+  it('places a clarinet exercise inside its written range', () => {
+    // Written range starts at E3 (52), so C is the C above it: C4 = 60.
+    expect(exerciseRootMidi('clarinetBb', 0)).toBe(60);
+    // E is the range floor itself.
+    expect(exerciseRootMidi('clarinetBb', 4)).toBe(52);
+    for (let pc = 0; pc < 12; pc++) {
+      const root = exerciseRootMidi('clarinetBb', pc);
+      expect(root).toBeGreaterThanOrEqual(52);
+      expect(root).toBeLessThan(52 + 12);
+      expect(root % 12).toBe(pc % 12);
+    }
+  });
+
+  it('offers only the octave counts that actually fit', () => {
+    // From E3 (52) to C7 (96) is 44 semitones — three octaves fit.
+    expect(maxExerciseOctaves('clarinetBb', 4)).toBe(3);
+    // From B3 (59) there are 37 semitones left, so three octaves still fit; from a
+    // root high in the first octave the count has to drop rather than run off the top.
+    for (let pc = 0; pc < 12; pc++) {
+      const root = exerciseRootMidi('clarinetBb', pc);
+      const octaves = maxExerciseOctaves('clarinetBb', pc);
+      expect(octaves).toBeGreaterThanOrEqual(1);
+      expect(root + octaves * 12).toBeLessThanOrEqual(96);
+    }
   });
 });

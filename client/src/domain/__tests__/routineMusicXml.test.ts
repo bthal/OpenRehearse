@@ -181,3 +181,36 @@ describe('generateRoutineXml', () => {
     expect(estimateRoutineSeconds(drill(2)) - estimateRoutineSeconds(drill())).toBeCloseTo(4);
   });
 });
+
+describe('routines for a single-staff instrument', () => {
+  const clarinetRoutine = makeRoutine({
+    instrument: 'clarinetBb',
+    blocks: [{ type: 'scales', pitchClass: 0, mode: 'major', hand: 'both', bpm: 60, octaves: 1 }],
+  });
+
+  it('emits one part, not a grand staff with a rest-filled bass', () => {
+    const xml = generateRoutineXml(clarinetRoutine);
+    expect(xml.match(/<score-part /g)).toHaveLength(1);
+    expect(xml).not.toContain('<part id="P2">');
+    expect(xml).not.toContain('Left Hand');
+  });
+
+  it('still emits both parts for a piano routine', () => {
+    const xml = generateRoutineXml(
+      makeRoutine({
+        blocks: [
+          { type: 'scales', pitchClass: 0, mode: 'major', hand: 'both', bpm: 60, octaves: 1 },
+        ],
+      }),
+    );
+    expect(xml.match(/<score-part /g)).toHaveLength(2);
+    expect(xml).toContain('<part id="P2">');
+  });
+
+  it('ignores a block’s stored hand, which the instrument has no control for', () => {
+    // 'both' is what the block carries; a clarinet cannot honour it, and quietly
+    // producing two staves would contradict the picker that never offered the choice.
+    const xml = generateRoutineXml(clarinetRoutine);
+    expect(xml).not.toContain('<part id="P2">');
+  });
+});

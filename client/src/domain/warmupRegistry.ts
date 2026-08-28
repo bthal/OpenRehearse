@@ -67,7 +67,18 @@ export interface ExerciseParams {
  * invalidate a generated score. Keeping it out of this type is what stops a caller
  * from re-generating — or a generator from depending on — something purely playback.
  */
-export type ScoreParams = Omit<ExerciseParams, 'bpm'>;
+export type ScoreParams = Omit<ExerciseParams, 'bpm'> & {
+  /**
+   * Where the exercise is anchored, when the instrument is not a piano.
+   *
+   * Derived from the instrument at render time (`exerciseRootMidi`) and deliberately
+   * *not* part of `ExerciseParams`: routine blocks persist those, and an anchor that
+   * follows from the routine's instrument has no business being stored per block —
+   * it would go stale the moment the registry's range changed. Omitted means the
+   * piano's long-standing C4/C3 anchor.
+   */
+  rootMidi?: number;
+};
 
 export interface MeasureNotes {
   rh: string[][] | null;
@@ -125,8 +136,8 @@ export const WARM_UP_REGISTRY = {
     labelKey: 'dashboard.scales',
     shortLabelKey: 'routineEdit.addExerciseScales',
     rehearsalLabel: (_p, k) => `${k} Scale`,
-    generateXml: (p) => generateScaleXml(p.pitchClass, p.mode, p.hand, p.octaves),
-    measureNotes: (p) => getScaleMeasureNotes(p.pitchClass, p.mode, p.hand, p.octaves),
+    generateXml: (p) => generateScaleXml(p.pitchClass, p.mode, p.hand, p.octaves, p.rootMidi),
+    measureNotes: (p) => getScaleMeasureNotes(p.pitchClass, p.mode, p.hand, p.octaves, p.rootMidi),
   },
   arpeggio: {
     params: KEYED_PARAMS,
@@ -141,8 +152,9 @@ export const WARM_UP_REGISTRY = {
     labelKey: 'dashboard.chromatic',
     shortLabelKey: 'routineEdit.addExerciseChromatic',
     rehearsalLabel: (_p, k) => `${k} Chromatic`,
-    generateXml: (p) => generateChromaticXml(p.pitchClass, p.mode, p.hand, p.octaves),
-    measureNotes: (p) => getChromaticMeasureNotes(p.pitchClass, p.mode, p.hand, p.octaves),
+    generateXml: (p) => generateChromaticXml(p.pitchClass, p.mode, p.hand, p.octaves, p.rootMidi),
+    measureNotes: (p) =>
+      getChromaticMeasureNotes(p.pitchClass, p.mode, p.hand, p.octaves, p.rootMidi),
   },
   fiveScale: {
     params: KEYED_PARAMS,

@@ -15,7 +15,9 @@ import { useTranslation } from 'react-i18next';
 
 import { AppIcon } from '@components/AppIcon';
 import { BrandMark } from '@components/BrandMark';
-import { WARM_UP_REGISTRY, WARM_UP_TYPES } from '@domain/warmupRegistry';
+import { INSTRUMENT_IDS, INSTRUMENT_REGISTRY, exercisesFor } from '@domain/instrumentRegistry';
+import { WARM_UP_REGISTRY } from '@domain/warmupRegistry';
+import { useWarmUpStore } from '@state/warmupStore';
 import { PieceEditModal, type PieceEditMode } from '@components/PieceEditModal';
 import { isPieceComplete } from '@domain/piece';
 import { PieceRow, PieceRowSkeleton } from '@components/PieceRow';
@@ -36,6 +38,9 @@ export default function Dashboard() {
 
   // Pieces state
   const pieceIds = usePiecesStore((s) => s.pieceIds);
+  const warmUpInstrument = useWarmUpStore((s) => s.instrument);
+  const setWarmUpInstrument = useWarmUpStore((s) => s.setInstrument);
+  const initWarmUpSettings = useWarmUpStore((s) => s.initSettings);
   const piecesById = usePiecesStore((s) => s.piecesById);
   const isLoading = usePiecesStore((s) => s.isLoading);
   const importError = usePiecesStore((s) => s.importError);
@@ -74,9 +79,12 @@ export default function Dashboard() {
       void seedDemoDataIfNeeded().then(() => loadPieces());
       void loadRoutines();
       void loadSettings();
+      // The warm-up section's instrument is remembered across launches, so the section
+      // cannot render its rows until this resolves.
+      void initWarmUpSettings();
       // Re-read on focus so time practised in the play view shows up on return.
       void loadPracticeHistory();
-    }, [loadPieces, loadRoutines, loadSettings, loadPracticeHistory]),
+    }, [loadPieces, loadRoutines, loadSettings, loadPracticeHistory, initWarmUpSettings]),
   );
 
   if (importError) {
@@ -260,6 +268,30 @@ export default function Dashboard() {
             <View className="mb-6">
               <Text className="text-[22px] font-bold text-slate-950">{t('dashboard.warmUps')}</Text>
 
+              {/* Instrument scope for this section only — the piece list is never
+                filtered by instrument. This is the honest way to show that Hanon does
+                not exist for a clarinet, without a mixed list or duplicated rows. */}
+              <View className="mt-2 flex-row flex-wrap gap-2">
+                {INSTRUMENT_IDS.map((id) => {
+                  const selected = warmUpInstrument === id;
+                  return (
+                    <Pressable
+                      key={id}
+                      className={`rounded-lg border px-3 py-1.5 ${
+                        selected
+                          ? 'border-slate-950 bg-slate-950'
+                          : 'border-slate-500/35 bg-slate-50'
+                      }`}
+                      onPress={() => setWarmUpInstrument(id)}
+                    >
+                      <Text className={`text-[13px] ${selected ? 'text-white' : 'text-slate-950'}`}>
+                        {t(INSTRUMENT_REGISTRY[id].labelKey)}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+
               {isRoutineSelectionMode ? (
                 <View className="mb-2 mt-1.5 flex-row justify-end gap-2">
                   <Pressable
@@ -321,7 +353,7 @@ export default function Dashboard() {
                 />
               ))}
 
-              {WARM_UP_TYPES.map((warmUpType) => (
+              {exercisesFor(warmUpInstrument).map((warmUpType) => (
                 <WarmUpRow
                   key={warmUpType}
                   title={t(WARM_UP_REGISTRY[warmUpType].labelKey)}

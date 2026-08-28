@@ -56,7 +56,12 @@ export type NativeToWebMessage =
   | { type: 'LEAVE_BIT' };
 
 export type WebToNativeMessage =
-  | { type: 'LOADED' }
+  /**
+   * `staffCount` is of the practised part as rendered, not of the instrument: a
+   * single-line melody imported as a piano piece has one staff too, and the hand
+   * filter is meaningless on either.
+   */
+  | { type: 'LOADED'; payload?: { staffCount: number } }
   | { type: 'ERROR'; payload: string }
   | { type: 'DEBUG'; payload: string }
   | { type: 'SCORE_BPM'; payload: number }

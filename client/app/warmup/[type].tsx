@@ -10,7 +10,7 @@ import {
   mdiSpeedometer,
 } from '@mdi/js';
 import { router, Stack, useLocalSearchParams } from 'expo-router';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   Animated,
@@ -23,7 +23,11 @@ import {
 import WebView, { type WebViewMessageEvent } from 'react-native-webview';
 
 import { AppIcon } from '@components/AppIcon';
-import { DEFAULT_INSTRUMENT } from '@domain/instrumentRegistry';
+import {
+  INSTRUMENT_REGISTRY,
+  exerciseRootMidi,
+  maxExerciseOctaves,
+} from '@domain/instrumentRegistry';
 import { injectInstrumentAudio } from '@score-web/instrumentAudio';
 import { CenterPlayButton } from '@components/CenterPlayButton';
 import { ToolbarShell } from '@components/ToolbarShell';
@@ -144,6 +148,21 @@ export default function WarmUpView() {
   // only. Depending on `settings` wholesale would reload the score on every tempo
   // change, which handleBpmChange goes out of its way to avoid.
   const { exercise, pitchClass, mode, hand, octaves, peakRepeats } = settings;
+  const instrument = useWarmUpStore((s) => s.instrument);
+  // The picker only offers what fits, but a value stored while another instrument was
+  // selected can outlive that choice — so the generator is given the clamped value
+  // rather than trusting what is on disk.
+  const octaveOptions = useMemo(
+    () =>
+      WARMUP_OCTAVES.filter(
+        (n): n is WarmUpOctaves => n <= maxExerciseOctaves(instrument, pitchClass),
+      ),
+    [instrument, pitchClass],
+  );
+  const effectiveOctaves = Math.min(
+    octaves,
+    maxExerciseOctaves(instrument, pitchClass),
+  ) as WarmUpOctaves;
 
   const sendScore = useCallback(async () => {
     setLoadingScore(true);
@@ -154,19 +173,24 @@ export default function WarmUpView() {
         pitchClass,
         mode,
         hand,
-        octaves,
+        // A single-staff instrument has no hand control, so its exercises are the
+        // one-part case — which is exactly what 'right' already produces.
+        ...(INSTRUMENT_REGISTRY[instrument].staffLayout === 'single'
+          ? { hand: 'right' as const }
+          : {}),
+        octaves: effectiveOctaves,
         peakRepeats,
+        // Anchors the exercise in this instrument's own register rather than the
+        // piano's C4. Derived, never persisted — see ScoreParams.
+        rootMidi: exerciseRootMidi(instrument, pitchClass),
       });
-      // The warm-up instrument picker arrives with the warm-up slice; until then every
-      // exercise is a piano one, as it has always been.
-      void injectInstrumentAudio(
-        (js) => webViewRef.current?.injectJavaScript(js),
-        DEFAULT_INSTRUMENT,
-      ).then(() => {
-        webViewRef.current?.injectJavaScript(
-          `window.__rn_load_xml(${JSON.stringify(xml)});void 0;`,
-        );
-      });
+      void injectInstrumentAudio((js) => webViewRef.current?.injectJavaScript(js), instrument).then(
+        () => {
+          webViewRef.current?.injectJavaScript(
+            `window.__rn_load_xml(${JSON.stringify(xml)});void 0;`,
+          );
+        },
+      );
     } catch (err) {
       setLoadingScore(false);
       setScoreError(err instanceof Error ? err.message : t('warmup.failedToGenerate'));
@@ -177,8 +201,9 @@ export default function WarmUpView() {
     pitchClass,
     mode,
     hand,
-    octaves,
+    effectiveOctaves,
     peakRepeats,
+    instrument,
     setLoadingScore,
     setScoreError,
     t,
@@ -524,10 +549,10 @@ export default function WarmUpView() {
                       className="text-base font-semibold mt-0.5"
                       style={{ color: openPanel === 'octave' ? Colors.primary : Colors.icon }}
                     >
-                      {settings.octaves}
+                      {effectiveOctaves}
                     </Text>
                     <Text className="text-[9px] text-black mt-0.5">
-                      {t('warmup.octave', { count: settings.octaves })}
+                      {t('warmup.octave', { count: effectiveOctaves })}
                     </Text>
                   </TouchableOpacity>
                 </View>
@@ -729,7 +754,7 @@ export default function WarmUpView() {
                 },
               ]}
             >
-              {WARMUP_OCTAVES.map((n) => (
+              {octaveOptions.map((n) => (
                 <TouchableOpacity
                   key={n}
                   onPress={() => handleOctaveChange(n)}
@@ -740,7 +765,7 @@ export default function WarmUpView() {
                     style={{
                       fontSize: 14,
                       fontWeight: '600',
-                      color: settings.octaves === n ? Colors.primary : Colors.iconMuted,
+                      color: effectiveOctaves === n ? Colors.primary : Colors.iconMuted,
                     }}
                   >
                     {n}

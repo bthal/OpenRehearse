@@ -18,6 +18,12 @@ import {
   type ExerciseParams,
   type WarmUpType,
 } from '@domain/warmupRegistry';
+import {
+  DEFAULT_INSTRUMENT,
+  INSTRUMENT_IDS,
+  normaliseInstrumentId,
+  type InstrumentId,
+} from '@domain/instrumentRegistry';
 
 /**
  * Remembered parameters for one exercise. Every exercise stores the full parameter
@@ -27,17 +33,48 @@ import {
  */
 export type ExerciseSettings = ExerciseParams;
 
+/** One instrument's remembered parameters, keyed by exercise. */
 type WarmUpSettings = Record<WarmUpType, ExerciseSettings>;
+
+/**
+ * The whole persisted file: which instrument the warm-up section is showing, and a
+ * settings block per instrument.
+ *
+ * Split by instrument because clarinet scales and piano scales are different
+ * exercises in different registers — carrying one octave count between them would
+ * offer a value the other instrument may not even support.
+ */
+interface WarmUpFile {
+  instrument: InstrumentId;
+  byInstrument: Record<InstrumentId, WarmUpSettings>;
+}
 
 const DEFAULTS: WarmUpSettings = Object.fromEntries(
   WARM_UP_TYPES.map((t) => [t, { ...DEFAULT_EXERCISE_PARAMS }]),
 ) as WarmUpSettings;
 
+const DEFAULTS_BY_INSTRUMENT: Record<InstrumentId, WarmUpSettings> = Object.fromEntries(
+  INSTRUMENT_IDS.map((id) => [id, DEFAULTS]),
+) as Record<InstrumentId, WarmUpSettings>;
+
 const SETTINGS_PATH = (FileSystem.documentDirectory ?? '') + 'warmup-settings.json';
 
 interface WarmUpState {
-  /** Persisted per-exercise parameters, keyed by exercise id. */
+  /**
+   * The instrument the warm-up section is showing. Scopes that section only — the
+   * library is never filtered by instrument. See `specs/features/instruments.md`.
+   */
+  instrument: InstrumentId;
+  /**
+   * Persisted per-exercise parameters for the *current* instrument, keyed by exercise.
+   *
+   * Kept as a flat slice rather than making every consumer index by instrument first:
+   * switching instrument swaps this wholesale, so the screens read exactly what they
+   * always did.
+   */
   exercises: WarmUpSettings;
+  /** Every instrument's block, so switching back restores what you had. */
+  exercisesByInstrument: Record<InstrumentId, WarmUpSettings>;
 
   webViewReady: boolean;
   isLoadingScore: boolean;
@@ -53,6 +90,7 @@ interface WarmUpState {
   scoreMoving: boolean;
 
   initSettings: () => Promise<void>;
+  setInstrument: (instrument: InstrumentId) => void;
   updateExercise: (type: WarmUpType, patch: Partial<ExerciseSettings>) => void;
   setWebViewReady: (v: boolean) => void;
   setLoadingScore: (v: boolean) => void;
@@ -99,28 +137,52 @@ function coerceExercise(raw: unknown): ExerciseSettings {
   };
 }
 
-async function loadSettings(): Promise<WarmUpSettings> {
+function coerceBlock(raw: unknown): WarmUpSettings {
+  const saved = (raw ?? {}) as Record<string, unknown>;
+  // Built from the registry rather than from the file, so an exercise removed from
+  // this build is dropped and a newly added one picks up its defaults.
+  return Object.fromEntries(
+    WARM_UP_TYPES.map((t) => [t, coerceExercise(saved[t])]),
+  ) as WarmUpSettings;
+}
+
+async function loadSettings(): Promise<WarmUpFile> {
   try {
     const info = await FileSystem.getInfoAsync(SETTINGS_PATH);
-    if (!info.exists) return DEFAULTS;
+    if (!info.exists) {
+      return { instrument: DEFAULT_INSTRUMENT, byInstrument: DEFAULTS_BY_INSTRUMENT };
+    }
     const raw = await FileSystem.readAsStringAsync(SETTINGS_PATH);
     const saved = (JSON.parse(raw) ?? {}) as Record<string, unknown>;
-    // Built from the registry rather than from the file, so an exercise removed from
-    // this build is dropped and a newly added one picks up its defaults.
-    return Object.fromEntries(
-      WARM_UP_TYPES.map((t) => [t, coerceExercise(saved[t])]),
-    ) as WarmUpSettings;
+
+    // A file written before instruments existed is a flat map of exercise ids. Those
+    // were piano settings and always were, so they become the piano block rather than
+    // being discarded — the same normalise-on-read stance the repositories take.
+    const legacy = !('byInstrument' in saved);
+    const blocks = (
+      legacy ? {} : ((saved.byInstrument ?? {}) as Record<string, unknown>)
+    ) as Record<string, unknown>;
+    const byInstrument = Object.fromEntries(
+      INSTRUMENT_IDS.map((id) => [
+        id,
+        coerceBlock(legacy && id === DEFAULT_INSTRUMENT ? saved : blocks[id]),
+      ]),
+    ) as Record<InstrumentId, WarmUpSettings>;
+
+    return { instrument: normaliseInstrumentId(saved.instrument), byInstrument };
   } catch {
-    return DEFAULTS;
+    return { instrument: DEFAULT_INSTRUMENT, byInstrument: DEFAULTS_BY_INSTRUMENT };
   }
 }
 
-function saveSettings(settings: WarmUpSettings): void {
-  FileSystem.writeAsStringAsync(SETTINGS_PATH, JSON.stringify(settings)).catch(() => {});
+function saveSettings(file: WarmUpFile): void {
+  FileSystem.writeAsStringAsync(SETTINGS_PATH, JSON.stringify(file)).catch(() => {});
 }
 
 export const useWarmUpStore = create<WarmUpState>()((set, get) => ({
+  instrument: DEFAULT_INSTRUMENT,
   exercises: DEFAULTS,
+  exercisesByInstrument: DEFAULTS_BY_INSTRUMENT,
   webViewReady: false,
   isLoadingScore: false,
   scoreError: null,
@@ -130,12 +192,30 @@ export const useWarmUpStore = create<WarmUpState>()((set, get) => ({
   scoreMoving: false,
 
   initSettings: async () => {
-    set({ exercises: await loadSettings() });
+    const file = await loadSettings();
+    set({
+      instrument: file.instrument,
+      exercisesByInstrument: file.byInstrument,
+      exercises: file.byInstrument[file.instrument],
+    });
+  },
+
+  setInstrument: (instrument) => {
+    set((s) => ({ instrument, exercises: s.exercisesByInstrument[instrument] }));
+    const { instrument: current, exercisesByInstrument } = get();
+    saveSettings({ instrument: current, byInstrument: exercisesByInstrument });
   },
 
   updateExercise: (type, patch) => {
-    set((s) => ({ exercises: { ...s.exercises, [type]: { ...s.exercises[type], ...patch } } }));
-    saveSettings(get().exercises);
+    set((s) => {
+      const exercises = { ...s.exercises, [type]: { ...s.exercises[type], ...patch } };
+      return {
+        exercises,
+        exercisesByInstrument: { ...s.exercisesByInstrument, [s.instrument]: exercises },
+      };
+    });
+    const { instrument, exercisesByInstrument } = get();
+    saveSettings({ instrument, byInstrument: exercisesByInstrument });
   },
 
   setWebViewReady: (v) => set({ webViewReady: v }),

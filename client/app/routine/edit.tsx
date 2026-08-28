@@ -7,7 +7,8 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useTranslation } from 'react-i18next';
 
 import { AppIcon } from '@components/AppIcon';
-import { DEFAULT_INSTRUMENT } from '@domain/instrumentRegistry';
+import { INSTRUMENT_REGISTRY, exercisesFor, type InstrumentId } from '@domain/instrumentRegistry';
+import { useWarmUpStore } from '@state/warmupStore';
 import {
   PAUSE_MEASURES,
   type ExerciseBlock,
@@ -31,7 +32,6 @@ import {
   DEFAULT_EXERCISE_PARAMS,
   HANON_EXERCISE_COUNT,
   WARM_UP_REGISTRY,
-  WARM_UP_TYPES,
   hasParam,
   keyLabel as keyName,
   type WarmUpType,
@@ -75,8 +75,9 @@ const HAND_OPTIONS: { tKey: string; value: WarmUpHand }[] = [
   { tKey: 'routineEdit.handLeft', value: 'left' },
 ];
 
-// Exercise types offered in the "Add Exercise" picker, in registry display order.
-const EXERCISE_TYPES: WarmUpType[] = WARM_UP_TYPES;
+// Exercise types offered in the "Add Exercise" picker come from the routine's
+// instrument, in registry display order. Gating here is what makes validation
+// unnecessary later: a block the instrument cannot play can never be created.
 
 function exerciseLabelKey(type: WarmUpType): string {
   return WARM_UP_REGISTRY[type].shortLabelKey;
@@ -183,6 +184,16 @@ export default function RoutineEditScreen() {
 
   // Lazy initializers so we don't need a setState-in-effect pattern
   const [title, setTitle] = useState(() => existingRoutine?.title ?? '');
+  /**
+   * Fixed at creation and read-only afterwards: changing it would invalidate every
+   * block whose exercise the new instrument cannot do, and there is no good answer to
+   * what should happen to those. New routines default to whatever the warm-up section
+   * is currently showing, which is almost always what the user means.
+   */
+  const warmUpInstrument = useWarmUpStore((s) => s.instrument);
+  const [instrument] = useState<InstrumentId>(
+    () => existingRoutine?.instrument ?? warmUpInstrument,
+  );
   const [blocks, setBlocks] = useState<BlockWithKey[]>(
     () => existingRoutine?.blocks.map((b) => ({ ...b, _key: Crypto.randomUUID() })) ?? [],
   );
@@ -218,9 +229,7 @@ export default function RoutineEditScreen() {
     await saveRoutine({
       id: existingRoutine?.id ?? Crypto.randomUUID(),
       title: title.trim(),
-      // Read-only once set, so an edit must carry the existing value through rather
-      // than re-deriving it. The create-time picker arrives with the warm-up slice.
-      instrument: existingRoutine?.instrument ?? DEFAULT_INSTRUMENT,
+      instrument,
       blocks: cleanBlocks,
       createdAt: existingRoutine?.createdAt ?? new Date().toISOString(),
     });
@@ -276,7 +285,7 @@ export default function RoutineEditScreen() {
       atIndex,
       type: 'addType',
       options: [
-        ...EXERCISE_TYPES.map((exType) => ({
+        ...exercisesFor(instrument).map((exType) => ({
           label: t(exerciseLabelKey(exType)),
           value: exType,
         })),
@@ -504,6 +513,13 @@ export default function RoutineEditScreen() {
                   className="rounded-lg border border-slate-500/35 bg-slate-50 px-4 py-3 text-xl text-slate-950"
                   style={{ textAlign: 'center' }}
                 />
+                {/* Read-only: fixed when the routine is created, because changing it
+                  would invalidate blocks the new instrument cannot play. */}
+                <Text className="mt-2 text-center text-[13px] text-slate-500">
+                  {t('routineEdit.instrumentFixed', {
+                    instrument: t(INSTRUMENT_REGISTRY[instrument].labelKey),
+                  })}
+                </Text>
                 {!title && (
                   <View
                     pointerEvents="none"

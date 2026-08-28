@@ -72,20 +72,37 @@ Hanon, Scales, Arpeggios, Chromatic, and 5-Finger scales share the same controls
 - Eighth notes beamed in groups of 4. No tempo marking rendered in score;
   BPM injected via WebView bridge after LOADED.
 
+## Instruments
+
+Exercises are scoped to an instrument. The **Warm-ups** section of the dashboard is headed by an
+instrument control which scopes *that section only* — the piece list is never filtered. The
+selection persists across launches, and settings are keyed by **instrument + exercise**, so
+clarinet scales keep their own key and octave count from piano scales.
+
+Which exercises exist for an instrument is declared by `INSTRUMENT_REGISTRY`, not here — a Bb
+clarinet offers scales and chromatic. A single-staff instrument's generators emit one part; `hand`
+is simply not among its parameters, and its exercises are anchored in that instrument's own
+register rather than the piano's C4, with the octave picker offering only counts that fit its
+written range. See `specs/features/instruments.md`.
+
 ## UI
 
 - Dashboard shows a **Warm-ups** section above the piece list.
 - Warm-up view is **landscape**; left toolbar: back, play/pause, metronome, BPM, hand,
   key, octave (peak repeats in place of key/octave for the 4-5 drill). Each picker opens a
   sliding panel over the score; opening pauses playback.
-- Settings persisted per exercise type to device storage (`warmup-settings.json`).
+- Settings persisted per **instrument and** exercise type to device storage
+  (`warmup-settings.json`). A file written before instruments existed is read as the piano block
+  rather than discarded.
 
 ## Acceptance criteria
 
 - [ ] Dashboard rows navigate to the correct warm-up view.
 - [ ] Score renders correctly for all key/hand/octave combinations.
 - [ ] Play/pause, BPM change, and metronome toggle work correctly.
-- [ ] Settings survive app restart.
+- [ ] Settings survive app restart, separately per instrument.
+- [ ] The warm-up section offers only the exercises the selected instrument supports.
+- [ ] Octave options never exceed what fits the instrument's written range.
 - [ ] Changing any parameter while playing pauses playback and re-generates the score.
 
 ---
@@ -93,6 +110,11 @@ Hanon, Scales, Arpeggios, Chromatic, and 5-Finger scales share the same controls
 ## Routines
 
 A **Routine** is an ordered list of exercise blocks (Hanon, Scales, Arpeggios, Chromatic, 5-Finger) and optional Pause blocks, rendered and played back as a single continuous score.
+
+A routine is built **for one instrument**, fixed when it is created and read-only afterwards:
+changing it would invalidate blocks the new instrument cannot play. The Add Exercise picker offers
+only that instrument's exercises, so an incompatible block can never be created and nothing has to
+be re-validated at save or playback time. Routines saved before instruments existed are piano ones.
 
 ### Dashboard
 
@@ -114,7 +136,9 @@ A **Routine** is an ordered list of exercise blocks (Hanon, Scales, Arpeggios, C
 
 - Simplified toolbar: back arrow, play/pause, metronome only. No loop, no speed panel.
 - Generates a combined MusicXML via `generateRoutineXml(routine)` in `domain/routineMusicXml.ts`.
-- Score always uses 2 staves (treble + bass); single-hand exercises fill the unused staff with whole-note rests.
+- A piano routine uses 2 staves (treble + bass); single-hand exercises fill the unused staff with
+  whole-note rests. A single-staff instrument's routine emits **one part** — the bass staff is not
+  emitted at all, rather than filled with rests and hidden.
 - Each exercise block's first measure includes a `<rehearsal>` section label (e.g. "Hanon 7 in C", "C Scale") and a `<sound tempo="X"/>` directive.
 - Pause blocks appear as rest measures with a "Pause" rehearsal mark; they play at the BPM of the **next** exercise block.
 - Tempo changes are driven by `computeRoutineTempoSchedule()` in `domain/routineMusicXml.ts`, which computes cumulative quarter-beat positions for each BPM change. `initPlayback` receives this as `externalTempoSchedule` and registers each change via `Tone.Transport.schedule()` so BPM fires at the correct tick on every play and replay. OSMD's `<sound tempo>` detection is bypassed when an external schedule is provided.

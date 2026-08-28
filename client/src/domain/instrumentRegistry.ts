@@ -151,3 +151,36 @@ export function isInWrittenRange(instrument: InstrumentId, writtenMidi: number):
   const { lowMidi, highMidi } = INSTRUMENT_REGISTRY[instrument].writtenRange;
   return writtenMidi >= lowMidi && writtenMidi <= highMidi;
 }
+
+/**
+ * The MIDI root a keyed exercise starts on for this instrument.
+ *
+ * The piano has always anchored at C4 (60) for the right hand and C3 (48) for the
+ * left, and keeps doing so. A single-staff instrument instead takes the lowest
+ * occurrence of the pitch class at or above the bottom of its written range, so an
+ * exercise sits where the instrument actually plays rather than where a piano would.
+ */
+export function exerciseRootMidi(instrument: InstrumentId, pitchClass: number): number {
+  const d = INSTRUMENT_REGISTRY[instrument];
+  if (d.staffLayout === 'grand') return 60 + (((pitchClass % 12) + 12) % 12);
+  const pc = ((pitchClass % 12) + 12) % 12;
+  const low = d.writtenRange.lowMidi;
+  // First note of that pitch class at or above the range floor.
+  return low + ((((pc - (low % 12)) % 12) + 12) % 12);
+}
+
+/**
+ * How many octaves of a keyed exercise fit inside the instrument's written range.
+ *
+ * The picker offers only these, which is what removes the error state: the UI never
+ * presents a combination the instrument cannot play, so nothing has to fail later.
+ * Always at least 1 — an instrument too small for a single octave of some key would
+ * be a registry bug, and silently offering zero options would hide it.
+ */
+export function maxExerciseOctaves(instrument: InstrumentId, pitchClass: number): number {
+  const d = INSTRUMENT_REGISTRY[instrument];
+  if (d.staffLayout === 'grand') return 3;
+  const root = exerciseRootMidi(instrument, pitchClass);
+  const span = d.writtenRange.highMidi - root;
+  return Math.max(1, Math.min(3, Math.floor(span / 12)));
+}

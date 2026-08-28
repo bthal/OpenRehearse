@@ -379,10 +379,15 @@ function twoHandMeasures(
   pitchClass: number,
   hand: WarmUpHand,
   build: MeasureBuilder,
+  rootMidi?: number,
 ): { rh: string[][] | null; lh: string[][] | null } {
+  // The piano's C4/C3 anchor stays the default. A single-staff instrument passes its
+  // own root so the exercise sits where that instrument actually plays; the left-hand
+  // octave below is kept relative to it, which is a no-op for the piano.
+  const rhRoot = rootMidi ?? 60 + pitchClass;
   return {
-    rh: hand === 'left' ? null : build(60 + pitchClass),
-    lh: hand === 'right' ? null : build(48 + pitchClass),
+    rh: hand === 'left' ? null : build(rhRoot),
+    lh: hand === 'right' ? null : build(rhRoot - 12),
   };
 }
 
@@ -412,11 +417,15 @@ export function getScaleMeasureNotes(
   mode: WarmUpScaleMode,
   hand: WarmUpHand,
   octaves: number,
+  rootMidi?: number,
 ): { rh: string[][] | null; lh: string[][] | null } {
   const { names } = getKeyInfo(pitchClass, mode);
   const intervals = mode === 'major' ? MAJOR_INTERVALS : MINOR_INTERVALS;
-  return twoHandMeasures(pitchClass, hand, (root) =>
-    buildScaleMeasuresInternal(root, names, intervals, octaves),
+  return twoHandMeasures(
+    pitchClass,
+    hand,
+    (root) => buildScaleMeasuresInternal(root, names, intervals, octaves),
+    rootMidi,
   );
 }
 
@@ -425,9 +434,10 @@ export function generateScaleXml(
   mode: WarmUpScaleMode,
   hand: WarmUpHand,
   octaves = 1,
+  rootMidi?: number,
 ): string {
   const { fifths } = getKeyInfo(pitchClass, mode);
-  const { rh, lh } = getScaleMeasureNotes(pitchClass, mode, hand, octaves);
+  const { rh, lh } = getScaleMeasureNotes(pitchClass, mode, hand, octaves, rootMidi);
   return buildTwoHandXml(fifths, mode, hand, rh, lh);
 }
 
@@ -460,10 +470,14 @@ export function getChromaticMeasureNotes(
   mode: WarmUpScaleMode,
   hand: WarmUpHand,
   octaves: number,
+  rootMidi?: number,
 ): { rh: string[][] | null; lh: string[][] | null } {
   const { names } = getKeyInfo(pitchClass, mode);
-  return twoHandMeasures(pitchClass, hand, (root) =>
-    buildChromaticMeasuresInternal(root, names, octaves),
+  return twoHandMeasures(
+    pitchClass,
+    hand,
+    (root) => buildChromaticMeasuresInternal(root, names, octaves),
+    rootMidi,
   );
 }
 
@@ -472,9 +486,10 @@ export function generateChromaticXml(
   mode: WarmUpScaleMode,
   hand: WarmUpHand,
   octaves = 1,
+  rootMidi?: number,
 ): string {
   const { fifths } = getKeyInfo(pitchClass, mode);
-  const { rh, lh } = getChromaticMeasureNotes(pitchClass, mode, hand, octaves);
+  const { rh, lh } = getChromaticMeasureNotes(pitchClass, mode, hand, octaves, rootMidi);
   return buildTwoHandXml(fifths, mode, hand, rh, lh);
 }
 
