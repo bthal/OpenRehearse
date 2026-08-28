@@ -23,6 +23,7 @@ Each descriptor carries:
 | Field | Meaning |
 |-------|---------|
 | `labelKey` | i18n key for the display name |
+| `shortLabelKey` | i18n key for the name in a chip or a button ("Clarinet") |
 | `samples` | Sample set id + the note→file map for `Tone.Sampler` |
 | `writtenRange` | Lowest and highest **written** MIDI note the instrument reads |
 | `transposeSemitones` | Sounding pitch relative to written. `0` for piano, `-2` for Bb clarinet |
@@ -47,16 +48,50 @@ piano finger independence and its printed fingerings are piano fingerings, so it
 musically pointless rather than technically impossible. Arpeggios and 5-finger scales are playable
 on a clarinet and are a candidate for the next slice; they are out now only to keep this one small.
 
+## What a part must be for an instrument to play it
+
+A MusicXML part is **monophonic** iff, scoped to that part: `<staves>` is absent or `1`, no
+`<chord/>` appears, and there is exactly one distinct `<voice>` value. All three conditions are
+needed and none implies another — a single-staff part can carry chords, a chordless part can carry
+two voices.
+
+**An instrument whose `staffLayout` is `single` may only be assigned to a monophonic part.** Piano
+has no constraint and accepts everything, which is what stops the import flow from ever
+dead-ending: whatever the file holds, at least one instrument is legal.
+
+The refusal is not softened into a top-note-only reduction. Playing something other than what the
+score plainly shows is a worse answer than an option the user can see is unavailable, and why. The
+consequence is deliberate and permanent at this granularity: none of the repo's piano test scores
+can be a clarinet piece, and "practise the piano melody on clarinet" is out of scope.
+
+Granularity is **part-only**. There is no staff or voice selection, and adding one would reopen
+every question this rule closes.
+
+The verdict is computed once at import (`scrapePartPolyphony`) and stored as `monophonic` on each
+entry of `Piece.parts`, with the first reason — `staves`, `chords`, `voices` — beside it for
+labelling. Storing it is what keeps every later check row-local: **listing the dashboard must never
+parse a score.** The flag is optional on `ScorePart`, because it is genuinely absent on parts
+written by earlier builds; absent means "nobody looked", never "polyphonic".
+
 ## Instrument on a piece
 
 `Piece.instrument: InstrumentId`. Pieces stored before this field existed normalise to `'piano'` at
 the repository boundary, the way `normaliseSections` and `normaliseBits` already work — so nothing
 downstream ever sees `undefined`, and no data migration runs.
 
-There is **no global "current instrument"**. The dashboard lists every piece and routine regardless
-of instrument, each row carrying a small instrument badge. A profile-level instrument mode that
-scopes the whole library is a separate feature that can be added cheaply later; un-scoping a scoped
-dashboard could not be.
+**The instrument is immutable after import.** So is the practised part. There is no "change
+instrument" action and no escape hatch: both are what the piece *is*, not settings on it, and a
+piece that could change instrument could be changed into one its own score cannot support. Getting
+it wrong is repaired by re-importing the file, which costs one dialogue.
+
+The repository extends its normalise-on-read seam to the rule: if a stored instrument is
+`single`-staff but the chosen part's stored `monophonic` flag is `false`, the piece reads as piano.
+A piece whose part carries **no** stored flag is left exactly as it is — it has been working, and a
+guess is not an improvement.
+
+The dashboard carries a **global instrument scope** — All / Piano / Clarinet — which filters the
+warm-ups, routines and pieces it lists and **nothing else**. It is a pure view filter: no effect on
+the PlayView, on the practice heatmap, or on what a new import may become. See `dashboard.md`.
 
 ## Transposition
 
@@ -130,8 +165,9 @@ positions are not stable across re-exports.
 
 The other parts are **filtered, not destroyed**. The full XML is stored untouched; at load the
 practised instrument is passed explicitly to `NotesUnderCursor(instrument)`, and the others are
-hidden for rendering. Nothing is rewritten, so the practised part can be changed later, and turning
-the hidden parts into accompaniment remains open without a re-import.
+hidden for rendering. Nothing is rewritten, so turning the hidden parts into accompaniment remains
+open without a re-import — which is the reason to keep the whole file even though the practised
+part itself is fixed at import.
 
 Note for that future: `Instrument.Visible = false` cascades to every Voice, and OSMD's
 visible-entry collection gates on `Voice.Visible` — so hiding a part also silences it. Accompaniment
@@ -147,32 +183,50 @@ documented meaning (see `section-detection.md`).
 Instrument and part are settled during import, through the existing "Input needed" modal
 (`import.md` step 7) rather than a new flow.
 
-- **Detection** reads `<score-instrument>` / `<instrument-name>`, the GM `<midi-program>`
-  (72 = clarinet), and the presence of `<transpose>`. With two instruments supported, "looks like a
-  clarinet, otherwise piano" is reliable enough.
-- **Instrument joins title, composer and tempo as a required field.** A file the detector cannot
-  place prompts; a clear one imports silently.
-- **A multi-part file always shows the part picker**, regardless of confidence — the app cannot
-  guess which line you intend to practise. Single-part files skip it.
-- Both stay editable afterwards in the piece edit modal.
+- **The part is asked first**, then the instrument. Which line you practise is what decides which
+  instruments are possible; asking the instrument first puts a question that nothing has yet
+  constrained. A multi-part file always shows the part picker, regardless of detection confidence —
+  the app cannot guess which line you intend to practise. Single-part files skip it.
+- **Instruments the chosen part rules out are shown disabled, with the reason** ("two staves",
+  "contains chords") — never hidden. A clarinettist who cannot find their instrument has to learn
+  that the score is the reason, not the app.
+- **The modal asks about the instrument unless exactly one is legal for the selection.** That is
+  not the same as "unless detection was confident", and the difference is the point:
+  - A two-staff score has one legal answer, so nothing is asked, however silent the file is about
+    what it is for. It imports as today.
+  - A single-line score **always** asks, however confident detection was, because that is the only
+    case where a wrong answer is both possible and irreversible. **Detection pre-selects; it does
+    not decide.**
+- **Detection** reads the part name first, then the GM `<midi-program>` (72 = clarinet). A
+  detection the chosen part cannot support is dropped. `<transpose>` is not a signal — see
+  `import.md`.
+- Neither is editable afterwards.
 
 ## Warm-ups and routines
 
-- The warm-up section of the dashboard is headed by an **instrument segmented control**. It scopes
-  that section only — not the library — and is the only honest way to present "Hanon does not exist
-  for clarinet" without either a mixed list or duplicated rows.
-- The selected instrument **persists across launches**, and warm-up settings are keyed by
-  **instrument + exercise** rather than exercise alone: clarinet scales keep their own key and
-  octave count, because they are a different exercise in a different register.
+- Warm-up rows follow the **dashboard's instrument scope**, not a control of their own. Under a
+  named instrument the section lists that instrument's exercises; under **All** an exercise appears
+  once per instrument that has it, **grouped by exercise** — Scales (Piano), Scales (Clarinet),
+  Chromatic (Piano), Chromatic (Clarinet). Grouping by instrument instead would bury the second
+  Scales row far below the first, and the question a warming-up player asks is "where are my
+  scales".
+- Tapping a warm-up row passes its instrument to the warm-up screen as a **route parameter**. It
+  does not change the persisted scope: the dashboard filter is a filter, not a mode.
+- Warm-up settings are keyed by **instrument + exercise** rather than exercise alone: clarinet
+  scales keep their own key and octave count, because they are a different exercise in a different
+  register. The store is indexed by instrument, since there is no "current" one to swap on.
 - Generators read `staffLayout` and emit one staff or two. `hand` is simply not in a single-staff
   instrument's `params`, which `WARM_UP_REGISTRY` already knows how to honour — no special-casing.
 - **Octave counts adapt to the range.** The generator anchors each exercise in the instrument's own
   register instead of a fixed octave, and the octaves picker offers only values that fit the
   selected key. The UI never offers an impossible combination, so there is no error state.
-- **A routine's instrument is chosen at creation and read-only thereafter.** The Add Exercise picker
-  offers only that instrument's supported exercises, so an incompatible block cannot be created and
-  no validation is needed at save or playback time. Routines stored before this field existed
-  normalise to `'piano'`.
+- **A routine's instrument is chosen at creation and read-only thereafter.** The editor shows a
+  picker while the routine is new — pre-selected from the dashboard scope when that scope names an
+  instrument, and left to the user under All — and a read-only "For {instrument}" line once it
+  exists. Switching before the first save drops blocks the new instrument cannot play, which keeps
+  the same invariant the Add Exercise picker enforces: a routine never holds a block its instrument
+  cannot do, so nothing has to be validated at save or playback time. Routines stored before this
+  field existed normalise to `'piano'`.
 
 ## Audio
 
@@ -212,10 +266,20 @@ one thing the heatmap is for.
 - [ ] A concert-pitch score assigned to Bb clarinet imports with a base transposition of +2 and
       renders in the transposed key; an already-transposed clarinet part imports with 0.
 - [ ] The transposition stepper shows base + practice; Reset returns to the base, not to zero.
-- [ ] A multi-part score shows a part picker; only the chosen part renders and sounds.
-- [ ] Changing the practised part later does not require re-import.
+- [ ] A multi-part score shows a part picker, before the instrument picker; only the chosen part
+      renders and sounds.
+- [ ] A two-staff score cannot be assigned to the clarinet: the option is shown disabled, with
+      "two staves" as the reason.
+- [ ] A single-line score always asks which instrument it is for; a two-staff one never does.
+- [ ] The piece edit modal states the instrument and the part and offers no way to change either.
+- [ ] A stored clarinet piece whose part is recorded as polyphonic reads back as a piano piece.
 - [ ] Warm-up section offers only scales and chromatic for clarinet, on a single staff, with no hand
       control.
+- [ ] The dashboard scope filters warm-ups, routines and pieces, survives a restart, defaults to
+      All on a fresh install, and changes nothing outside that screen.
+- [ ] Under All, each exercise appears once per instrument that has it, grouped by exercise.
+- [ ] Opening a warm-up row from All does not change the persisted scope.
+- [ ] Changing the scope clears any row selection.
 - [ ] Octave options offered for a clarinet exercise never exceed its written range.
 - [ ] Warm-up settings for clarinet and piano are remembered independently.
 - [ ] A routine created for clarinet cannot contain a Hanon or 4-5 drill block.

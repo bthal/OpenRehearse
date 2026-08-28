@@ -157,7 +157,10 @@ The `/commit` command runs a guided pass over all of this: assess scope → read
   enumeration — never switch on an instrument name. It owns the sample set, written range,
   staff layout, sounding interval and exercise list. Playback sounds the **sounding** pitch, not the
   written one. Sample sets are **bundled**, never fetched. Other parts of a multi-part score are
-  **filtered, never stripped** — the XML is stored whole.
+  **filtered, never stripped** — the XML is stored whole. A `staffLayout: 'single'` instrument may
+  only be assigned to a **monophonic** part (no `<staves>` > 1, no `<chord/>`, one `<voice>`), the
+  selection is **refused rather than reduced**, and a piece's instrument and part are **immutable
+  after import**. The dashboard's instrument scope is a **view filter** over that screen only.
 - **Loops**: **one** active loop; handles **continuously draggable** but **discretised to the note
   grid** (bounds are half-open `[A, B)`, minimum one quarter note); **immediate jump** at wrap.
   Saved loops ("**bits**") do not change that: a bit is *stored bounds plus practice settings*,

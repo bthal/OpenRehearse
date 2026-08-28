@@ -74,10 +74,21 @@ Hanon, Scales, Arpeggios, Chromatic, and 5-Finger scales share the same controls
 
 ## Instruments
 
-Exercises are scoped to an instrument. The **Warm-ups** section of the dashboard is headed by an
-instrument control which scopes *that section only* — the piece list is never filtered. The
-selection persists across launches, and settings are keyed by **instrument + exercise**, so
-clarinet scales keep their own key and octave count from piano scales.
+Exercises are scoped to an instrument, by the **dashboard's instrument scope** (see
+`dashboard.md`) rather than by a control of this section — routines and pieces are filtered by the
+same choice, and two competing scopes on one screen would be a puzzle.
+
+Under a named instrument the section lists that instrument's exercises. Under **All** an exercise
+appears once per instrument that has it, **grouped by exercise**: Scales (Piano), Scales
+(Clarinet), Chromatic (Piano), Chromatic (Clarinet). Grouping by instrument would bury the second
+Scales row far below the first, and the question a warming-up player asks is "where are my scales".
+
+Tapping a row passes its instrument to the warm-up screen as a **route parameter**; it never
+changes the persisted scope, because the dashboard filter is a filter and not a mode. Every row
+carries a small text badge naming its instrument, shown under a filtered scope too.
+
+Settings are keyed by **instrument + exercise**, so clarinet scales keep their own key and octave
+count from piano scales; the store is indexed by instrument, since there is no "current" one.
 
 Which exercises exist for an instrument is declared by `INSTRUMENT_REGISTRY`, not here — a Bb
 clarinet offers scales and chromatic. A single-staff instrument's generators emit one part; `hand`
@@ -93,7 +104,8 @@ written range. See `specs/features/instruments.md`.
   sliding panel over the score; opening pauses playback.
 - Settings persisted per **instrument and** exercise type to device storage
   (`warmup-settings.json`). A file written before instruments existed is read as the piano block
-  rather than discarded.
+  rather than discarded, and one carrying the old "which instrument is showing" key is read with
+  that key ignored — the dashboard scope replaced it and lives in `settings.json`.
 
 ## Acceptance criteria
 
@@ -101,7 +113,9 @@ written range. See `specs/features/instruments.md`.
 - [ ] Score renders correctly for all key/hand/octave combinations.
 - [ ] Play/pause, BPM change, and metronome toggle work correctly.
 - [ ] Settings survive app restart, separately per instrument.
-- [ ] The warm-up section offers only the exercises the selected instrument supports.
+- [ ] The warm-up section offers only the exercises the scoped instrument supports; under All each
+      exercise appears once per instrument that has it, grouped by exercise.
+- [ ] Opening a warm-up row from All practises that row's instrument and leaves the scope alone.
 - [ ] Octave options never exceed what fits the instrument's written range.
 - [ ] Changing any parameter while playing pauses playback and re-generates the score.
 
@@ -111,14 +125,21 @@ written range. See `specs/features/instruments.md`.
 
 A **Routine** is an ordered list of exercise blocks (Hanon, Scales, Arpeggios, Chromatic, 5-Finger) and optional Pause blocks, rendered and played back as a single continuous score.
 
-A routine is built **for one instrument**, fixed when it is created and read-only afterwards:
-changing it would invalidate blocks the new instrument cannot play. The Add Exercise picker offers
-only that instrument's exercises, so an incompatible block can never be created and nothing has to
-be re-validated at save or playback time. Routines saved before instruments existed are piano ones.
+A routine is built **for one instrument**, chosen while the routine is new and read-only once it
+exists: changing it on a saved routine would invalidate blocks the new instrument cannot play. The
+editor shows a picker until the first save — pre-selected from the dashboard scope when that scope
+names an instrument, left to the user under All — and a read-only "For {instrument}" line
+thereafter. Switching before the first save drops blocks the new instrument cannot do. The Add
+Exercise picker offers only that instrument's exercises, so an incompatible block can never be
+created and nothing has to be re-validated at save or playback time. Routines saved before
+instruments existed are piano ones.
 
 ### Dashboard
 
 - A **Routines** sub-section appears below the Hanon/Scales rows, with a **New Routine** button.
+- Routine rows are filtered by the dashboard's instrument scope and carry an instrument badge. When
+  the filtered list is empty the section keeps its place and says so ("No clarinet routines yet")
+  rather than collapsing.
 - Routine rows support long-press selection (like pieces), but routines and pieces cannot be selected simultaneously.
 - Selecting one routine: shows **Edit** + **Delete**. Selecting multiple: shows **Delete** only.
 - Tapping a routine row (not in selection mode) opens the Routine Playview.
