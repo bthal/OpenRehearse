@@ -189,17 +189,22 @@ Type '"/piece/[id]"' is not assignable to type '"/" | "/_sitemap"'
 
 ### Test MusicXML files: push .mxl directly (both formats now accepted)
 
-The app accepts both `.mxl` (compressed MusicXML) and `.xml` (uncompressed). Push either format to device:
+The app accepts both `.mxl` (compressed MusicXML) and `.xml` (uncompressed). Push either format to
+device (`testfiles/` is the gitignored scratch directory this repo uses for real scores):
 
 ```bash
-~/Library/Android/sdk/platform-tools/adb push test-mxls/*.mxl /sdcard/Download/
-~/Library/Android/sdk/platform-tools/adb push test-mxls/*.xml  /sdcard/Download/
+~/Library/Android/sdk/platform-tools/adb push testfiles/*.mxl /sdcard/Download/
+~/Library/Android/sdk/platform-tools/adb push testfiles/*.xml /sdcard/Download/
 ```
+
+Pushing a `.mxl` only *works* because the picker accepts `application/octet-stream` — see the
+landmine at the end of this file. For a long while it did not, and the workaround in circulation
+was renaming to `.mxl.zip`, which is why stray `*.mxl.zip` files turn up in `/sdcard/Download`.
 
 If you need the uncompressed XML for other tooling, extract with:
 
 ```bash
-for f in test-mxls/*.mxl; do
+for f in testfiles/*.mxl; do
   dir="${f%.mxl}_tmp" && mkdir -p "$dir" && unzip -o "$f" -d "$dir" > /dev/null
   rootfile=$(grep -o 'full-path="[^"]*\.xml"' "$dir/META-INF/container.xml" | head -1 \
     | sed 's/full-path="//;s/"//')
@@ -243,3 +248,36 @@ function isZip(base64: string): boolean {
   return head[0] === 0x50 && head[1] === 0x4b && head[2] === 0x03 && head[3] === 0x04;
 }
 ```
+
+### Android has no MIME type for `.mxl` — the picker greys the file out
+
+**LANDMINE:** Android's `MimeTypeMap` has no entry for the `mxl` extension, so the Storage Access
+Framework reports `application/octet-stream`. A `DocumentPicker.getDocumentAsync({ type: [...] })`
+allowlist naming only the "correct" MusicXML types therefore greys out **every `.mxl` file on the
+device**. The file cannot be selected at all, so none of the import pipeline runs and there is no
+error message to read — which is what makes this expensive to diagnose.
+
+Verified against the device's own MediaStore:
+
+```bash
+adb shell "content query --uri content://media/external/file \
+  --projection _display_name:mime_type --where \"_display_name LIKE '%.mxl'\""
+# .mxl      → mime_type=application/octet-stream   ✗ greyed out
+# .mxl.zip  → mime_type=application/zip            ✓
+# .xml      → mime_type=text/xml                   ✓
+```
+
+**The symptom hides the cause.** `.xml` files and any `.mxl` hand-renamed to `.mxl.zip` import
+fine, so the app looks healthy and the bug presents as "these particular files are broken". It is
+the extension, never the file: every `.mxl` that could not be picked parses correctly the moment it
+reaches `extractXmlFromMxl`. If you find yourself comparing zip entry order, UTF-8 filename flags
+or MusicXML versions between a working and a failing score, stop and check the MIME type first.
+
+**Fix:** include `'application/octet-stream'` in the picker's `type` list (`src/data/filePicker.ts`).
+Widening is safe because the picker's answer was never trusted anyway — the magic-byte sniff above
+decides how to decode, and `validateMusicXml` rejects anything else with a message. A provider that
+reports some other type for `.mxl` would still be greyed out; the escape hatch is `'*/*'`, at the
+cost of listing every file on the device.
+
+Covered by `src/data/__tests__/filePicker.test.ts`, which encodes the real Android extension→MIME
+mapping so the allowlist cannot silently narrow again.

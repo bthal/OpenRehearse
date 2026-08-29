@@ -34,7 +34,7 @@ RN/OSMD/Tone imports. See `specs/architecture.md` for the authoritative version.
 | Screens & flows | `specs/features/dashboard.md`, `specs/features/playview.md` |
 | Practice-time tracking & heatmap | `specs/features/dashboard.md`, `compound-docs/practice-tracking.md` |
 | Settings & count-in | `specs/features/settings.md`, `compound-docs/tone-playback.md` (count-in) |
-| Files & MusicXML | `specs/features/import.md` |
+| Files & MusicXML | `specs/features/import.md`, `compound-docs/expo-rn-setup.md` (picker & SAF traps) |
 | Sections: detection, user editing & the PlayView label | `specs/features/section-detection.md`, `compound-docs/osmd-webview.md` |
 | Bits (saved loops), the marker strip & the bit toolbar | `specs/features/playview.md`, `specs/features/pieces-domain.md`, `compound-docs/osmd-webview.md` |
 | Play-surface overlays & animation | `specs/features/playview.md`, `compound-docs/expo-rn-setup.md` |

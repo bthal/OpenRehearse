@@ -37,6 +37,15 @@ export async function pickXmlFile(): Promise<PickedFile | null> {
       'application/vnd.recordare.musicxml',
       'application/vnd.recordare.musicxml+xml',
       'application/zip',
+      // Android has no MimeTypeMap entry for `mxl` (nor `musicxml`), so the Storage
+      // Access Framework reports octet-stream and the picker greys the file out —
+      // every .mxl on the device is unselectable without this. Widening the filter is
+      // safe because the picker's answer was never trusted anyway: the magic-byte
+      // sniff below decides how to decode, and validateMusicXml rejects the rest with
+      // a message. A provider that reports some other type for .mxl would still be
+      // greyed out; the escape hatch if that ever surfaces is `'*/*'`, at the cost of
+      // listing every file on the device.
+      'application/octet-stream',
     ],
     copyToCacheDirectory: false,
   });

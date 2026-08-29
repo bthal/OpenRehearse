@@ -2,18 +2,25 @@
 
 ## Goal
 
-Let users add **pieces** from **MusicXML 2.x–4.x** files, both uncompressed (`.xml`) and compressed (`.mxl`).
+Let users add **pieces** from **MusicXML 2.x–4.x** files, both uncompressed (`.xml` / `.musicxml`) and compressed (`.mxl`).
 
 ## Accepted format
 
-- **Extensions**: `.xml` (uncompressed) and `.mxl` (compressed MusicXML / ZIP).
-- **Rejected** with explicit messaging: `.musicxml`, `.mid`, PDF, images, and other archives.
+- **Extensions**: `.xml` and `.musicxml` (uncompressed), `.mxl` (compressed MusicXML / ZIP).
+- **Rejected** with explicit messaging: `.mid`, PDF, images, and other archives.
+- The extension decides nothing on its own. What a file *is* comes from its magic bytes (ZIP → MXL)
+  and then from `validateMusicXml`; the extension is a hint for the picker and for the fallback
+  title. Rejecting a readable score because it was named `.musicxml` would be a lie about what the
+  app can do.
 - **Version**: **MusicXML 2.x–4.x** — if parser cannot confirm a supported version, reject with a clear error.
 - **MXL decompression**: `.mxl` archives are decompressed on-device before validation; the extracted XML goes through the same pipeline as `.xml` files.
 
 ## Flow
 
-1. User picks file (Android document picker / SAF).
+1. User picks file (Android document picker / SAF). The picker's MIME allowlist **must** admit
+   `application/octet-stream`: Android has no MIME type for the `mxl` extension, so a stricter list
+   makes every `.mxl` on the device unselectable — with no error, because nothing below ever runs.
+   See `compound-docs/expo-rn-setup.md`.
 2. Read file as UTF-8 text (handle BOM); size limit TBD (document in code, e.g. max MB).
 3. **Validate**: well-formed XML; root / DOCTYPE checks for MusicXML; version check.
 4. **Scrape metadata**: extract `work-title`, `movement-title`, `composer`, and tempo
@@ -71,7 +78,8 @@ Let users add **pieces** from **MusicXML 2.x–4.x** files, both uncompressed (`
 
 ## Acceptance criteria
 
-- [ ] Both `.xml` and `.mxl` MusicXML 2.x–4.x files can be imported.
+- [ ] Both `.xml` and `.mxl` MusicXML 2.x–4.x files can be imported, including on Android, where
+      `.mxl` carries no MIME type of its own and the picker must accept `application/octet-stream`.
 - [ ] Invalid inputs never corrupt the local piece index.
 - [ ] Imported piece is available offline immediately after import.
 - [ ] Title, composer, and tempo are scraped and stored on import.
