@@ -27,6 +27,25 @@ export interface WrittenRange {
 }
 
 /**
+ * Where a sample set's recordings may be looped so a note can outlast its buffer.
+ *
+ * Declared per instrument because it is a property of the recordings, not of the
+ * player: a flat, decay-less wind tone is loopable anywhere in its steady state, while
+ * a piano sample has decayed to near-silence long before its end and looping it would
+ * sustain a dead tail. Absent means the set is one-shot, which is the safe default.
+ *
+ * All three are seconds into the **recorded** sample. `crossfadeSec` is the length of
+ * the pre-blend that makes the wrap seamless; it must fit before `startSec`, since the
+ * blend reads the material immediately preceding the loop start. See
+ * `src/score-web/sustainLoop.ts` for the algorithm and the exact clamping rules.
+ */
+export interface SustainLoop {
+  startSec: number;
+  endSec: number;
+  crossfadeSec: number;
+}
+
+/**
  * Salamander Grand Piano, the set already in use — one sample per minor third across
  * A0–C8, which is why "thin to a minor third" leaves the piano sound untouched.
  * Sharps are spelled with `s` in the filenames (`D#1` → `Ds1.mp3`).

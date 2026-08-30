@@ -15,6 +15,7 @@ import {
   CLARINET_SAMPLE_NOTES,
   PIANO_SAMPLE_NOTES,
   type StaffLayout,
+  type SustainLoop,
   type WrittenRange,
 } from './instrument';
 import type { WarmUpType } from './warmupRegistry';
@@ -32,6 +33,14 @@ export interface InstrumentDescriptor {
   sampleSet: string;
   /** Sounding-pitch note names the sample set provides, one file each. */
   sampleNotes: readonly string[];
+  /**
+   * Where this set's recordings may be looped so a note can outlast its buffer.
+   *
+   * Absent means one-shot: the note stops when the sample runs out, which is right for
+   * anything that decays. Present routes the instrument through the looping player
+   * instead of `Tone.Sampler` — the Sampler has no loop option at all.
+   */
+  sustainLoop?: SustainLoop;
   /** What the player reads. Governs what the UI offers, never what playback permits. */
   writtenRange: WrittenRange;
   /**
@@ -54,6 +63,10 @@ export const INSTRUMENT_REGISTRY = {
     shortLabelKey: 'instruments.pianoShort',
     sampleSet: 'salamander-piano',
     sampleNotes: PIANO_SAMPLE_NOTES,
+    // No `sustainLoop`, and this one is not an oversight to be corrected later. A
+    // Salamander sample is 4–25 s and falls from about -24 dBFS at the onset to
+    // -55 dBFS by 1.25 s; looping any part of that would hold a dead tail open. A
+    // piano note is *supposed* to stop.
     // A0–C8, the standard 88.
     writtenRange: { lowMidi: 21, highMidi: 108 },
     transposeSemitones: 0,
@@ -65,6 +78,30 @@ export const INSTRUMENT_REGISTRY = {
     shortLabelKey: 'instruments.clarinetBbShort',
     sampleSet: 'fluidr3-clarinet',
     sampleNotes: CLARINET_SAMPLE_NOTES,
+    // Every file in this set is exactly 3.128889 s of dead-flat tone — no decay, no
+    // release, and an onset only ~1.6 dB below the steady state — then a hard cut. So
+    // any part of it is usable sustain material, and without a loop a clarinet note
+    // simply stops after 3.13 s (a whole note below ~77 BPM, and every long tone).
+    //
+    // The bounds were measured across all 17 files, not guessed:
+    //   startSec 0.50 — the slowest onset (C3) has settled by ~0.15 s, so this clears
+    //                   it with room to spare, and leaves 0.30 s of headroom above the
+    //                   crossfade, which must fit in [startSec - crossfadeSec, startSec).
+    //   endSec   2.90 — 0.23 s clear of the hard cut at 3.128889 s. The margin is for
+    //                   the decoder, not the audio: mp3 encoder padding is trimmed by
+    //                   whatever decodes the file, and Chromium need not agree with the
+    //                   tool these numbers were measured with to within a few frames.
+    //   crossfadeSec 0.20 — long enough that the blend reads as a transition rather
+    //                   than an edge, short enough to be 8% of the 2.4 s loop.
+    //
+    // The loop length is deliberately the longest the two margins allow: a longer loop
+    // is a less repetitive one. It is *not* tuned against seam artefacts, and that is
+    // considered. One spec covers 17 pitches, so the two blended copies meet at an
+    // effectively random phase per note; the resulting level modulation across the seam
+    // (about 2-3 dB typically, up to ~7 dB on the unluckiest note) moves chaotically
+    // with a 5 ms change in endSec and reshuffles again under a different decoder.
+    // There is nothing stable to optimise against. See `src/score-web/sustainLoop.ts`.
+    sustainLoop: { startSec: 0.5, endSec: 2.9, crossfadeSec: 0.2 },
     // Written E3–C7; sounding D3–Bb6.
     writtenRange: { lowMidi: 52, highMidi: 96 },
     transposeSemitones: -2,
@@ -112,6 +149,19 @@ export function instrumentDescriptor(value: unknown): InstrumentDescriptor | nul
 export function supportsExercise(instrument: InstrumentId, type: WarmUpType): boolean {
   // `as const` narrows each exercises tuple to its own literal union, so widen to compare.
   return (INSTRUMENT_REGISTRY[instrument].exercises as readonly WarmUpType[]).includes(type);
+}
+
+/**
+ * Where this instrument's samples may be looped, or `null` if they are one-shots.
+ *
+ * A function rather than a field read because `as const` keeps each row's literal type,
+ * and a row that omits the optional field has no such property to read at all. Widening
+ * to the descriptor here is what makes "does this instrument loop?" one question with
+ * one answer instead of a narrowing puzzle at every call site.
+ */
+export function sustainLoopFor(instrument: InstrumentId): SustainLoop | null {
+  const descriptor: InstrumentDescriptor = INSTRUMENT_REGISTRY[instrument];
+  return descriptor.sustainLoop ?? null;
 }
 
 /** The exercises this instrument offers, in registry order. */
