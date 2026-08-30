@@ -20,6 +20,14 @@ Play **audio derived from the score** (not external recordings) so that **notati
   (0 for piano, −2 for a Bb clarinet) is added before the note is named, so the app can be played
   along with. See `specs/features/instruments.md`.
 
+### Known limitation: notes cannot outlast their sample
+
+`Tone.Sampler` does not loop a buffer, so a note stops sounding when its sample runs out. The
+bundled clarinet samples are **3.13 s** flat one-shots with no decay, so any clarinet note longer
+than that truncates — a whole note below ~77 BPM, and every long-tone drill. Piano is unaffected in
+practice because its samples decay to inaudibility first. Remedies all trade audio quality against
+the ~2.4 MB bundled-audio budget; see `compound-docs/tone-playback.md` before attempting one.
+
 ## Loop interaction
 
 - Transport respects **active bit** boundaries: when playback position reaches **end of bit**, **seek immediately** to **start of bit** (see `playview.md`).
@@ -41,7 +49,8 @@ Play **audio derived from the score** (not external recordings) so that **notati
 
 - [x] Note onsets audibly align with cursor for representative scores (manual QA checklist in repo optional).
 - [x] Tempo change does not leave orphan scheduled events (no stuck notes after pause/stop).
-- [x] Tied notes produce a single sustained sound (no double-attack at tie boundary).
+- [x] Tied notes produce a single sustained sound (no double-attack at tie boundary) held for the
+      chain's **combined** length, not the first note's.
 - [x] Repeat barlines are honored: playback cycles through the repeated section.
 - [x] Fermata notes sound longer; subsequent notes are delayed so the hold is audible.
 - [x] Arpeggiated chords roll from low to high (or high to low per marking).

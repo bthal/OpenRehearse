@@ -318,6 +318,49 @@ if (note.NoteTie && note.NoteTie.StartNote !== note) continue;
 for non-tied notes despite being typed as `Tie` (not `Tie | undefined`), so the `&&` guard is
 required.
 
+**Second half of the same rule — the half that was missing until `feat/instruments`:** skipping the
+continuations is only correct if the start note is then held for the *whole chain*. `Note.Length`
+is that note's OWN length, never the group's; the combined value lives on the tie as
+`Tie.Duration`. Both are `Fraction`s in whole notes.
+
+Verified against OSMD 1.9.9 by loading a score headlessly and reading both fields: two tied whole
+notes give `Note.Length.RealValue` 1 and `Tie.Duration.RealValue` 2. `Tie.Duration` sums unequal
+chains correctly (quarter + eighth = 0.375) and spans barlines.
+
+Sounding `Note.Length` therefore cut every tied note to a *fraction* of its notated value — a half
+for a two-note tie, a third for three, a quarter for four. It went unnoticed because a piano sample
+has decayed to inaudibility long before the shortfall matters. The rule now lives in
+`client/src/domain/ties.ts` (`soundingLengthWholes`) with unit tests, because `score-web/` is
+outside tsc and Jest.
+
+## LANDMINE: a sustained-instrument note cannot outlast its sample — `Tone.Sampler` never loops
+
+`Tone.Sampler` has no loop option (`SamplerOptions` is `attack | release | onload | onerror |
+baseUrl | curve | urls`). It plays a one-shot `ToneBufferSource`; when the buffer ends, the sound
+ends, whatever duration `triggerAttackRelease` was given. `release` only shortens — it can never
+extend past the buffer.
+
+Measured lengths of the bundled sets (`afinfo`/`ffprobe`, not header arithmetic — the clarinet
+files all report a misleading 128 kbps and are actually ~65 kbps):
+
+| set | length | envelope |
+|---|---|---|
+| `fluidr3-clarinet` | **3.13 s**, every file identical | flat ~−28 dBFS throughout, then a hard cut — no decay |
+| `salamander-piano` | 4–25 s | natural decay; −24 dBFS at onset, −55 dBFS by 1.25 s |
+
+So a clarinet note stops sounding after 3.13 s no matter what the score says. At 60 BPM that is
+just over three beats, which is what long-tone drills expose. **This is not specific to tied
+notes**: any single clarinet note longer than 3.13 s truncates — a whole note below ~77 BPM, a
+dotted half below ~58 BPM, a half note below ~39 BPM.
+
+Piano is not immune in principle, only in practice: its samples decay to inaudibility well before
+they run out, so the truncation is never heard.
+
+**Open** — fixing it is a real trade-off (longer samples cost APK size against the ~2.4 MB audio
+budget, which the current sets exactly meet; looping the soundfont's sustain points means replacing
+`Tone.Sampler` with a custom player). Do not "fix" it by re-triggering the sample: that is audible
+as a re-attack, which is exactly what the tie rule above exists to avoid.
+
 ## OSMD repeats: use `CurrentEnrolledTimestamp`, not `currentTimeStamp`
 
 **LANDMINE:** `Iterator.currentTimeStamp` is an alias for `CurrentSourceTimestamp` — the note's
