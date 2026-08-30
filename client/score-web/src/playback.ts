@@ -19,6 +19,7 @@ import {
 // Pure count-in and loop-geometry math live in the domain layer (screens/score-web → domain).
 import { computeCountIn, isFreshStart, loopLeadInBeats } from '../../src/domain/countIn';
 import { placeLoopAtCursor } from '../../src/domain/loop';
+import { soundingLengthWholes } from '../../src/domain/ties';
 import {
   anchorToBarlines,
   buildSnapGrid,
@@ -624,7 +625,8 @@ function buildTimelines(osmd: OpenSheetMusicDisplay): {
             a.articulationEnum === ArticulationEnum.fermata ||
             a.articulationEnum === ArticulationEnum.invertedfermata,
         );
-        const normalDurQ = note.Length.RealValue * WHOLE_TO_QUARTER;
+        // The whole tied chain, not this note alone — see domain/ties.
+        const normalDurQ = soundingLengthWholes(note) * WHOLE_TO_QUARTER;
         const durQ = normalDurQ * (hasFermata ? FERMATA_DURATION_MULTIPLIER : 1);
         if (durQ <= 0) continue;
         noteEvents.push({ time: `${baseTicks}i`, midi: note.halfTone + 12, durQ });
@@ -651,7 +653,8 @@ function buildTimelines(osmd: OpenSheetMusicDisplay): {
               a.articulationEnum === ArticulationEnum.fermata ||
               a.articulationEnum === ArticulationEnum.invertedfermata,
           );
-          const normalDurQ = note.Length.RealValue * WHOLE_TO_QUARTER;
+          // The whole tied chain, not this note alone — see domain/ties.
+          const normalDurQ = soundingLengthWholes(note) * WHOLE_TO_QUARTER;
           const durQ = normalDurQ * (hasFermata ? FERMATA_DURATION_MULTIPLIER : 1);
           if (durQ <= 0) return;
           noteEvents.push({
