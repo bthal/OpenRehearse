@@ -4,11 +4,16 @@
  * Lives on the native side of the seam because resolving a bundled asset to a URI is
  * an expo-asset concern the web bundle has no access to, and because all three score
  * screens need the identical two-step: resolve, then inject *before* the load. The
- * Sampler is constructed during `__rn_load_xml`, so ordering is not optional —
- * injectJavaScript delivers in order, which is what makes back-to-back calls safe.
+ * note player is constructed during `__rn_load_xml` — and the loop bounds sent here
+ * decide *which* player — so ordering is not optional; injectJavaScript delivers in
+ * order, which is what makes back-to-back calls safe.
  */
 import { resolveSampleUris } from '@data/instrumentSamples';
-import { INSTRUMENT_REGISTRY, type InstrumentId } from '@domain/instrumentRegistry';
+import {
+  INSTRUMENT_REGISTRY,
+  sustainLoopFor,
+  type InstrumentId,
+} from '@domain/instrumentRegistry';
 
 export async function injectInstrumentAudio(
   inject: (js: string) => void,
@@ -16,9 +21,13 @@ export async function injectInstrumentAudio(
 ): Promise<void> {
   const urls = await resolveSampleUris(instrument);
   const offset = INSTRUMENT_REGISTRY[instrument].transposeSemitones;
-  // The web entry point parses a JSON string, so the payload is stringified twice:
+  // Where this set's recordings may be looped, so a note can outlast its buffer.
+  // Absent for a decaying set (the piano), which keeps `Tone.Sampler`; present for the
+  // clarinet, whose flat 3.13 s one-shots otherwise cut every long note dead.
+  const loop = sustainLoopFor(instrument);
+  // The web entry point parses each JSON string, so the payloads are stringified twice:
   // once to JSON, once more to become a valid JS string literal in the injected source.
-  inject(
-    `window.__rn_set_instrument_audio(${JSON.stringify(JSON.stringify(urls))}, ${offset});void 0;`,
-  );
+  const urlsArg = JSON.stringify(JSON.stringify(urls));
+  const loopArg = loop === null ? 'null' : JSON.stringify(JSON.stringify(loop));
+  inject(`window.__rn_set_instrument_audio(${urlsArg}, ${offset}, ${loopArg});void 0;`);
 }

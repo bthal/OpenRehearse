@@ -19,6 +19,7 @@ import {
   setPractisedInstrument,
 } from './playback';
 import type { OutboundMessage } from './types';
+import type { SustainLoop } from '../../src/domain/instrument';
 
 function postToNative(msg: OutboundMessage): void {
   const rn = (window as unknown as { ReactNativeWebView?: { postMessage: (s: string) => void } })
@@ -34,14 +35,23 @@ let osmd: OpenSheetMusicDisplay | null = null;
 const w = window as unknown as Record<string, unknown>;
 
 /**
- * The practised instrument's bundled samples and its sounding offset.
+ * The practised instrument's bundled samples, sounding offset and sustain-loop bounds.
  *
- * Must arrive before __rn_load_xml, because the Sampler is built during the load.
+ * Must arrive before __rn_load_xml, because the note player is built during the load —
+ * and the loop bounds decide *which* player, since Tone.Sampler cannot loop at all.
  * injectJavaScript delivers in order, so native sends the two back to back.
  */
-w.__rn_set_instrument_audio = (urlsJson: string, offsetSemitones: number) => {
+w.__rn_set_instrument_audio = (
+  urlsJson: string,
+  offsetSemitones: number,
+  loopJson?: string | null,
+) => {
   try {
-    setInstrumentAudio(JSON.parse(urlsJson) as Record<string, string>, offsetSemitones);
+    setInstrumentAudio(
+      JSON.parse(urlsJson) as Record<string, string>,
+      offsetSemitones,
+      loopJson ? (JSON.parse(loopJson) as SustainLoop) : null,
+    );
   } catch (err) {
     postToNative({
       type: 'ERROR',
