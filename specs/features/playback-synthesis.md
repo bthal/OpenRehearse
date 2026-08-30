@@ -20,13 +20,26 @@ Play **audio derived from the score** (not external recordings) so that **notati
   (0 for piano, −2 for a Bb clarinet) is added before the note is named, so the app can be played
   along with. See `specs/features/instruments.md`.
 
-### Known limitation: notes cannot outlast their sample
+### Sustained instruments loop their samples
 
-`Tone.Sampler` does not loop a buffer, so a note stops sounding when its sample runs out. The
-bundled clarinet samples are **3.13 s** flat one-shots with no decay, so any clarinet note longer
-than that truncates — a whole note below ~77 BPM, and every long-tone drill. Piano is unaffected in
-practice because its samples decay to inaudibility first. Remedies all trade audio quality against
-the ~2.4 MB bundled-audio budget; see `compound-docs/tone-playback.md` before attempting one.
+A note may be longer than the recording it is played from. The bundled clarinet samples are
+**3.13 s** flat one-shots, so before this every clarinet note past that length simply stopped.
+
+An instrument whose samples are loopable declares a **`sustainLoop`** in the registry (see
+`instruments.md`). Its buffers are **pre-blended once at load** — the material just before the loop
+end is equal-power crossfaded toward the material just before the loop start — so that Web Audio's
+own `loop`/`loopStart`/`loopEnd` wrap without a click. Nothing overlaps at runtime; there is still
+one voice per note. `Tone.Sampler` has no loop option at all, so a looping instrument goes through
+a small dedicated player instead, and a one-shot instrument (the piano) keeps the Sampler unchanged.
+
+A **piano note is meant to stop**, and piano must never loop: a Salamander sample has decayed to
+near-silence long before it ends, so looping it would sustain a dead tail.
+
+The seam is inaudible as a click but is not perfectly transparent in level: one set of loop bounds
+covers a whole sample set, so the two blended copies meet at an effectively random phase per pitch
+and the seam swells or combs by a couple of dB (worst case around 7 dB on one note of the clarinet
+set) over its 0.2 s. This is not tunable away with a single set of bounds — see
+`compound-docs/tone-playback.md`.
 
 ## Loop interaction
 
@@ -51,6 +64,9 @@ the ~2.4 MB bundled-audio budget; see `compound-docs/tone-playback.md` before at
 - [x] Tempo change does not leave orphan scheduled events (no stuck notes after pause/stop).
 - [x] Tied notes produce a single sustained sound (no double-attack at tie boundary) held for the
       chain's **combined** length, not the first note's.
+- [ ] A clarinet note longer than 3.13 s keeps sounding for its full written length, with no click
+      at the loop wrap and no re-attack.
+- [ ] Piano playback is unchanged: notes decay and stop as before, and no piano sample loops.
 - [x] Repeat barlines are honored: playback cycles through the repeated section.
 - [x] Fermata notes sound longer; subsequent notes are delayed so the hold is audible.
 - [x] Arpeggiated chords roll from low to high (or high to low per marking).

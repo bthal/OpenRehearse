@@ -240,6 +240,15 @@ Instrument and part are settled during import, through the existing "Input neede
   1.9 MB. The clarinet is thinned from 88 chromatic files to 17 spanning C3–C7 sounding, at 435 KB.
   **Total added to the APK is about 2.3 MB**, which matters on a sideloaded release with no update
   channel.
+- **A sample set may declare a sustain loop**, and the clarinet's does: `sustainLoop`
+  (`startSec`, `endSec`, `crossfadeSec`) beside `sampleSet` and `sampleNotes` in the registry.
+  Absent means one-shot. It is a property of the recordings, not of the player — the FluidR3
+  clarinet files are 3.13 s of dead-flat tone with no decay, so any part of them is usable sustain
+  material, while a Salamander piano sample has decayed to near-silence long before it ends and
+  looping it would hold a dead tail open. **Piano must never loop.** Without a loop a clarinet note
+  simply stops after 3.13 s — a whole note below ~77 BPM, and every long-tone drill.
+  The clarinet's bounds are 0.50–2.90 s with a 0.20 s crossfade, derived by measuring all 17 files;
+  the reasoning is in the registry comment. See `playback-synthesis.md` for how it sounds.
 - Samples reach the WebView as `file://` URIs resolved through **`expo-asset`**, the same mechanism
   `seedDemoData.ts` already uses for the bundled demo score. This works on iOS, which
   `android_asset` would not. It requires `allowFileAccess` on the WebView, which defaults to `false`

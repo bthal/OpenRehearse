@@ -356,10 +356,66 @@ dotted half below ~58 BPM, a half note below ~39 BPM.
 Piano is not immune in principle, only in practice: its samples decay to inaudibility well before
 they run out, so the truncation is never heard.
 
-**Open** — fixing it is a real trade-off (longer samples cost APK size against the ~2.4 MB audio
-budget, which the current sets exactly meet; looping the soundfont's sustain points means replacing
-`Tone.Sampler` with a custom player). Do not "fix" it by re-triggering the sample: that is audible
-as a re-attack, which is exactly what the tie rule above exists to avoid.
+**Do not "fix" it by re-triggering the sample.** That is audible as a re-attack, which is exactly
+what the tie rule above exists to avoid. Longer samples were also rejected: the current sets
+exactly meet the ~2.4 MB bundled-audio budget. The fix that shipped is the next entry.
+
+## PATTERN: crossfade-loop a sample by pre-blending it once at load
+
+`Tone.Sampler` cannot loop, but the node underneath it can. `AudioBufferSourceNode` has `loop`,
+`loopStart` and `loopEnd` built in, and `Tone.ToneBufferSource` exposes all three. So the shape of
+the fix is: **do the looping natively, and make the wrap seamless by editing the buffer, not by
+juggling voices.**
+
+Per channel, with loop start `S`, loop end `E` and crossfade `F`, all in frames:
+
+```
+for i in [0, F):
+  buf[E - F + i] = orig[E - F + i] * cos(i/F * π/2) + orig[S - F + i] * sin(i/F * π/2)
+```
+
+The material immediately before `E` has then already been blended toward the material immediately
+before `S`, so the frame the loop plays last leads into `S` exactly as `S`'s own predecessor does.
+This runs **once per buffer at decode time**, so there is nothing per-note at runtime and still
+exactly one voice per note. `src/score-web/sustainLoop.ts` (pure, unit-tested — `score-web/` is
+outside tsc and Jest) does the maths; `score-web/src/loopingSampler.ts` plays it.
+
+Four things that are easy to get wrong:
+
+- **`loopStart`/`loopEnd` are in *buffer* seconds and are unaffected by `playbackRate`.** A
+  pitch-shifted note needs no scaling of them.
+- **`ToneBufferSource.start` defaults a *looping* source's offset to `loopStart`.** Pass an
+  explicit `0` or every note skips its own attack.
+- **Blend before the buffer is ever played.** Assigning an `AudioBuffer` to a source node's
+  `buffer` "acquires the contents" and detaches its `ArrayBuffer`s, after which `getChannelData`
+  hands back an empty array. Decode → blend → hand to the player is the only safe order.
+- **A looping voice does not end by itself.** Its stop is scheduled at the note's end, which on a
+  long tone is seconds away, so `_stopInternal` and `pausePlayback` must release the player's
+  voices or the clarinet sounds on after the transport has stopped. One-shots never needed this,
+  which is why the Sampler path has no equivalent.
+
+**Equal-power (`cos`/`sin`) fades, not linear — and the seam is still not perfectly flat.** One set
+of bounds is declared per *sample set* and applies to all of its pitches, so the loop length is not
+a whole number of periods for any particular note and the two blended copies meet at an effectively
+arbitrary phase. Equal power keeps the expected energy flat across that; linear would dip wherever
+they are out of phase. What remains is a level modulation over the 0.2 s seam — measured on the
+clarinet set, offline, against the shipped code: **typically 2–3 dB, worst case −7.4 dB on A4**
+(comb cancellation) **and +2.9 dB on C6**. The discontinuity at the wrap itself is always *smaller*
+than a typical inter-frame step inside the loop, i.e. there is no click.
+
+**Do not try to tune the bounds against that modulation.** It was swept: moving `endSec` by 5 ms
+moves the worst case anywhere between 4.7 dB and 12.6 dB with no pattern, because the phase
+relationship at the seam is chaotic in the bounds. It also reshuffles under a different mp3
+decoder, so any value found this way is fitted to the measuring tool. The only real cure would be
+snapping the loop length **per buffer** to a whole number of that sample's own fundamental period
+(pitch detection at load), which was not done. Choose the bounds on the stable criteria instead —
+clear of the onset, clear of the end, as long as possible — and take the modulation.
+
+**Why the piano keeps `Tone.Sampler`.** A Salamander sample decays from about −24 dBFS at the onset
+to −55 dBFS by 1.25 s; looping any part of it would hold a dead tail open. A piano note is supposed
+to stop. Routing it through the new player would also have meant re-deriving its attack, release
+and voice handling for no gain, so the registry's `sustainLoop` being absent is what selects the
+Sampler, and the piano path is byte-for-byte what it was.
 
 ## OSMD repeats: use `CurrentEnrolledTimestamp`, not `currentTimeStamp`
 
