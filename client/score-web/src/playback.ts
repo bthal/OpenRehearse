@@ -23,6 +23,7 @@ import {
   anchorToBarlines,
   buildSnapGrid,
   clampLoopIndices,
+  motionPxLeft,
   nearestGridIndex,
   type AnchorableStep,
   type GridPoint,
@@ -146,11 +147,17 @@ interface NoteEvent {
 
 interface CursorStep {
   quarters: number; // expanded time (fermata hold adds extra quarters)
-  // Where this step sits in the score, and the single pixel every part of the UI
-  // reads: the snap search, the preview line, the loop overlay and the playback
-  // interpolation. It starts as cursorElement.style.left, but the onset that opens
-  // a measure is then pulled onto that measure's barline — see anchorToBarlines.
+  // Where this step sits in the score, and the pixel every part of the UI reads *at
+  // rest*: the snap search, the settle, the seek, the preview line and the loop
+  // overlay. It starts as cursorElement.style.left, but the onset that opens a measure
+  // is then pulled onto that measure's barline — see anchorToBarlines. The resting
+  // playhead and the loop handles agree only because they all read this one value, so
+  // nothing at rest may be moved off it.
   pxLeft: number;
+  // The same onset before that pull: where the notehead group is actually engraved.
+  // Read by the playback RAF alone, through motionPxLeft — a moving playhead belongs
+  // on the note that is sounding, not on the barline behind it.
+  notePxLeft: number;
   osmdIdx: number; // how many cursor.next() calls from start to reach this OSMD position
 }
 
@@ -252,6 +259,10 @@ let cursorSteps: CursorStep[] = [];
 // play, so the pan and handle A snap against cursorSteps directly.
 let snapGrid: GridPoint[] = [];
 let currentCursorStep = -1;
+// The step a fresh start began on. It keeps its barline anchor for as long as the RAF
+// is on it, so the playhead does not yank off the barline the instant the first note
+// sounds. Null for a mid-note resume, and cleared as soon as the playhead moves past.
+let startAnchorStep: number | null = null;
 let totalQuarters = 0;
 let animFrameId: number | null = null;
 let osmdRef: OpenSheetMusicDisplay | null = null;
@@ -427,7 +438,10 @@ function buildTimelines(osmd: OpenSheetMusicDisplay): {
   tempoChanges: TempoChange[];
 } {
   const noteEvents: NoteEvent[] = [];
-  const steps: (CursorStep & AnchorableStep)[] = [];
+  // Not CursorStep: here pxLeft is still the raw notehead straight off the cursor
+  // element. It only becomes a CursorStep's placement pixel after anchorToBarlines
+  // below, and the raw value survives as CursorStep.notePxLeft.
+  const steps: (Omit<CursorStep, 'pxLeft' | 'notePxLeft'> & AnchorableStep)[] = [];
   const tempoChanges: TempoChange[] = [];
 
   osmd.cursor.reset();
@@ -625,6 +639,8 @@ function buildTimelines(osmd: OpenSheetMusicDisplay): {
   cursorSteps = steps.map((step, i) => ({
     quarters: step.quarters,
     pxLeft: anchoredPx[i] ?? step.pxLeft,
+    // steps[].pxLeft is the raw cursorElement.style.left, i.e. pre-anchor.
+    notePxLeft: step.pxLeft,
     osmdIdx: step.osmdIdx,
   }));
   osmd.cursor.reset();
@@ -888,6 +904,28 @@ function advanceCursorTo(targetStep: number): void {
   currentCursorStep = targetStep;
 }
 
+/**
+ * The step to hold on its barline for this start, or null when the start is resuming
+ * inside a note and must pick up exactly where it froze.
+ *
+ * Deliberately not `isFreshStart`: that decides whether the player lost the pulse, by
+ * provenance — its loop branch reads `didLoopSeek` and never looks at position at all,
+ * and its piece branch is `posTicks <= firstStepTicks`, which is false at every
+ * mid-piece onset. The question here is only whether the transport sits *on* an onset.
+ *
+ * Deliberately not `ticksToStep` either: that is a floor search, and the landmine is
+ * that round-tripping a step through ticks lands one note early on tuplets.
+ * `currentCursorStep` is already a valid index — the settle, the seek and the RAF all
+ * keep it current — so this only has to test the tick. Whole-tick rounding can put an
+ * exact onset one tick out, the same tolerance a section junction allows.
+ */
+function startAnchorFor(ticks: number): number | null {
+  const onset = cursorSteps[currentCursorStep];
+  if (onset === undefined) return null;
+  const onsetTicks = Math.round(onset.quarters * TONE_PPQ);
+  return Math.abs(ticks - onsetTicks) <= SEAM_EPSILON_TICKS ? currentCursorStep : null;
+}
+
 // ─── Binary search helpers ────────────────────────────────────────────────────
 
 // Pixel→step lookups all go through nearestGridIndex in domain/scoreGrid.ts, which
@@ -1002,6 +1040,11 @@ function animateCursorLoop(): void {
   // advanced here to avoid main-thread stalls on backward seeks (loop wraps).
   currentCursorStep = targetStep;
 
+  // The start anchor is spent once the playhead is past it. Holding it would keep a
+  // stale downbeat pinned to its barline on every later pass of a loop that was
+  // started from inside rather than at its A handle.
+  if (startAnchorStep !== null && targetStep > startAnchorStep) startAnchorStep = null;
+
   // Cheap: a scan over at most a dozen section starts, and it posts nothing unless
   // the cursor actually crossed a junction.
   emitSectionIfChanged(effectiveQE * TONE_PPQ);
@@ -1009,13 +1052,30 @@ function animateCursorLoop(): void {
   // Interpolate position between current step and the next for smooth scrolling.
   // The interpolated px is used for BOTH the score translation AND the cursor element's
   // left position so they always align on the center line.
-  const currPx = cursorSteps[targetStep]?.pxLeft ?? 0;
-  const nextPx = cursorSteps[targetStep + 1]?.pxLeft ?? currPx;
+  // Noteheads, not barlines — except at the two positions the playhead arrives at
+  // rather than flows through. Both ends of the interval go through the selector, so a
+  // segment terminating on an anchored step aims at the pixel that step will expose.
+  const loopAStep = loopRegion?.aStep ?? null;
+  const currPx = motionPxLeft(cursorSteps, targetStep, startAnchorStep, loopAStep) ?? 0;
+  // The interval that ends the loop aims at the loop's own right edge, not at the next
+  // step's notehead. bPx is where the bracket is drawn and where the clamp below bites,
+  // so aiming past it makes the playhead arrive early and park there until the transport
+  // wraps. bStep also indexes snapGrid rather than cursorSteps, so where B is the
+  // terminal target the selector would miss entirely and the last interval would freeze.
+  const nextPx =
+    loopRegion !== null && targetStep + 1 >= loopRegion.bStep
+      ? loopRegion.bPx
+      : (motionPxLeft(cursorSteps, targetStep + 1, startAnchorStep, loopAStep) ?? currPx);
   const currQ = cursorSteps[targetStep]?.quarters ?? 0;
-  const nextQ = cursorSteps[targetStep + 1]?.quarters ?? (currQ + 1);
+  const nextQ =
+    loopRegion !== null && targetStep + 1 >= loopRegion.bStep
+      ? loopRegion.bTicks / TONE_PPQ
+      : (cursorSteps[targetStep + 1]?.quarters ?? currQ + 1);
   const fraction = nextQ > currQ ? Math.min(1, (effectiveQE - currQ) / (nextQ - currQ)) : 0;
   const rawInterpolatedPx = currPx + fraction * (nextPx - currPx);
   // Clamp to the loop's right boundary so the cursor never wanders into handle B.
+  // bPx stays the anchored pixel deliberately: a loop ends at the bar, and the sweep
+  // should terminate where the bracket is drawn rather than overshoot it.
   const interpolatedPx = loopRegion !== null ? Math.min(rawInterpolatedPx, loopRegion.bPx) : rawInterpolatedPx;
 
   // Move OSMD cursor element to interpolated position so it stays on the center line.
@@ -1067,6 +1127,9 @@ function _stopInternal(): void {
     osmdActualIdx = -1;
   }
   currentCursorStep = 0;
+  startAnchorStep = null;
+  // Step 0 is the opening measure, which anchorToBarlines never anchors, so its two
+  // pixels coincide and the rewind needs no selector.
   const px0 = cursorSteps[0]?.pxLeft ?? 0;
   const el = cursorEl();
   if (el) el.style.left = `${px0}px`;
@@ -1901,6 +1964,8 @@ function armBit(bit: ResolvedBit): void {
  * moves with a resize. Repainting alone would leave that marker at a pixel resolved
  * against the previous grid.
  */
+// Resolves against pxLeft, like the loop handles a bit was saved from. Bit markers are
+// overlay geometry and must stay on the resting grid, not the playhead's motion track.
 function reresolveBits(): void {
   resolvedBits = resolveBits(bitsInput, cursorSteps, snapGrid);
   // A bit that is no longer in the list — or that this grid cannot place — cannot stay
@@ -2193,6 +2258,8 @@ function emitSectionIfChanged(ticks: number): void {
 }
 
 /** Score-pixel position of a tick, via the cursor step that owns it. */
+// pxLeft, never notePxLeft: a junction divides two measures, so it belongs on the
+// barline. The notehead track exists for the moving playhead alone.
 function pxAtTicks(ticks: number): number {
   return cursorSteps[ticksToStep(ticks)]?.pxLeft ?? 0;
 }
@@ -2231,6 +2298,7 @@ function markDiv(left: number, width: number, background: string, opacity: numbe
  * The elements live inside #osmd, so they translate with the score for free and
  * need no per-frame work; they are rebuilt only when the section list changes.
  */
+// Draws from pxLeft throughout — see pxAtTicks. Section marks are measure geometry.
 function renderSectionMarks(): void {
   if (!sectionMarksEl) return;
   sectionMarksEl.textContent = '';
@@ -2510,6 +2578,12 @@ export async function startPlayback(): Promise<void> {
   countInOriginTicks = Tone.Transport.ticks;
   countInArmed = countIn !== null;
 
+  // Hold the starting step on its barline while the RAF is on it. Without this the
+  // cursor sits parked on the barline through the whole count-in and then jumps right
+  // the moment the first note sounds — the very lurch the notehead track removes.
+  // countInOriginTicks is the authority: the loop seek above has already run.
+  startAnchorStep = startAnchorFor(countInOriginTicks);
+
   try {
     await Tone.start();
     await Promise.race([Tone.loaded(), new Promise<void>((r) => setTimeout(r, 8000))]);
@@ -2694,6 +2768,7 @@ export function disposePlayback(): void {
   cursorSteps = [];
   snapGrid = [];
   currentCursorStep = -1;
+  startAnchorStep = null;
   osmdActualIdx = -1;
   totalQuarters = 0;
   finalBarlinePx = 0;
