@@ -882,6 +882,96 @@ if (finalPxLeft > lastCapturedPx) {
 
 Place this immediately after the while-loop, before setting `totalQuarters`.
 
+## LANDMINE: Tone files a scheduled event one tick early, so a loop's first note never sounds
+
+**LANDMINE:** the tick you hand Tone is not the tick Tone stores. Every tick position goes
+through `ToneWithContext.toTicks` → `TransportTimeClass.toTicks`, which converts to seconds
+at the current BPM and straight back:
+
+```
+_ticksToUnits(n) = (n * (60 / bpm)) / PPQ      // to seconds
+toTicks()        = (seconds / (60 / bpm)) * PPQ // and back
+```
+
+That round trip is not exact. At 100 BPM `"43776i"` returns **43775.99999999999**, and
+`TransportEvent` then does `this.time = Math.floor(options.time)`, keeping the remainder in
+`_remainderTime` and adding it back to the audio time in `invoke()`. So the note still
+*sounds* on the beat — it is merely **filed one tick early**. That is why this hid for
+several releases.
+
+The clock only ever emits whole ticks, so anything that compares a transport position
+against a *musical* tick misses by one wherever this bites:
+
+- `Transport.ticks = <onset>` then play leaves that onset's notes filed *behind* the
+  playhead, and they never sound. That is the first note of a piece, of a bit, or of
+  whatever position the user panned to.
+- `Transport.loop` fences the clock to `[loopStart, loopEnd)`, so **A's notes fall outside
+  the loop and never sound, while B's own notes fall inside it and sound at the end of every
+  pass**. Measured on `waltz-for-nala` with a loop over measures 77–82: A silent on all
+  three passes, B sounding on every one, and the emitted ticks resuming at 43777 after each
+  wrap.
+
+Neither drift nor rare, and not fixable by choosing better numbers:
+
+| | affected onsets at the score's own tempo |
+|---|---|
+| `waltz-for-nala` (100 BPM) | 32 of 623 — measures 77 and 82 among them |
+| Chopin nocturne op. 9 no. 2 (92 BPM) | 71 of 558 |
+| `adele-set-fire-to-the-rain` (108 BPM) | 112 of 894 |
+| `maple-leaf-rag` (100 BPM) | 57 of 1019 |
+| BWV 846 prelude (100 BPM) | 32 of 547 |
+| `Grüne_Augen_lügen_nicht` (80 BPM) | 0 of 196 — until the speed control moves off 80 |
+
+Which onsets are hit depends on the tempo (0 at 60/80/120, 138 of 623 at 72), so the speed
+control moves the failures around rather than removing them. **No PPQ escapes it** — 192,
+256, 384, 512, 960 and 1920 all fail at some tempo — and **no input representation does
+either**: the `"Ni"` string, a `Tone.Ticks` and raw seconds all land on the same floor, and
+the `i` notation is whole ticks only (`/^(\d+)i$/`) so there is nothing to bias it with.
+`Math.round` of the round trip is never wrong (the error is ≤1.5e-11 ticks and goes **both
+ways**), but Tone floors rather than rounds and the floor is inside `TransportEvent`.
+
+**Fix:** stop arguing with it and meet it where it files. `gridTransportTicks` in
+`playback.ts` asks the live transport for each grid position's filed tick
+(`Math.floor(Transport.toTicks("<ticks>i"))`) and everything that talks to the transport
+reads that: the fence, the seek in `seekToStep`, the settle in `settleToNearestStep`, and
+`startPlayback`'s "is the playhead inside the loop" test. `loopRegion` carries both spaces —
+`aTicks`/`bTicks` stay musical for the count-in's meter and for a saved bit's stored bounds.
+
+Two rules for the fence itself, both load-bearing, and both owned by
+`domain/transportTicks.ts` (`loopFence`) so they are testable without a browser:
+
+- **`loopStart` is A's filed tick exactly.** The wrap seeks the clock there and then fires
+  that tick's timeline events, so a bound one tick off means A never sounds — first pass or
+  any later one. It survives the setter's own re-conversion because both readers tolerate the
+  error (`forEachAtTime` matches within `EPSILON` = 1e-6, and emitted ticks are rounded).
+- **`loopEnd` is half a tick *below* B's filed tick.** Tone tests `ticks >= loopEnd` against
+  the raw float, and the round trip can leave it a hair *above* the integer — 96 ticks at
+  41 BPM comes back as 96.00000000000003 — which slips the wrap by a tick and sounds B's own
+  notes. Assign it in **seconds**, since the tick notation cannot carry a fraction.
+
+**The capture is paired with the `Part`, not with the grid.** A Part's event ticks are frozen
+when it is built, while the speed control moves `Transport.bpm` afterwards, so
+`captureTransportTicks()` runs immediately before each `new Tone.Part` — in `initPlayback`
+(after `bpm.value = initialBpm`) and in `setActiveHand`. Splitting that pair silently
+re-introduces the bug at every tempo the user has touched.
+
+**Two consequences elsewhere**, both a whole tick — 3 ms at 100 BPM — and both absorbed with
+the existing `SEAM_EPSILON_TICKS`:
+
+- `animateCursorLoop` reads `Tone.Transport.ticks + SEAM_EPSILON_TICKS`. Without it the first
+  frame of a fresh start or of a loop pass resolves to the step *before* the one sounding, and
+  the playhead flicks backwards for a frame at every wrap.
+- the metronome's downbeat test accepts `ticks` or `ticks + SEAM_EPSILON_TICKS`, or a downbeat
+  loses its accent for a whole playthrough.
+
+**How to re-verify** (there is no Tone in the app's Jest environment — it is a score-web
+dependency and needs an AudioContext, so `transportTicks.test.ts` asserts the fence against a
+*model* of the arithmetic above). Build the bundle with `minify: false` into a standalone page
+next to the unzipped MusicXML, stub `window.ReactNativeWebView`, call `__rn_load_xml`, and wrap
+`(Tone.Transport as any)._clock.callback` to record the emitted ticks plus a probe in the
+`Part` callback to record what fires. Then arm a loop over an affected onset and count. The
+numbers in this note came from exactly that, on all eleven files in `testfiles/`.
+
 ## PATTERN: `effectiveQE` snap — prevent cursor sitting at B for an extra RAF frame
 
 When Tone's transport loops, `Transport.ticks` wraps from `bTicks` back to `aTicks` on the audio

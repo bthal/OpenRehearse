@@ -37,7 +37,7 @@ RN/OSMD/Tone imports. See `specs/architecture.md` for the authoritative version.
 | Bits (saved loops), the marker strip & the bit toolbar | `specs/features/playview.md`, `specs/features/pieces-domain.md`, `compound-docs/osmd-webview.md` |
 | Play-surface overlays & animation | `specs/features/playview.md`, `compound-docs/expo-rn-setup.md` |
 | Local data & offline | `specs/features/offline-storage.md` |
-| Audio + cursor sync | `specs/features/playback-synthesis.md`, `specs/features/playview.md` |
+| Audio + cursor sync | `specs/features/playback-synthesis.md`, `specs/features/playview.md`, `compound-docs/tone-playback.md` |
 | State & domain | `specs/features/pieces-domain.md` |
 | Warm-up exercises | `specs/features/warmup.md` |
 | Routines (build + playback) | `specs/features/warmup.md` (Routines section) |
@@ -171,6 +171,12 @@ The `/commit` command runs a guided pass over all of this: assess scope → read
   count-in schedules the transport to start in the *future*, so the state getter reads `'stopped'`
   for the whole pre-roll — and again while `startPlayback` awaits the sample load. Both windows look
   like playback to the user. See `compound-docs/tone-playback.md`.
+- **The tick you hand Tone is not the tick Tone stores.** Tone converts every tick position
+  through seconds and back, floors the result, and adds the lost fraction to the audio time — so a
+  note sounds on the beat but is *filed* up to one tick early. **Never compare a transport position
+  against a musical tick**: read the filed tick from `gridTransportTicks`, and take loop bounds from
+  `domain/transportTicks.ts`. Left uncorrected a loop's first note never sounds and its last one
+  sounds on every pass. See `compound-docs/tone-playback.md`.
 - **Animation**: RN core `Animated` with **`useNativeDriver: false`**. Not a preference — a
   native-driven transform falls back to React's last committed value when it completes, which
   flickers on any component that does not re-render mid-animation. `react-native-reanimated` is
