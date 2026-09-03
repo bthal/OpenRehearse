@@ -2041,8 +2041,8 @@ function startMetronome(): void {
   }, '4n', pickupOffsetTicks > 0 ? `${pickupOffsetTicks}i` : 0);
 }
 
-export function toggleMetronome(): void {
-  metronomeEnabled = !metronomeEnabled;
+export function setMetronome(enabled: boolean): void {
+  metronomeEnabled = enabled;
   if (metronomeEnabled) {
     startMetronome();
   } else {
@@ -2051,6 +2051,10 @@ export function toggleMetronome(): void {
       metronomeEventId = null;
     }
   }
+}
+
+export function toggleMetronome(): void {
+  setMetronome(!metronomeEnabled);
 }
 
 // ─── Count-in ─────────────────────────────────────────────────────────────────

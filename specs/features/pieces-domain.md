@@ -13,6 +13,11 @@
   (`scrapeTempoBpm`); surfaced to the user as the file's original speed
 - Optional: `targetBpm` — user-chosen target speed that overrides `importedBpm` as the PlayView
   100% reference; valid range and helpers live in `domain/tempo.ts`
+- Optional: `tempoMultiplier` — the ×0.5/×0.75/×1.0 speed the piece was last practised at,
+  restored on open; absent for pieces last practised before the field existed, which read as ×1.0
+- Optional: `metronome` — whether the metronome clicks for this piece, restored on open like
+  `tempoMultiplier`; absent reads as off. The active hand is deliberately not stored — see
+  `specs/features/playview.md` § "Playback & tempo"
 - Optional: `sections` — the piece's sections in score order, seeded by detection at import
   (`domain/sections.ts`) and editable by the user thereafter (`domain/sectionEditing.ts`; see
   `specs/features/section-detection.md`). A tiling: no gaps, no overlaps, every measure in
@@ -56,6 +61,9 @@ session. Stored as a JSON array on the piece (`Piece.bits`), normalised on read 
 - Bits are written through a dedicated `piecesStore.setBits(id, bits)` rather than
   `updatePiece`: the PlayView creates, deletes and re-tunes bits on its own and has no
   business restating the title and composer to do it.
+- The piece's own practice settings — `tempoMultiplier` and `metronome`, restored on open —
+  go through `piecesStore.setPracticeSettings(id, settings)` for the same reason. The
+  active hand is not persisted; see `specs/features/playview.md`.
 
 ## Extensibility (future)
 

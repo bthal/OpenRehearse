@@ -7,6 +7,7 @@ import {
   setTempoBpm,
   disposePlayback,
   toggleLoop,
+  setMetronome,
   toggleMetronome,
   setActiveHand,
   setCountIn,
@@ -96,6 +97,12 @@ w.__rn_toggle_loop = () => {
 
 w.__rn_toggle_metronome = () => {
   toggleMetronome();
+};
+
+// A routine carries its metronome setting, so it needs to be set to a known state rather
+// than flipped from whatever the WebView happened to be left on.
+w.__rn_set_metronome = (on: boolean) => {
+  setMetronome(on);
 };
 
 w.__rn_set_active_hand = (hand: 'both' | 'right' | 'left') => {

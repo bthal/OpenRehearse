@@ -501,6 +501,31 @@ metronomeEventId = Tone.Transport.scheduleRepeat((time) => {
 
 Use `Tone.Transport.clear(id)` to cancel on toggle-off or dispose.
 
+### Set it, don't toggle it — and only after the load
+
+The web side exposed `toggleMetronome()` and nothing else. That is enough for a toolbar button
+whose whole job is to flip whatever state the WebView is in, and unusable the moment the setting
+comes from *data*: a routine that stores `metronome: true`, or a piece that remembers the click
+from its last session, needs the metronome driven to a **known** state, and a blind toggle
+inverts it whenever the WebView happens to disagree. `setMetronome(enabled)` is now the
+primitive and `toggleMetronome()` delegates to it.
+
+Native then mirrors its own state into the WebView rather than firing and forgetting:
+
+```typescript
+useEffect(() => {
+  if (!scoreReady) return;
+  webViewRef.current?.injectJavaScript(`window.__rn_set_metronome(${metronomeOn});void 0;`);
+}, [scoreReady, metronomeOn]);
+```
+
+**LANDMINE:** the injection has to wait for the score *load*, not merely `webViewReady`.
+`startMetronome` reads `downbeatTicks`, which `initPlayback` builds during the cursor walk —
+set the metronome before that and `scheduleRepeat` is armed against an empty set, so every
+click is unaccented until something re-schedules it. Keying the effect on "score loaded" also
+re-asserts the setting after any reload, which is what a one-shot injection on the `LOADED`
+message quietly gets wrong.
+
 ## LANDMINE: `'@4n'` quantize syntax is NOT valid as `scheduleRepeat`'s `startTime`
 
 Tone.js's `'@4n'` notation ("next quarter-note boundary") works for `Transport.schedule()` but

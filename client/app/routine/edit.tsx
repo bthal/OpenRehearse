@@ -1,4 +1,11 @@
-import { mdiArrowLeft, mdiDelete, mdiPlus, mdiSwapVertical } from '@mdi/js';
+import {
+  mdiArrowLeft,
+  mdiDelete,
+  mdiMetronome,
+  mdiMetronomeTick,
+  mdiPlus,
+  mdiSwapVertical,
+} from '@mdi/js';
 import * as Crypto from 'expo-crypto';
 import { router, Stack, useLocalSearchParams } from 'expo-router';
 import { useState } from 'react';
@@ -185,6 +192,7 @@ export default function RoutineEditScreen() {
   const [blocks, setBlocks] = useState<BlockWithKey[]>(
     () => existingRoutine?.blocks.map((b) => ({ ...b, _key: Crypto.randomUUID() })) ?? [],
   );
+  const [metronome, setMetronome] = useState(() => existingRoutine?.metronome ?? false);
   const [isDirty, setIsDirty] = useState(false);
   const [picker, setPicker] = useState<PickerState | null>(null);
 
@@ -218,12 +226,20 @@ export default function RoutineEditScreen() {
       id: existingRoutine?.id ?? Crypto.randomUUID(),
       title: title.trim(),
       blocks: cleanBlocks,
+      metronome,
       createdAt: existingRoutine?.createdAt ?? new Date().toISOString(),
     });
     router.back();
   }
 
   // ─── Block mutations ───────────────────────────────────────────────────────
+
+  // The metronome belongs to the routine as a whole, so it toggles straight from the
+  // header rather than going through the per-block picker.
+  function toggleMetronome() {
+    setMetronome((prev) => !prev);
+    setIsDirty(true);
+  }
 
   function insertBlock(atIndex: number, block: RoutineBlock) {
     setBlocks((prev) => {
@@ -489,27 +505,45 @@ export default function RoutineEditScreen() {
           )}
           ListHeaderComponent={
             <View className="pb-2 pt-4">
-              <View className="mb-4 mx-6">
-                <TextInput
-                  value={title}
-                  onChangeText={(v) => {
-                    setTitle(v);
-                    setIsDirty(true);
-                  }}
-                  placeholder=""
-                  className="rounded-lg border border-slate-500/35 bg-slate-50 px-4 py-3 text-xl text-slate-950"
-                  style={{ textAlign: 'center' }}
-                />
-                {!title && (
-                  <View
-                    pointerEvents="none"
-                    className="absolute inset-0 items-center justify-center"
-                  >
-                    <Text className="text-xl text-slate-400">
-                      {t('routineEdit.namePlaceholder')}
-                    </Text>
-                  </View>
-                )}
+              <View className="mx-6 mb-4 flex-row items-center gap-3">
+                {/* The name field keeps its own stacking context so the centred
+                    placeholder overlays the input alone, not the toggle beside it. */}
+                <View className="flex-1">
+                  <TextInput
+                    value={title}
+                    onChangeText={(v) => {
+                      setTitle(v);
+                      setIsDirty(true);
+                    }}
+                    placeholder=""
+                    className="rounded-lg border border-slate-500/35 bg-slate-50 px-4 py-3 text-xl text-slate-950"
+                    style={{ textAlign: 'center' }}
+                  />
+                  {!title && (
+                    <View
+                      pointerEvents="none"
+                      className="absolute inset-0 items-center justify-center"
+                    >
+                      <Text className="text-xl text-slate-400">
+                        {t('routineEdit.namePlaceholder')}
+                      </Text>
+                    </View>
+                  )}
+                </View>
+                <Pressable
+                  onPress={toggleMetronome}
+                  hitSlop={8}
+                  className="p-1.5"
+                  accessibilityRole="button"
+                  accessibilityLabel={t('routineEdit.metronome')}
+                  accessibilityState={{ selected: metronome }}
+                >
+                  <AppIcon
+                    path={metronome ? mdiMetronome : mdiMetronomeTick}
+                    size={26}
+                    color={metronome ? Colors.primary : Colors.icon}
+                  />
+                </Pressable>
               </View>
             </View>
           }

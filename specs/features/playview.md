@@ -71,6 +71,15 @@ The entire piece is rendered in a **single horizontal line** — all measures la
   40/60/80. The reference resolves to `targetBpm ?? importedBpm ?? scoreBpm`; effective BPM =
   reference × multiplier. Bounds are **40–240** (`domain/tempo.ts`), chosen so every selectable
   speed stays inside the synth's `[20, 240]` clamp and the displayed BPM always equals playback.
+- **Speed and metronome are remembered per piece** (`Piece.tempoMultiplier`, `Piece.metronome`),
+  restored once when the piece opens so practice resumes where it left off, and written back on
+  every change made outside a bit — inside one the setting belongs to the bit. The **active hand
+  is deliberately not remembered**: it returns to both hands on every open, because a piece left
+  in one hand gives no clue on screen why the other has gone silent. Pieces last practised before
+  the fields existed read as ×1.0 with the metronome off.
+- The metronome reaches the WebView **only** as a mirror of `metronomeOn`, pushed with
+  `__rn_set_metronome` once the score has loaded and re-asserted after any reload — the click
+  schedule is built from measure metadata that the load creates. Nothing toggles it blind.
 
 ## Loop ("bit") — MVP rules
 
@@ -295,7 +304,8 @@ else.
 ## State (Zustand)
 
 Slices: `activePieceId`, `webViewReady`, `isLoadingScore`, `scoreError`, `isPlaying`,
-`scoreBpm` (from MusicXML), `tempoMultiplier` (×0.5/×0.75/×1.0), `metronomeOn: boolean`,
+`scoreBpm` (from MusicXML), `tempoMultiplier` (×0.5/×0.75/×1.0) and `metronomeOn: boolean`
+(both seeded from the piece on open and persisted back to it),
 `activeHand: 'both' | 'right' | 'left'` (resets to `'both'` on piece unmount),
 `currentSectionIndex: number | null` (driven by `SECTION_INDEX` from the WebView, which owns position),
 `scoreMoving: boolean` (driven by `SCORE_MOTION` from the WebView, which owns the gesture),
@@ -315,6 +325,8 @@ before the first bit was entered, restored on leaving),
 - [x] Score BPM read from MusicXML; speed selector ×0.5/×0.75/×1.0 applied as multiplier. *(Phase 3b)*
 - [x] Target speed defaults to the imported tempo and is adjustable per piece; the speed selector
   scales the target (`targetBpm ?? importedBpm ?? scoreBpm` × multiplier).
+- [x] The chosen speed and metronome setting survive leaving and reopening the piece, and the app
+  being restarted; the hand still returns to both.
 - [x] Cursor visible at position 0 after load and after stop; smooth left-slide between beats. *(Phase 3b)*
 - [x] Score renders in one-line mode (single horizontal system; cursor pinned to center). *(Phase 4)*
 - [x] Manual horizontal scroll pauses playback; play resumes from scrolled position, or from loop start if a loop is active. *(Phase 4)*
