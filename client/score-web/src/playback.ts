@@ -19,6 +19,7 @@ import {
 // Pure count-in and loop-geometry math live in the domain layer (screens/score-web → domain).
 import { computeCountIn, isFreshStart, loopLeadInBeats } from '../../src/domain/countIn';
 import { placeLoopAtCursor } from '../../src/domain/loop';
+import { loopFence } from '../../src/domain/transportTicks';
 import {
   anchorToBarlines,
   buildSnapGrid,
@@ -173,6 +174,13 @@ interface LoopRegion {
   bPx: number;
   aTicks: number;
   bTicks: number;
+  // The same two bounds in the transport's own tick space, which is not the musical
+  // one — see gridTransportTicks. Everything that talks to Tone.Transport about this
+  // loop (the fence, the seek to A, the "is the playhead inside it" test) reads these;
+  // everything musical (the count-in's meter, a saved bit's stored bounds) reads the
+  // pair above.
+  aTransportTicks: number;
+  bTransportTicks: number;
 }
 
 function postToNative(msg: OutboundMessage): void {
@@ -926,6 +934,59 @@ function startAnchorFor(ticks: number): number | null {
   return Math.abs(ticks - onsetTicks) <= SEAM_EPSILON_TICKS ? currentCursorStep : null;
 }
 
+// ─── Transport tick space ─────────────────────────────────────────────────────
+
+/**
+ * Each snap-grid position's tick **as Tone files it**, which is not its musical tick.
+ *
+ * Read from the live transport rather than recomputed, and captured at the BPM the
+ * `Part` was filed with rather than the live one: a Part's event ticks are frozen when it
+ * is built, while the speed control moves `Transport.bpm` afterwards. Both Part builds
+ * call {@link captureTransportTicks} immediately before constructing one, and that
+ * pairing is the whole invariant — keep them together.
+ *
+ * `domain/transportTicks.ts` has the landmine this exists for in full: in short, Tone
+ * converts every tick position through seconds and back, floors the result, and adds the
+ * lost fraction to the audio time — so a note sounds on the beat but is *filed* up to one
+ * tick early, and any comparison against a musical tick misses it. Left uncorrected, a
+ * loop's A never sounds and its B sounds on every pass, and playing from a position the
+ * user panned to drops that first note.
+ */
+let gridTransportTicks: number[] = [];
+
+function captureTransportTicks(): void {
+  gridTransportTicks = snapGrid.map((point) =>
+    Math.floor(Tone.Transport.toTicks(`${Math.round(point.quarters * TONE_PPQ)}i`)),
+  );
+}
+
+/**
+ * A snap-grid index's transport tick, falling back to its musical tick before the
+ * first capture (no Part exists yet, so nothing is filed to disagree with).
+ */
+function transportTicksAt(step: number): number {
+  return gridTransportTicks[step] ?? Math.round((snapGrid[step]?.quarters ?? 0) * TONE_PPQ);
+}
+
+/**
+ * Fences the transport to the loop, in the transport's own tick space.
+ *
+ * `domain/transportTicks.ts` owns the two rules — start exactly on A's filed tick, end a
+ * fraction of a tick below B's — and its tests hold them against a model of Tone's own
+ * arithmetic. All that is left here is the assignment: the start bound goes in as tick
+ * notation, the end bound in seconds, because the notation is whole ticks only
+ * (`/^(\d+)i$/`) and the end bound is deliberately not one. The setter converts it back
+ * at this same BPM, so the fraction survives the trip.
+ */
+function applyTransportLoop(): void {
+  if (!loopRegion) return;
+  const { loopStartTicks, loopEndTicks } = loopFence(loopRegion);
+  const secondsPerTick = 60 / Tone.Transport.bpm.value / TONE_PPQ;
+  Tone.Transport.loop = true;
+  Tone.Transport.loopStart = `${loopStartTicks}i`;
+  Tone.Transport.loopEnd = loopEndTicks * secondsPerTick;
+}
+
 // ─── Binary search helpers ────────────────────────────────────────────────────
 
 // Pixel→step lookups all go through nearestGridIndex in domain/scoreGrid.ts, which
@@ -950,20 +1011,24 @@ function ticksToStep(ticks: number): number {
  * the visible cursor disagree, so every seek goes through here.
  */
 function seekToTicks(ticks: number): void {
-  seekToStep(ticksToStep(ticks), ticks);
+  seekToStep(ticksToStep(ticks));
 }
 
 /**
- * Seeks by step index rather than by ticks.
+ * Seeks by step index — the only way in, since the transport position a step maps to
+ * cannot be recovered from a tick count.
  *
- * Preferred wherever the caller already knows the step: `ticksToStep` floors over
- * `quarters`, and `Math.round(quarters * TONE_PPQ)` can round *up*, so the
- * round-trip lands on the previous step for positions that are not exact multiples
- * of a tick — tuplets, mostly. Passing the index avoids the trip entirely.
+ * The index is the authority for two separate reasons. `ticksToStep` floors over
+ * `quarters` while `Math.round(quarters * TONE_PPQ)` can round *up*, so a tick
+ * round-trip lands on the previous step wherever a position is not an exact tick
+ * multiple — tuplets, mostly. And the tick written to the transport is not the musical
+ * one at all but the tick Tone files this onset's notes at, which only the index can
+ * look up; seeking to the musical tick leaves those notes one tick behind the playhead,
+ * where they never sound. See {@link gridTransportTicks}.
  */
-function seekToStep(step: number, ticks?: number): void {
+function seekToStep(step: number): void {
   const point = cursorSteps[step];
-  Tone.Transport.ticks = ticks ?? Math.round((point?.quarters ?? 0) * TONE_PPQ);
+  Tone.Transport.ticks = transportTicksAt(step);
   advanceCursorTo(step);
   const px = point?.pxLeft ?? 0;
   const el = cursorEl();
@@ -991,6 +1056,8 @@ function loopFromSteps(aStep: number, bStep: number): LoopRegion {
     bPx: b?.pxLeft ?? 0,
     aTicks: Math.round((a?.quarters ?? 0) * TONE_PPQ),
     bTicks: Math.round((b?.quarters ?? 0) * TONE_PPQ),
+    aTransportTicks: transportTicksAt(aStep),
+    bTransportTicks: transportTicksAt(bStep),
   };
 }
 
@@ -1017,7 +1084,13 @@ function animateCursorLoop(): void {
     countInArmed = false;
   }
 
-  const quartersElapsed = Tone.Transport.ticks / TONE_PPQ;
+  // Tone files every event at Math.floor of its tick position, so the transport runs up
+  // to one tick — 3 ms at 100 BPM — behind the musical grid searched below (see
+  // gridTransportTicks). Without the slack the first frame of a fresh start or of a
+  // loop pass resolves to the step *before* the one that is sounding, and the playhead
+  // flicks backwards for a frame at every wrap. Same tolerance, and the same
+  // whole-tick-rounding reason, as SEAM_EPSILON_TICKS.
+  const quartersElapsed = (Tone.Transport.ticks + SEAM_EPSILON_TICKS) / TONE_PPQ;
 
   // Tone.js may take a frame or two for Transport.ticks to wrap back to loopStart
   // after the audio loop fires. Snap effectiveQE to loopStart the moment elapsed
@@ -1161,7 +1234,10 @@ function settleToNearestStep(animate: boolean): void {
   if (!target) return;
 
   currentCursorStep = step;
-  Tone.Transport.ticks = Math.round(target.quarters * TONE_PPQ);
+  // The transport's tick for this onset, not its musical one: a pan is followed by a
+  // play, and the musical tick leaves the note the user stopped on unplayable. See
+  // gridTransportTicks.
+  Tone.Transport.ticks = transportTicksAt(step);
   const el = cursorEl();
   if (el) el.style.left = `${target.pxLeft}px`;
   // The frame loop is not running while paused, so a manual pan is the other way
@@ -1621,8 +1697,7 @@ function initLoopHandles(): void {
       // never disagree with the line the user is looking at.
       if (desired.aIndex !== loopRegion.aStep || desired.bIndex !== loopRegion.bStep) {
         loopRegion = loopFromSteps(desired.aIndex, desired.bIndex);
-        Tone.Transport.loopStart = `${loopRegion.aTicks}i`;
-        Tone.Transport.loopEnd = `${loopRegion.bTicks}i`;
+        applyTransportLoop();
       }
 
       // The dragged side follows the finger; the other is painted from the snapped
@@ -1769,9 +1844,7 @@ function createLoop(): void {
     moved: 'b',
   });
   loopRegion = loopFromSteps(aIndex, bIndex);
-  Tone.Transport.loop = true;
-  Tone.Transport.loopStart = `${loopRegion.aTicks}i`;
-  Tone.Transport.loopEnd = `${loopRegion.bTicks}i`;
+  applyTransportLoop();
   setHandlesInert(false);
   if (handleAEl) handleAEl.style.display = 'flex';
   if (handleBEl) handleBEl.style.display = 'flex';
@@ -1930,9 +2003,7 @@ function armBit(bit: ResolvedBit): void {
 
   activeBitId = bit.id;
   loopRegion = loopFromSteps(bit.aStep, bit.bStep);
-  Tone.Transport.loop = true;
-  Tone.Transport.loopStart = `${loopRegion.aTicks}i`;
-  Tone.Transport.loopEnd = `${loopRegion.bTicks}i`;
+  applyTransportLoop();
   setHandlesInert(true);
   if (handleAEl) handleAEl.style.display = 'flex';
   if (handleBEl) handleBEl.style.display = 'flex';
@@ -2102,7 +2173,12 @@ function startMetronome(): void {
     // Round to nearest integer tick rather than nearest quarter so sub-quarter
     // downbeats (e.g. after an eighth-note pickup) are matched correctly.
     const ticks = Math.round(Tone.Transport.getTicksAtTime(time));
-    playClick(ctx, time, downbeatTicks.has(ticks));
+    // downbeatTicks is musical and the transport can sit one tick behind it, so a
+    // downbeat would lose its accent for a whole playthrough — the same off-by-one the
+    // RAF absorbs above. See gridTransportTicks.
+    const onDownbeat =
+      downbeatTicks.has(ticks) || downbeatTicks.has(ticks + SEAM_EPSILON_TICKS);
+    playClick(ctx, time, onDownbeat);
   }, '4n', pickupOffsetTicks > 0 ? `${pickupOffsetTicks}i` : 0);
 }
 
@@ -2490,6 +2566,9 @@ export function initPlayback(
     baseUrl: SALAMANDER_BASE_URL,
   }).toDestination();
 
+  // Immediately before the Part, and at the BPM it is about to be filed at: this table
+  // is only meaningful paired with the Part it was captured for. See gridTransportTicks.
+  captureTransportTicks();
   const samplerRef = sampler;
   part = new Tone.Part<NoteEvent>(
     (time, event) => {
@@ -2561,12 +2640,19 @@ export async function startPlayback(): Promise<void> {
   // outside [aTicks, bTicks], seek to A before starting.
   let didLoopSeek = false;
   if (loopRegion) {
-    if (loopModified || posTicks < loopRegion.aTicks || posTicks >= loopRegion.bTicks) {
+    // In the transport's tick space, since posTicks was read from the transport: the
+    // musical bounds can sit a tick to either side of the fence, which would read a
+    // playhead parked exactly on A as being outside the loop. See gridTransportTicks.
+    if (
+      loopModified ||
+      posTicks < loopRegion.aTransportTicks ||
+      posTicks >= loopRegion.bTransportTicks
+    ) {
       loopModified = false;
       didLoopSeek = true;
-      // By step, not by ticks: the tick round-trip floors and would start the loop
-      // one note early wherever A's position is not an exact tick multiple.
-      seekToStep(loopRegion.aStep, loopRegion.aTicks);
+      // By step, not by ticks: only the index can resolve both the tuplet round-trip
+      // and the tick Tone actually filed A's notes at.
+      seekToStep(loopRegion.aStep);
     }
   }
 
@@ -2633,7 +2719,8 @@ function resolveCountIn(
       didLoopSeek,
       resumingAbortedCountIn: countInReArmed && posTicks === countInOriginTicks,
       posTicks,
-      firstStepTicks: Math.round((cursorSteps[0]?.quarters ?? 0) * TONE_PPQ),
+      // Transport space: posTicks came off the transport. See gridTransportTicks.
+      firstStepTicks: transportTicksAt(0),
     })
   ) {
     return null;
@@ -2722,6 +2809,8 @@ export function disposePlayback(): void {
   userBpmOverride = null;
   part?.dispose();
   part = null;
+  // Only meaningful paired with the Part just disposed — see gridTransportTicks.
+  gridTransportTicks = [];
   sampler?.dispose();
   sampler = null;
   if (metronomeEventId !== null) {
@@ -2820,8 +2909,12 @@ export function setActiveHand(hand: ActiveHand): void {
   // so the grid comes back identical and the loop's indices stay valid. Rebuilt
   // anyway so the loop's dependence on the grid is explicit rather than accidental.
   rebuildSnapGrid();
+  // Before the loop and the bits are re-derived below, because loopFromSteps reads it,
+  // and at the BPM the Part further down is about to be filed at. See gridTransportTicks.
+  captureTransportTicks();
   if (loopRegion) {
     loopRegion = loopFromSteps(loopRegion.aStep, loopRegion.bStep);
+    applyTransportLoop();
     updateLoopOverlay();
   }
   // The grid comes back identical, so the bits resolve to where they already were —

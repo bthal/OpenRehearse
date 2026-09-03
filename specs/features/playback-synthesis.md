@@ -12,6 +12,8 @@ Play **audio derived from the score** (not external recordings) so that **notati
 ## Loop interaction
 
 - Transport respects **active bit** boundaries: when playback position reaches **end of bit**, **seek immediately** to **start of bit** (see `playview.md`).
+- `[A, B)` holds in audio as well as in geometry: the bit's **start** onset sounds on every
+  pass, its **end** onset never does.
 
 ## Count-in
 
@@ -32,4 +34,6 @@ Play **audio derived from the score** (not external recordings) so that **notati
 - [x] Fermata notes sound longer; subsequent notes are delayed so the hold is audible.
 - [x] Arpeggiated chords roll from low to high (or high to low per marking).
 - [x] Metronome toggleable from toolbar; quarter-note click track; downbeats louder/higher-pitch; correct for any time signature.
+- [x] The onset at the playback position sounds: starting a piece, arming a bit, or playing from
+  a position the user panned to attacks that onset's own notes.
 - [ ] Count-in (when enabled) plays the meter's beats for 1 or 2 measures before a fresh start; a prelude is absorbed into the last counted measure; the first note lands on the beat.
