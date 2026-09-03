@@ -65,11 +65,19 @@ export interface AnchorableStep {
  * to 1.25x / 1.52x — the engraving already bulges there, and anchoring only
  * redistributes the bulge. Not noticeable in practice.
  *
- * Do not "fix" even that by splitting the pixel in two, one for overlays and one
- * for playback. A single value shared by the snap search, the overlays and the
- * playback interpolation is exactly what guarantees the playhead and the loop
- * handles can never disagree at rest; the alternative parks the playhead inside
- * the loop shade forever.
+ * The pixel was once shared by every consumer without exception, on the reasoning
+ * that one value is what stops the playhead and the loop handles disagreeing. That
+ * reasoning still holds **at rest**, and every resting consumer still reads this one
+ * pixel: the snap search, the settle, the seek, the preview line, the overlays and
+ * the handles. Do not split those apart.
+ *
+ * It did not survive contact with playback. The redistribution above happens once per
+ * measure, and across a whole piece it reads as the playhead lurching back to each
+ * barline and then hurrying to beat 2 — noticeable after all. So the motion track, and
+ * only the motion track, reads a second pixel: see {@link motionPxLeft}, which keeps
+ * the playhead on the engraved notehead while it is moving and hands back the anchored
+ * pixel at the two positions the playhead *arrives* at, where disagreeing with the loop
+ * overlay would actually show.
  */
 export function anchorToBarlines(steps: readonly AnchorableStep[]): number[] {
   return steps.map((step, i) => {
@@ -88,6 +96,44 @@ export function anchorToBarlines(steps: readonly AnchorableStep[]): number[] {
     // mean the geometry was misread.
     return Math.min(target, step.pxLeft);
   });
+}
+
+/** A step's two pixels: where it is placed, and where its notehead is engraved. */
+export interface MotionStep {
+  /** Placement pixel — barline-anchored where this onset opens a measure. */
+  pxLeft: number;
+  /** Where the notehead group is engraved, before {@link anchorToBarlines} pulls it. */
+  notePxLeft: number;
+}
+
+/**
+ * The pixel a step exposes to the playback animation, as opposed to at rest.
+ *
+ * Motion runs on noteheads: a playhead sweeping through a measure belongs on the note
+ * that is sounding, not on the barline behind it. Two positions are exceptions, and
+ * both are places the playhead *arrives* at rather than flows through:
+ *
+ * - `loopAStep` — where a loop wraps back to. No arrival test is needed: the transport
+ *   is fenced inside [A, B), so A is only ever reached by the wrap.
+ * - `startAnchorStep` — where a fresh start begins. Without it the cursor sits parked
+ *   on the barline for the whole count-in and then yanks right the instant the first
+ *   note sounds. Callers must pass null when resuming a mid-note pause, which would
+ *   otherwise jerk the playhead *backwards* onto the barline, and should clear it once
+ *   the playhead moves past, so a start made inside a loop cannot leave a stale
+ *   downbeat anchored on every later pass.
+ *
+ * Returns undefined for an out-of-range index so callers keep their own fallback —
+ * the interpolation wants 0 for the current step but the current pixel for the next.
+ */
+export function motionPxLeft(
+  steps: readonly MotionStep[],
+  index: number,
+  startAnchorStep: number | null,
+  loopAStep: number | null,
+): number | undefined {
+  const step = steps[index];
+  if (step === undefined) return undefined;
+  return index === startAnchorStep || index === loopAStep ? step.pxLeft : step.notePxLeft;
 }
 
 export interface LoopIndices {

@@ -3,9 +3,11 @@ import {
   buildSnapGrid,
   clampLoopIndices,
   LOOP_MIN_QUARTERS,
+  motionPxLeft,
   nearestGridIndex,
   type AnchorableStep,
   type GridPoint,
+  type MotionStep,
   nearestIndexByQuarters,
 } from '../scoreGrid';
 
@@ -270,6 +272,59 @@ describe('anchorToBarlines', () => {
 
   it('survives a score with no onsets', () => {
     expect(anchorToBarlines([])).toEqual([]);
+  });
+});
+
+describe('motionPxLeft', () => {
+  // Same BWV 846 geometry as above: a measure's first notehead sits 22 px right of the
+  // barline it was anchored onto, and successive onsets are 28 px apart. Steps 0 and 3
+  // open measures, so their two pixels differ; steps 1, 2 and 4 do not, so theirs agree.
+  const STEPS: MotionStep[] = [
+    { pxLeft: 100, notePxLeft: 122 },
+    { pxLeft: 150, notePxLeft: 150 },
+    { pxLeft: 178, notePxLeft: 178 },
+    { pxLeft: 206, notePxLeft: 228 },
+    { pxLeft: 256, notePxLeft: 256 },
+  ];
+
+  it('puts a measure-start step on its notehead when it is not an anchor', () => {
+    expect(motionPxLeft(STEPS, 3, null, null)).toBe(228);
+  });
+
+  it('leaves the two tracks identical away from a measure start', () => {
+    expect(motionPxLeft(STEPS, 1, null, null)).toBe(150);
+    expect(motionPxLeft(STEPS, 2, 2, null)).toBe(178);
+  });
+
+  it('holds the loop A step on its barline, which is where the wrap lands', () => {
+    expect(motionPxLeft(STEPS, 3, null, 3)).toBe(206);
+  });
+
+  it('holds the step a fresh start began on, so the first note does not yank', () => {
+    expect(motionPxLeft(STEPS, 3, 3, null)).toBe(206);
+  });
+
+  it('anchors nothing once both anchors are spent', () => {
+    expect(STEPS.map((_, i) => motionPxLeft(STEPS, i, null, null))).toEqual([
+      122, 150, 178, 228, 256,
+    ]);
+  });
+
+  // Starting playback at a loop's A handle sets both anchors to the same index.
+  it('treats the two anchors landing on one step as a single anchor', () => {
+    expect(motionPxLeft(STEPS, 0, 0, 0)).toBe(100);
+  });
+
+  it('anchors only the named steps, never their neighbours', () => {
+    expect(motionPxLeft(STEPS, 0, 3, 3)).toBe(122);
+    expect(motionPxLeft(STEPS, 4, 3, 3)).toBe(256);
+  });
+
+  // The interpolation reads index + 1 every frame and falls back to the current pixel,
+  // so the final step must report a miss rather than a zero.
+  it('returns undefined past the end of the grid', () => {
+    expect(motionPxLeft(STEPS, 5, null, null)).toBeUndefined();
+    expect(motionPxLeft([], 0, 0, 0)).toBeUndefined();
   });
 });
 

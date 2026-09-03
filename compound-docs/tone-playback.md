@@ -745,32 +745,80 @@ position is not an exact tick multiple — tuplets, mostly. `seekToStep(step, ti
 wherever the caller already knows the index, pass the index. `startPlayback`'s seek to loop A goes
 through it, otherwise a loop starting on a triplet would begin one note early.
 
-## A measure's first onset is anchored to its barline — one pixel, shared by everything
+## A measure's first onset is anchored to its barline — one pixel at rest, two in motion
 
 **PATTERN:** `buildTimelines` records each measure-opening step's barline (`measureBoundsPx`) and
-`anchorToBarlines` (`domain/scoreGrid.ts`) writes the result straight into `CursorStep.pxLeft`.
-There is exactly **one** pixel per grid point, read by the snap search, the preview line, the loop
-overlay, `pxAtTicks` for section seams, the scroll clamp and the playback interpolation alike.
+`anchorToBarlines` (`domain/scoreGrid.ts`) writes the result into `CursorStep.pxLeft`. That is the
+**placement** pixel, and at rest it is the only one: the snap search, the settle, the seek, the
+preview line, the loop overlay, `pxAtTicks` for section seams and the scroll clamp all read it.
+**Never split those apart** — one shared value is what stops the resting playhead and the loop
+handles disagreeing.
 
-That single value is the whole point. The obvious alternative — a "notehead pixel" for playback and
-a "barline pixel" for overlays — was designed and rejected: it parks the playhead ~22 px inside the
-loop shade at every loop start and wrap, which is the same defect as the off-grid cursor bug that
-motivated the grid in the first place, only permanent.
+The raw notehead pixel survives alongside it as `CursorStep.notePxLeft`, and the RAF playback
+interpolation is the **only** reader, through `motionPxLeft` (`domain/scoreGrid.ts`).
 
-**The cost, measured on Bach BWV 846 (28 px per sixteenth as 1.0×; median shift 6.9 px, max 22.8):**
+**Why the split exists, after this note spent a release forbidding it.** The original rejection was
+right about its defect and wrong about the cost:
 
-| step | before | after |
+- *Right:* a naive split parks the playhead ~22 px inside the loop shade at every loop start and
+  wrap — the off-grid cursor bug the grid was built to kill, made permanent. `motionPxLeft` avoids
+  it by re-anchoring at exactly the two positions the playhead *arrives* at rather than flows
+  through: `loopRegion.aStep`, and the step a fresh start began on. **Remove either exception and
+  that bug is back.**
+- *Wrong:* "not noticeable in practice". The table below is a fair account of one barline, but the
+  event repeats every measure, and over a piece it reads as the playhead lurching back to each
+  barline and then hurrying to beat 2. It was reported as a bug.
+
+**The redistribution at one barline, measured on Bach BWV 846** (28 px per sixteenth as 1.0×;
+median shift 6.9 px, max 22.8) — this is what motion now avoids, and what still happens at the two
+anchored positions:
+
+| step | notehead | anchored |
 |---|---|---|
 | into the barline (last note of the measure) | 1.50× | **1.25×** |
 | out of the barline (downbeat) | 1.28× | **1.52×** |
 
-The engraving already bulges either side of a barline; anchoring only redistributes the bulge, and
-the result is not noticeable in practice. **Do not "smooth" even that** by reintroducing a second
-pixel per step.
-
 An earlier revision of this note claimed 0.71× / 2.06×. That was measured while `measureBoundsPx`
 still carried the cursor's `- 1.5` offset (see `osmd-webview.md`), which inflated the shift from
-6.9 px to 21.9 px. If you find figures in that range anywhere, the offset bug is back.
+6.9 px to 21.9 px. If you find figures in that range anywhere, the offset bug is back — and the
+motion track then also breaks `settleToNearestStep`, which resolves a paused playhead against
+`pxLeft` and only has ~11 px of margin (half the minimum note gap) to absorb the difference.
+
+### LANDMINE: `loopRegion.aStep`/`bStep` index `snapGrid`, not `cursorSteps`
+
+`snapGrid` is `cursorSteps` plus the terminal target standing for the closing barline, so **B can be
+one past the end of `cursorSteps`**. Any per-step lookup on a loop bound has to account for that.
+
+The first attempt at the motion track did not, and produced a playhead that reached the end of a
+loop early and then stuck there until the transport wrapped. Two causes, both in the interval that
+ends the loop:
+
+- `nextPx` read `motionPxLeft(cursorSteps, bStep, …)`. B is not an anchor index, so it returned B's
+  *notehead* — right of `bPx`. The playhead aimed past the bracket, hit the `Math.min(…, bPx)` clamp
+  early and parked. Where B was the terminal target the lookup missed entirely and `nextPx` fell
+  back to `currPx`, freezing the playhead for the whole interval.
+- `nextQ` had the same shape. It happened to be correct only because the terminal sits exactly
+  `LOOP_MIN_QUARTERS` past the final onset.
+
+**Fix:** the interval ending a loop aims at the region's own edge — `loopRegion.bPx` and
+`loopRegion.bTicks / TONE_PPQ`, the same value the wrap predicate tests. `fraction` then reaches 1.0
+at the instant the wrap fires, and the clamp goes back to being a safety net instead of the thing
+that stops the playhead.
+
+### The start anchor is a tick test, not `isFreshStart`
+
+`startAnchorStep` is armed by `startAnchorFor(countInOriginTicks)`, which asks only whether the
+transport sits *on* an onset. Do not reach for `isFreshStart` here: it answers whether the **player**
+lost the pulse, by provenance. Its loop branch is `didLoopSeek || resumingAbortedCountIn` and never
+inspects position; its piece branch is `posTicks <= firstStepTicks`, false at every mid-piece onset.
+
+Without the anchor the cursor sits parked on the barline through the whole count-in and then yanks
+right the instant the first note sounds. With it applied to a *mid-note resume* it jerks
+**backwards** instead — hence the tick test. `startAnchorFor` reads `currentCursorStep` rather than
+`ticksToStep` because the latter is a floor search (see the round-trip landmine above), and allows
+`SEAM_EPSILON_TICKS` of slack for whole-tick rounding. The anchor expires the first time the RAF
+sees a `targetStep` past it, so a playback started *inside* a loop cannot leave a stale downbeat
+pinned on every later pass.
 
 Two rules inside `anchorToBarlines` that are not decoration:
 

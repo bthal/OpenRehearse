@@ -33,12 +33,19 @@ The entire piece is rendered in a **single horizontal line** — all measures la
     means "start of measure" — the cursor, a loop bound, a section junction — lands *after* the
     barline that defines it. The opening measure is deliberately excluded: its left edge is the edge
     of the engraving, so anchoring there would park the playhead left of the clef.
-  - That single pixel is shared by the snap search, the preview line, the loop overlay **and** the
-    playback interpolation, which is what keeps the playhead, the handles and the section seams from
-    ever disagreeing. The cost is slightly uneven playhead motion at each barline — the pixels
-    between barline and notehead move from the step arriving at the downbeat to the step leaving it
-    — but the engraving already spaces those steps unevenly, so anchoring only redistributes it
-    (measured: 1.50×/1.28× becomes 1.25×/1.52× of a normal step).
+  - That pixel is shared by the snap search, the preview line, the loop overlay and every resting
+    position, which is what keeps the playhead, the handles and the section seams from ever
+    disagreeing when the score is still.
+  - **A moving playhead follows noteheads instead.** Anchoring shifts pixels from the step arriving
+    at a downbeat to the step leaving it (measured: 1.50×/1.28× becomes 1.25×/1.52× of a normal
+    step), which is harmless once but repeats every measure — as continuous motion it reads as the
+    playhead lurching back to each barline and then hurrying to beat 2. So during playback the
+    playhead sits on the note that is sounding, and re-anchors only where it *arrives* rather than
+    flows: at a loop's or bit's start on every wrap, and at the step a fresh start began on, so
+    nothing jumps when the first note sounds after a count-in. Resuming a mid-note pause picks up
+    exactly where it froze.
+  - A loop's last interval aims at the loop's own right edge, so the playhead reaches the B bracket
+    at the moment the wrap fires rather than arriving early and waiting there.
   - On next **play**: if no loop is set, playback resumes from the cursor's current position — which
     is already exactly on a note, so **nothing moves when playback starts**. If a loop is set, the
     cursor smoothly scrolls to the loop start and playback begins from there.
@@ -323,6 +330,9 @@ before the first bit was entered, restored on leaving),
   glides onto it on settle. Pressing play after positioning by hand moves nothing.
 - [x] A measure's first onset sits on its barline, so the cursor, loop bounds and section junctions
   all align with the engraved barlines; the opening measure is excluded (`domain/scoreGrid.ts`).
+- [x] A moving playhead tracks noteheads rather than barlines, re-anchoring only at a loop or bit
+  start on each wrap and at the step a fresh start began on, so playback paces evenly across
+  barlines and nothing jumps when the first note sounds (`motionPxLeft`, `domain/scoreGrid.ts`).
 - [x] Toolbar renders vertically on the left. *(Phase 4)*
 - [x] Play/pause is a decorative translucent disc on the cursor at screen centre, not a toolbar
       button; it is hidden while the score is panning, coasting, gliding or a handle is dragged,
