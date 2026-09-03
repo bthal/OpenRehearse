@@ -1,4 +1,5 @@
 import type { Bit } from './bits';
+import type { TempoMultiplier } from './practiceSettings';
 import type { Section } from './sections';
 
 export interface Piece {
@@ -21,6 +22,23 @@ export interface Piece {
    * `importedBpm`. See `domain/tempo.ts` for the valid range.
    */
   targetBpm?: number;
+  /**
+   * The speed the piece was last practised at, so reopening it resumes where the
+   * practice left off instead of snapping back to full speed. Undefined for pieces
+   * imported before the field existed, which read as ×1.0.
+   *
+   * Only the piece's own speed: a bit carries its own, and leaving a bit restores this
+   * one. The active hand is deliberately *not* stored — it returns to both hands on
+   * every open, because a piece left in one hand gives no clue on screen why the other
+   * has gone silent.
+   */
+  tempoMultiplier?: TempoMultiplier;
+  /**
+   * Whether the metronome clicks for this piece, restored on open like
+   * `tempoMultiplier`. Undefined for pieces imported before the field existed, which
+   * read as off.
+   */
+  metronome?: boolean;
   /**
    * The piece's sections in score order, seeded by detection at import and editable
    * by the user thereafter. A tiling: no gaps, no overlaps, every measure in exactly

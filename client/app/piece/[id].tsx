@@ -1,7 +1,7 @@
 import {
   mdiAlertCircleOutline,
-  mdiArrowLeft,
   mdiClose,
+  mdiExitToApp,
   mdiHandBackLeft,
   mdiHandBackRight,
   mdiHandClap,
@@ -27,6 +27,7 @@ import { SectionLabel } from '@components/SectionLabel';
 import { ToolbarShell } from '@components/ToolbarShell';
 import { pieceRepository } from '@data/index';
 import { BIT_MAX_ROWS, type Bit } from '@domain/bits';
+import { DEFAULT_PRACTICE_SETTINGS } from '@domain/practiceSettings';
 import type { Section } from '@domain/sections';
 import { Colors, SectionColors } from '@theme/colors';
 import { SCORE_WEB_HTML } from '@score-web/html';
@@ -64,6 +65,7 @@ export default function PlayView() {
   const piece = usePiecesStore((s) => (id ? s.piecesById[id] : undefined));
   const touchPiece = usePiecesStore((s) => s.touchPiece);
   const setPieceBits = usePiecesStore((s) => s.setBits);
+  const setPiecePracticeSettings = usePiecesStore((s) => s.setPracticeSettings);
 
   const webViewReady = usePlayViewStore((s) => s.webViewReady);
   const isLoadingScore = usePlayViewStore((s) => s.isLoadingScore);
@@ -162,13 +164,41 @@ export default function PlayView() {
     if (id) void touchPiece(id);
   }, [id, touchPiece]);
 
+  // Speed and metronome are the piece's own, restored once when it arrives so practice
+  // resumes where it left off. Once only, and before the score reports its BPM: the
+  // SCORE_BPM handler multiplies the reference by the restored value, so the piece opens
+  // at the right tempo with nothing extra injected, and a later change made in the view
+  // (or by entering a bit) must not be overwritten by this.
+  const restoredForRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!id || !piece || restoredForRef.current === id) return;
+    restoredForRef.current = id;
+    setTempoMultiplier(piece.tempoMultiplier ?? DEFAULT_PRACTICE_SETTINGS.tempoMultiplier);
+    setMetronomeOn(piece.metronome ?? DEFAULT_PRACTICE_SETTINGS.metronome);
+  }, [id, piece, setTempoMultiplier, setMetronomeOn]);
+
+  /**
+   * Stores a practice setting on the piece — but not while a bit is armed, where the
+   * setting belongs to the bit (`writeBackToActiveBit` records it) and leaving the bit
+   * restores the piece's own value from `preBitSettings`.
+   */
+  const persistToPiece = useCallback(
+    (settings: { tempoMultiplier?: TempoMultiplier; metronome?: boolean }) => {
+      if (!id || activeBitIdRef.current !== null) return;
+      void setPiecePracticeSettings(id, settings);
+    },
+    [id, setPiecePracticeSettings],
+  );
+
   /**
    * Applies a set of practice settings, injecting only what actually differs.
    *
    * The guard is not an optimisation: `__rn_set_active_hand` rebuilds the Tone.Part and
    * commits any glide in flight, so re-asserting the hand a bit was already using would
-   * snap the score to the bit instead of letting it slide there. Metronome has no setter
-   * on the web side either — only a toggle — so "differs" is the only safe test.
+   * snap the score to the bit instead of letting it slide there.
+   *
+   * The metronome needs no guard — the effect below mirrors it into the WebView from
+   * state, so setting it to the value it already had costs nothing.
    */
   const applyPracticeSettings = useCallback(
     (next: PracticeSettings) => {
@@ -185,10 +215,7 @@ export default function PlayView() {
           `window.__rn_set_tempo(${Math.round(reference * next.tempoMultiplier)});void 0;`,
         );
       }
-      if (next.metronome !== metronomeOnRef.current) {
-        setMetronomeOn(next.metronome);
-        webViewRef.current?.injectJavaScript('window.__rn_toggle_metronome();void 0;');
-      }
+      setMetronomeOn(next.metronome);
     },
     [setActiveHand, setTempoMultiplier, setMetronomeOn],
   );
@@ -519,8 +546,9 @@ export default function PlayView() {
       const bpm = Math.round(reference * m);
       webViewRef.current?.injectJavaScript(`window.__rn_set_tempo(${bpm});void 0;`);
       writeBackToActiveBit({ tempoMultiplier: m });
+      persistToPiece({ tempoMultiplier: m });
     },
-    [setTempoMultiplier, isPlaying, writeBackToActiveBit],
+    [setTempoMultiplier, isPlaying, writeBackToActiveBit, persistToPiece],
   );
 
   const handleLoopToggle = useCallback(() => {
@@ -534,10 +562,10 @@ export default function PlayView() {
   }, []);
 
   const handleMetronomeToggle = useCallback(() => {
-    webViewRef.current?.injectJavaScript('window.__rn_toggle_metronome();void 0;');
     setMetronomeOn(!metronomeOn);
     writeBackToActiveBit({ metronome: !metronomeOn });
-  }, [metronomeOn, setMetronomeOn, writeBackToActiveBit]);
+    persistToPiece({ metronome: !metronomeOn });
+  }, [metronomeOn, setMetronomeOn, writeBackToActiveBit, persistToPiece]);
 
   /**
    * Saves the live loop as a bit. The id is minted here because `crypto.randomUUID` is
@@ -557,6 +585,15 @@ export default function PlayView() {
   const referenceBpm = piece?.targetBpm ?? piece?.importedBpm ?? scoreBpm;
   const effectiveBpm = Math.round(referenceBpm * tempoMultiplier);
   const scoreReady = webViewReady && !isLoadingScore && !scoreError;
+
+  // The single path by which the metronome reaches the WebView: state here, mirrored
+  // there. Only once the score has loaded, because the click schedule is built from the
+  // measure metadata the load creates, and re-asserted after any reload.
+  useEffect(() => {
+    if (!scoreReady) return;
+    webViewRef.current?.injectJavaScript(`window.__rn_set_metronome(${metronomeOn});void 0;`);
+  }, [scoreReady, metronomeOn]);
+
   // Bit mode. The WebView owns the armed loop, so this follows BIT_ENTERED rather than
   // being set by the tap that caused it.
   const inBit = activeBitId !== null;
@@ -650,7 +687,7 @@ export default function PlayView() {
                     accessibilityRole="button"
                     accessibilityLabel={t('playView.back')}
                   >
-                    <AppIcon path={mdiArrowLeft} size={24} color={Colors.icon} />
+                    <AppIcon path={mdiExitToApp} size={24} color={Colors.icon} flip="vertical" />
                   </TouchableOpacity>
 
                   {/* Loop select / clear */}
