@@ -177,6 +177,12 @@ The `/commit` command runs a guided pass over all of this: assess scope → read
   against a musical tick**: read the filed tick from `gridTransportTicks`, and take loop bounds from
   `domain/transportTicks.ts`. Left uncorrected a loop's first note never sounds and its last one
   sounds on every pass. See `compound-docs/tone-playback.md`.
+- **A scheduled audio event cannot be taken back.** Tone schedules ahead of the playhead, and a
+  click is a raw Web Audio node started at a future time — `Transport.stop()` does not unschedule
+  it. Anything that must not sound has to be **refused when it is scheduled**, inside the callback
+  and against the event's own tick, never by stopping the transport later. Stopping from the RAF
+  loop is doubly wrong: it is a frame late by construction and does not run at all when frames are
+  throttled. See `compound-docs/tone-playback.md`.
 - **Animation**: RN core `Animated` with **`useNativeDriver: false`**. Not a preference — a
   native-driven transform falls back to React's last committed value when it completes, which
   flickers on any component that does not re-render mid-animation. `react-native-reanimated` is

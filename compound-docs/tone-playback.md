@@ -501,6 +501,39 @@ metronomeEventId = Tone.Transport.scheduleRepeat((time) => {
 
 Use `Tone.Transport.clear(id)` to cancel on toggle-off or dispose.
 
+### LANDMINE: the repeat is unbounded, and its clicks cannot be taken back
+
+Both halves of the pattern above have a cost, and together they produce a click **after** the piece
+ends — one beat too many, landing exactly as it finishes:
+
+- `scheduleRepeat` has **no end bound**. It clicks for as long as the transport runs.
+- A click is a raw `OscillatorNode` with `osc.start(futureTime)`, scheduled ahead of the playhead by
+  Tone's lookahead. It is committed to the audio graph, outside Tone's control.
+
+So `Transport.stop()` cannot silence it. By the time the RAF loop sees `quartersElapsed >=
+totalQuarters` and calls `_stopInternal()`, the click on the closing barline has already been
+started, and stopping the transport does not unschedule a Web Audio node. Measured on a two-bar
+C major scale (`totalQuarters` 8): clicks at quarters 0…8, the one at 8 being the downbeat of a
+measure that does not exist.
+
+**Fix:** refuse the click while it is still only *scheduled*, inside the callback, against the
+click's own tick rather than the live transport position — `domain/transportTicks.ts`'s
+`metronomeClickSounds`:
+
+```typescript
+const ticks = Math.round(Tone.Transport.getTicksAtTime(time));
+if (!metronomeClickSounds({ clickTicks: ticks, pieceEndTicks: totalQuarters * TONE_PPQ })) return;
+```
+
+The tolerance is a whole tick — the same "filed one tick early" defect the loop fence backs off
+from, so the comparison meets the click where Tone files it rather than where the beat is.
+
+**Do not try to fix this by stopping the transport earlier.** The RAF loop is the wrong instrument:
+it runs a frame late by construction, and it does not run at all when frames are throttled — a
+backgrounded WebView or a locked screen left the metronome clicking indefinitely (observed running
+to quarter 44 of an 8-quarter piece). The guard above is what actually bounds the metronome; the
+RAF stop only ends playback.
+
 ### Set it, don't toggle it — and only after the load
 
 The web side exposed `toggleMetronome()` and nothing else. That is enough for a toolbar button
@@ -582,15 +615,14 @@ Clamping `translateX` to `[viewportWidth - scoreWidth, 0]` limits the score so i
 reaches the screen left and its right edge reaches the screen right. But the cursor line is fixed
 at screen centre — at either boundary the cursor line sits over blank space, not a note.
 
-**Fix:** clamp to `[viewportWidth/2 - pxLast, viewportWidth/2 - px0]` where `px0` and `pxLast`
-are the pixel positions of the first and last cursor steps. Compute in `initPlayback` after
-`buildTimelines`:
+**Fix:** clamp to `[viewportWidth/2 - pxLast, viewportWidth/2 - px0]` — the first cursor step at
+one end and the snap grid's terminal at the other, both computed in `recomputeViewportMetrics`:
 
 ```typescript
-const px0    = cursorSteps[0]?.pxLeft ?? 0;
-const pxLast = cursorSteps[cursorSteps.length - 1]?.pxLeft ?? scoreWidth;
-scrollMaxPx  = viewportWidth / 2 - px0;    // first note centred
-scrollMinPx  = viewportWidth / 2 - pxLast; // last note centred
+const px0 = cursorSteps[0]?.pxLeft ?? 0;
+const pxLast = snapGrid[snapGrid.length - 1]?.pxLeft ?? ...;
+scrollMaxPx = viewportWidth / 2 - px0; // first note centred
+scrollMinPx = viewportWidth / 2 - pxLast; // closing barline centred
 ```
 
 **Secondary LANDMINE (same root cause):** On load, `applyTranslate(viewportWidth/2 - px0)`
@@ -599,10 +631,22 @@ this value, so any `touchmove` event — even a zero-delta tap — clamped the o
 snapped the score to the left edge. The corrected `scrollMaxPx` bound is always ≥ the initial
 translateX, so no snap occurs.
 
-**Do not widen these bounds to the snap grid's terminal target.** The terminal exists so handle B
-can reach past the final note; the *playhead* must never park there, because there is nothing to
-play and nothing to snap to. `recomputeViewportMetrics` deliberately reads `cursorSteps` extremes,
-not `snapGrid` extremes, and carries a comment saying so.
+**The right bound is the terminal, not the final onset — and it has to be.** This used to say the
+opposite ("the playhead must never park there"), which stopped being true once the last note began
+gliding to the closing barline over its sounding length: with the bound at the final onset the score
+spent that whole note outside its own pan range, so pausing on it and then panning yanked the score
+right by a barline. The bound follows the playhead.
+
+It still puts the centre line nowhere the playhead cannot go, which is what the bounds are for.
+Nothing sounds past the final onset and nothing needs to — **the settle is still onsets-only**
+(`nearestGridIndex(cursorSteps, ...)`), so a pan into the closing bar glides back onto the last note
+rather than sticking in the gap. Keep those two apart: bounds follow the playhead, the settle follows
+the notes.
+
+**One dependency chain, one place.** The viewport fixes the terminal's reachable pixel, and the
+terminal fixes `scrollMinPx`, so `recomputeViewportMetrics` calls `rebuildSnapGrid` itself between
+the two. Do not rebuild the grid anywhere else on a resize — the bounds would be left a resize behind
+the terminal they are derived from.
 
 ## Fermata: expand the tick timeline, don't just extend the note duration
 
@@ -856,31 +900,71 @@ Two rules inside `anchorToBarlines` that are not decoration:
   binary-searches on. On the prelude it never has to fire (34 anchored steps, 0 clamped), but a
   measure whose first entry carries accidentals has a 37.8 px inset against ~28 px steps, so it can.
 
-## LANDMINE: `Iterator.EndReached` fires while cursor is still AT the final note
+## LANDMINE: the iterator is a whole measure past the music once `EndReached` is set
 
-**LANDMINE:** Some OSMD builds set `cursor.Iterator.EndReached = true` while the cursor is still
-positioned AT the final note — not past it. The standard `while (!EndReached)` walk exits before
-pushing that position, so the final note is never captured in `cursorSteps`. Effects:
-- Handle B cannot reach the last note's pixel position (it clamps to the second-to-last note).
-- The cursor never visually reaches the final note during playback.
-- The snap grid's terminal target is derived from the final onset, so a missing final step puts the
-  end of the piece in the wrong place and the last note cannot be looped.
+**LANDMINE:** once `cursor.Iterator.EndReached` is true, nothing the iterator reports is a musical
+position any more. On OSMD 1.9.9 it has advanced `CurrentEnrolledTimestamp` a **full measure past the
+end of the piece** and `CurrentMeasureIndex` one past the last measure, while the cursor element has
+drifted a few pixels right of the final notehead. Measured:
 
-**Fix:** After the while-loop, check whether the cursor element's current `style.left` is strictly
-beyond the last captured step's `pxLeft`. If so, capture it as an extra step:
+| score                   | final onset | music ends     | iterator after the walk |
+| ----------------------- | ----------- | -------------- | ----------------------- |
+| C major scale, 2 bars   | q=7         | q=8            | q=12                    |
+| Hanon No. 1, 16 bars    | q=60        | q=64           | q=68                    |
+| Bach BWV 846, 35 bars   | q=136       | q=143 (fermata)| q=147                   |
+
+**Do not push a step from it after the loop, and do not derive `totalQuarters` from one.** A step
+built from that pair is a note onset that does not exist, and every consumer believes it: the
+playhead spent 8 quarters crossing Hanon's closing semibreve and 11 crossing Bach's fermata — twice
+the written value, longer than the fermata itself — and `totalQuarters` held the transport open
+behind it. The walk already captures the final note (Hanon No. 1 ends at step 120 of 121), so nothing
+is missing that needs recovering.
+
+This block previously existed for the opposite belief — "some OSMD builds set `EndReached` while the
+cursor is still AT the final note" — guarded by `finalPxLeft > lastCapturedPx`. That test cannot tell
+the two cases apart: the cursor element moves past the last notehead either way, so the guard fires
+unconditionally. If a future OSMD really does exit the walk early, detect it against the *score*, not
+against a pixel.
+
+**`cursorSteps` holds real note onsets only.** The point standing for the closing barline is
+`buildSnapGrid`'s terminal, appended on top — see below.
+
+## The end of the piece is the closing barline, not "one quarter past the last note"
+
+`totalQuarters` used to be `lastExpandedQuarters + 1`, which is neither the barline nor the last
+note's length: a piece closing on a semibreve stopped three quarters early, one closing on a quaver
+ran a quarter long. `domain/scoreGrid.ts`'s `pieceEndQuarters` measures the closing measure the way
+every other measure is measured — its downbeat, plus its own length, plus any fermata inside it:
 
 ```typescript
-const finalPxLeft = parseFloat(el?.style.left ?? '0');
-const lastCapturedPx = steps[steps.length - 1]?.pxLeft ?? -1;
-if (finalPxLeft > lastCapturedPx) {
-  const q = osmd.cursor.Iterator.CurrentEnrolledTimestamp.RealValue * WHOLE_TO_QUARTER;
-  const expandedQ = q + tickShift / TONE_PPQ;
-  lastExpandedQuarters = expandedQ;
-  steps.push({ quarters: expandedQ, pxLeft: finalPxLeft, osmdIdx });
-}
+totalQuarters = pieceEndQuarters({
+  lastMeasureStartQuarters, // captured on the last measure change, fermata-expanded
+  lastMeasureQuarters, // SourceMeasure.Duration, NOT the time signature
+  trailingHoldQuarters: (tickShift - tickShiftAtLastMeasure) / TONE_PPQ,
+  lastOnsetQuarters: lastExpandedQuarters,
+});
 ```
 
-Place this immediately after the while-loop, before setting `totalQuarters`.
+- **`Duration`, not `ActiveTimeSignature`.** A piece that opens with a pickup pays it back in a short
+  closing bar, and a full bar's worth of meter would run past the double bar.
+- **Snapshot `tickShift` at the measure change**, so a fermata _inside_ the closing measure counts
+  and one before it does not.
+- The floor at `lastOnset + LOOP_MIN_QUARTERS` is for malformed MusicXML, where OSMD can report a
+  zero-length measure. Without it the terminal lands on or behind the final onset, stopping the
+  transport before that note sounds and leaving `clampLoopIndices` with no legal loop at the end.
+
+**The RAF loop's final interval aims at the terminal**, for the same reason the loop's last interval
+aims at handle B: it is a position the playhead _arrives_ at, and it is not in `cursorSteps`.
+
+```typescript
+const terminal = snapGrid[snapGrid.length - 1];
+// ... ?? terminal?.pxLeft ?? currPx     and     ?? terminal?.quarters ?? currQ + 1
+```
+
+Without it the playhead freezes on the last notehead while its note is still sounding — the one
+measure in the piece it does not cross. With it, the last note glides from its notehead to the double
+bar over exactly its sounding length (4 quarters for Hanon, 7 for Bach's fermata), and playback stops
+there.
 
 ## LANDMINE: Tone files a scheduled event one tick early, so a loop's first note never sounds
 

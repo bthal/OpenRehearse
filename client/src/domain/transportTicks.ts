@@ -82,3 +82,41 @@ export function loopFence({ aTransportTicks, bTransportTicks }: LoopFenceParams)
     loopEndTicks: bTransportTicks - LOOP_FENCE_BACKOFF_TICKS,
   };
 }
+
+/**
+ * How far below the end of the piece the metronome's last click may sit, in ticks.
+ *
+ * A whole tick, not the fence's half: this one absorbs the `TransportEvent` floor at the
+ * top of this file rather than a float comparison, and that floor is a whole tick. Beats
+ * are quarter-notes apart, so a tick of slack cannot reach the previous one.
+ */
+export const METRONOME_END_TOLERANCE_TICKS = 1;
+
+export interface MetronomeClickParams {
+  /** The click's position, as the transport reports it at the click's own audio time. */
+  clickTicks: number;
+  /** The end of the piece — `totalQuarters` in ticks, i.e. the closing barline. */
+  pieceEndTicks: number;
+}
+
+/**
+ * Whether a metronome click belongs to the piece, or has run off the end of it.
+ *
+ * The metronome is a `Transport.scheduleRepeat` with no end bound, and its clicks are raw
+ * `OscillatorNode`s started at a *future* audio time. Neither half of that can be taken
+ * back: by the time the RAF loop sees the transport reach the end and calls
+ * `Transport.stop()`, the click on the closing barline has already been scheduled into
+ * the audio graph, and stopping the transport does not unschedule a Web Audio node. So it
+ * sounded — one beat too many, exactly as the piece ended. The click has to be refused
+ * when it is *scheduled*, which is what this is for.
+ *
+ * A click at the closing barline is the downbeat of a measure that does not exist. The
+ * last click a piece gets is the last beat that falls strictly inside it.
+ *
+ * The tolerance is the same "filed one tick early" defect as {@link loopFence}'s backoff
+ * — score-web's `SEAM_EPSILON_TICKS` is the same number for the same reason — so the
+ * comparison meets the click where Tone files it rather than where the beat is.
+ */
+export function metronomeClickSounds({ clickTicks, pieceEndTicks }: MetronomeClickParams): boolean {
+  return clickTicks + METRONOME_END_TOLERANCE_TICKS < pieceEndTicks;
+}

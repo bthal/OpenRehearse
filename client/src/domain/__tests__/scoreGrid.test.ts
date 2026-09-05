@@ -9,10 +9,11 @@ import {
   type GridPoint,
   type MotionStep,
   nearestIndexByQuarters,
+  pieceEndQuarters,
 } from '../scoreGrid';
 
-// Four quarter notes plus the terminal target. The terminal always sits exactly
-// LOOP_MIN_QUARTERS past the final onset, mirroring `totalQuarters` in playback.ts.
+// Four quarter notes plus the terminal target, which stands for the closing barline
+// — here a quarter past the final onset, because the final note is a quarter.
 const QUARTERS: GridPoint[] = [
   { quarters: 0, pxLeft: 100 },
   { quarters: 1, pxLeft: 200 },
@@ -360,5 +361,70 @@ describe('nearestIndexByQuarters', () => {
 
   it('returns 0 for an empty grid, like its pixel counterpart', () => {
     expect(nearestIndexByQuarters([], 3)).toBe(0);
+  });
+});
+
+describe('pieceEndQuarters', () => {
+  it('ends the piece at the final barline, not one quarter past the final onset', () => {
+    // Hanon No. 1: fifteen bars of quavers, then a bar holding one whole note.
+    expect(
+      pieceEndQuarters({
+        lastMeasureStartQuarters: 60,
+        lastMeasureQuarters: 4,
+        trailingHoldQuarters: 0,
+        lastOnsetQuarters: 60,
+      }),
+    ).toBe(64);
+  });
+
+  it('carries a fermata in the final measure past the barline', () => {
+    // Bach BWV 846: a whole-note chord under a fermata, held 1.75x, so the bar
+    // sounds for seven quarters rather than its written four.
+    expect(
+      pieceEndQuarters({
+        lastMeasureStartQuarters: 136,
+        lastMeasureQuarters: 4,
+        trailingHoldQuarters: 3,
+        lastOnsetQuarters: 136,
+      }),
+    ).toBe(143);
+  });
+
+  it('ends a short final note at the barline it is engraved before', () => {
+    // A scale whose run lands mid-bar: seven quavers and a closing crotchet.
+    expect(
+      pieceEndQuarters({
+        lastMeasureStartQuarters: 4,
+        lastMeasureQuarters: 4,
+        trailingHoldQuarters: 0,
+        lastOnsetQuarters: 7,
+      }),
+    ).toBe(8);
+  });
+
+  it('honours a short final measure rather than assuming a full bar', () => {
+    // A piece that opens with a pickup pays it back in the closing bar.
+    expect(
+      pieceEndQuarters({
+        lastMeasureStartQuarters: 32,
+        lastMeasureQuarters: 3,
+        trailingHoldQuarters: 0,
+        lastOnsetQuarters: 34,
+      }),
+    ).toBe(35);
+  });
+
+  it('keeps the terminal ahead of the final onset when the measure duration is unusable', () => {
+    // Malformed MusicXML can leave OSMD reporting a zero-length measure. Falling
+    // back below the final onset would stop the transport before that note sounds
+    // and leave `clampLoopIndices` with no legal loop at the end of the piece.
+    expect(
+      pieceEndQuarters({
+        lastMeasureStartQuarters: 8,
+        lastMeasureQuarters: 0,
+        trailingHoldQuarters: 0,
+        lastOnsetQuarters: 10,
+      }),
+    ).toBe(10 + LOOP_MIN_QUARTERS);
   });
 });

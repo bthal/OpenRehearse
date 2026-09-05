@@ -46,6 +46,10 @@ The entire piece is rendered in a **single horizontal line** — all measures la
     exactly where it froze.
   - A loop's last interval aims at the loop's own right edge, so the playhead reaches the B bracket
     at the moment the wrap fires rather than arriving early and waiting there.
+  - **The closing measure is crossed like any other.** The final note's interval aims at the closing
+    barline, so the playhead travels from that note's notehead to the double bar over exactly the
+    note's sounding length and playback ends there. It does not freeze on the last notehead, which
+    would make that one note the only one the playhead never moved across.
   - On next **play**: if no loop is set, playback resumes from the cursor's current position — which
     is already exactly on a note, so **nothing moves when playback starts**. If a loop is set, the
     cursor smoothly scrolls to the loop start and playback begins from there.
@@ -104,8 +108,10 @@ The entire piece is rendered in a **single horizontal line** — all measures la
   bracket around the region.
 - **End of the piece**: a virtual target on the **engraved closing barline** sits past the last
   onset, so dragging B fully right includes the final note and shades up to the double bar the user
-  can see. It is clamped to a reachable pixel, since the score only scrolls until the last onset
-  reaches the cursor and a handle parked beyond that could not be dragged back.
+  can see. The score scrolls until **that target** reaches the cursor, not merely until the last
+  onset does, so the target is always reachable and a handle parked on it can always be dragged
+  back. A clamp on the target's pixel survives only as a guard for viewports too narrow for the
+  double bar to be brought to the centre line at all.
 - **Handle dragging**:
   - Dragging is **continuous** — the handle follows the finger — but the position is **discretised
     to the note grid immediately**. The same **preview line** used by manual scroll marks the onset
