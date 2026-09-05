@@ -19,13 +19,14 @@ import {
 // Pure count-in and loop-geometry math live in the domain layer (screens/score-web → domain).
 import { computeCountIn, isFreshStart, loopLeadInBeats } from '../../src/domain/countIn';
 import { placeLoopAtCursor } from '../../src/domain/loop';
-import { loopFence } from '../../src/domain/transportTicks';
+import { loopFence, metronomeClickSounds } from '../../src/domain/transportTicks';
 import {
   anchorToBarlines,
   buildSnapGrid,
   clampLoopIndices,
   motionPxLeft,
   nearestGridIndex,
+  pieceEndQuarters,
   type AnchorableStep,
   type GridPoint,
 } from '../../src/domain/scoreGrid';
@@ -313,7 +314,7 @@ let scoreWidth = 0;
 // pixel frame. 0 until a score has been walked.
 let finalBarlinePx = 0;
 let viewportWidth = 0;
-let scrollMinPx = 0; // translateX that puts the last note at center
+let scrollMinPx = 0; // translateX that puts the closing barline at center
 let scrollMaxPx = 0; // translateX that puts the first note at center
 // Intrinsic geometry of the rendered staff system (independent of viewport size), cached at
 // load so the layout can be re-centered on viewport changes without re-rendering OSMD.
@@ -469,6 +470,13 @@ function buildTimelines(osmd: OpenSheetMusicDisplay): {
   let tickShift = 0;
   let osmdIdx = 0; // cursor.next() call count — shared by hold steps at the same position
   let lastBpm = scoreBpm;
+  // The closing measure, as it stood when the walk last entered a measure. Its
+  // downbeat and its own written length are what pieceEndQuarters reads to place
+  // the terminal on the double bar; `tickShift` is snapshotted alongside so a
+  // fermata *inside* the closing measure counts and one before it does not.
+  let lastMeasureStartQuarters = 0;
+  let lastMeasureQuarters = 0;
+  let tickShiftAtLastMeasure = 0;
   downbeatTicks = new Set();
   measureMeta = [];
   firstTicksBySourceIndex = [];
@@ -494,6 +502,7 @@ function buildTimelines(osmd: OpenSheetMusicDisplay): {
       const sm = measure as {
         ActiveTimeSignature?: { Numerator?: number; Denominator?: number };
         ImplicitMeasure?: boolean;
+        Duration?: { RealValue?: number };
       };
       const num = sm.ActiveTimeSignature?.Numerator;
       const den = sm.ActiveTimeSignature?.Denominator;
@@ -503,6 +512,12 @@ function buildTimelines(osmd: OpenSheetMusicDisplay): {
         den: den && den > 0 ? den : 4,
         implicit: sm.ImplicitMeasure === true,
       });
+      // `Duration` is what the measure is actually filled with, which is the meter
+      // everywhere except a pickup or a short closing bar — the two places the
+      // difference decides where the piece ends.
+      lastMeasureStartQuarters = expandedQuarters;
+      lastMeasureQuarters = (sm.Duration?.RealValue ?? 0) * WHOLE_TO_QUARTER;
+      tickShiftAtLastMeasure = tickShift;
       // CurrentMeasureIndex indexes Sheet.SourceMeasures — the printed score — and is
       // rewound by the iterator on a repeat's back-jump. Keeping only the first visit
       // maps a printed measure to the tick it first sounds at, which is where a
@@ -626,23 +641,32 @@ function buildTimelines(osmd: OpenSheetMusicDisplay): {
     osmd.cursor.next();
   }
 
-  // Some OSMD builds set EndReached while the cursor is still AT the final note,
-  // not past it, so the while-loop exits before that position is pushed. Capture
-  // it here when pxLeft is strictly beyond the last captured step.
-  const finalPxLeft = parseFloat(el?.style.left ?? '0');
-  const lastCapturedPx = steps[steps.length - 1]?.pxLeft ?? -1;
-  if (finalPxLeft > lastCapturedPx) {
-    const q = osmd.cursor.Iterator.CurrentEnrolledTimestamp.RealValue * WHOLE_TO_QUARTER;
-    const expandedQ = q + tickShift / TONE_PPQ;
-    lastExpandedQuarters = expandedQ;
-    steps.push({ quarters: expandedQ, pxLeft: finalPxLeft, osmdIdx });
-  }
+  // Do NOT read the iterator once EndReached is set, and do not push a step from
+  // what it says. OSMD leaves `CurrentEnrolledTimestamp` a whole measure past the
+  // end of the music (Bach BWV 846: 147 quarters against the closing barline's 143)
+  // and `CurrentMeasureIndex` one past the last measure, while the cursor element
+  // drifts a few pixels right of the final notehead. A step built from that pair is
+  // a note onset that does not exist, and everything downstream believes it: the
+  // playhead spent eight quarters crossing Hanon's closing semibreve and eleven
+  // crossing Bach's fermata, and `totalQuarters` held the transport open behind it.
+  //
+  // This block used to exist for the opposite reason — "some OSMD builds set
+  // EndReached while the cursor is still AT the final note". On 1.9.9 they do not:
+  // the walk above captures the final note itself (Hanon No. 1 ends at step 120 of
+  // 121). A pixel comparison cannot tell the two cases apart anyway, since the
+  // cursor moves past the last notehead either way. `cursorSteps` holds real onsets
+  // only; the terminal standing for the closing barline is buildSnapGrid's job.
 
   // The closing barline, for the loop's terminal target. Falls back to 0, which
   // rebuildSnapGrid reads as "unknown" and replaces with the score's full width.
   finalBarlinePx = measureBoundsPx(osmd, osmd.GraphicSheet.MeasureList.length - 1)?.rightPx ?? 0;
 
-  totalQuarters = lastExpandedQuarters + 1;
+  totalQuarters = pieceEndQuarters({
+    lastMeasureStartQuarters,
+    lastMeasureQuarters,
+    trailingHoldQuarters: (tickShift - tickShiftAtLastMeasure) / TONE_PPQ,
+    lastOnsetQuarters: lastExpandedQuarters,
+  });
   const anchoredPx = anchorToBarlines(steps);
   cursorSteps = steps.map((step, i) => ({
     quarters: step.quarters,
@@ -828,18 +852,29 @@ function startScoreGlide(step: number, onDone: () => void): void {
 function recomputeViewportMetrics(): void {
   if (!osmdEl) return;
   viewportWidth = window.innerWidth;
+  // One dependency chain, so it runs in one place: the viewport fixes the terminal's
+  // reachable pixel, and the terminal fixes scrollMinPx below. Rebuilding the grid
+  // anywhere else would leave the bounds a resize behind it.
+  rebuildSnapGrid();
 
   const viewportHeight = window.innerHeight;
   const centeredTop = Math.round((viewportHeight - systemHeightPx) / 2);
   osmdOffsetTopPx = centeredTop - systemTopPx;
   osmdEl.style.top = `${osmdOffsetTopPx}px`;
 
-  // Bounds are the first and last *onsets*, deliberately not the snap grid's
-  // terminal: the centre line must always sit over a note. Widening scrollMinPx to
-  // reach the terminal would let the playhead park past the final note, where there
-  // is nothing to play and nothing to snap to.
+  // The right bound is the snap grid's terminal — the closing barline — not the final
+  // onset. The playhead travels there under its own steam: the last note glides from
+  // its notehead to the double bar over its sounding length, and a bound stopping at
+  // the onset would leave the score parked outside its own pan range for that whole
+  // note, so pausing on it and then panning yanked the score right by a barline.
+  //
+  // This does not put the centre line anywhere the playhead cannot already go, which
+  // is what the bounds are really for. Nothing sounds past the final onset, and
+  // nothing needs to: the settle still resolves to the nearest *onset*, so a pan into
+  // the closing bar glides back onto the last note rather than sticking in the gap.
   const px0 = cursorSteps[0]?.pxLeft ?? 0;
-  const pxLast = cursorSteps[cursorSteps.length - 1]?.pxLeft ?? scoreWidth;
+  const pxLast =
+    snapGrid[snapGrid.length - 1]?.pxLeft ?? cursorSteps[cursorSteps.length - 1]?.pxLeft ?? scoreWidth;
   scrollMaxPx = viewportWidth / 2 - px0;
   scrollMinPx = viewportWidth / 2 - pxLast;
 }
@@ -854,10 +889,9 @@ function onViewportResize(): void {
   const prevViewportWidth = viewportWidth;
   const centeredScoreX = prevViewportWidth > 0 ? prevViewportWidth / 2 - scrollOffsetPx : 0;
   const wasGliding = glideFrameId !== null;
+  // Rebuilds the grid against the new width on its way through, so the terminal and
+  // the bounds that follow it move together.
   recomputeViewportMetrics();
-  // The terminal target's reachable pixel depends on the viewport width, so the grid
-  // has to follow a resize or handle B could end up outside the scrollable span.
-  rebuildSnapGrid();
   // A bit whose end sits on the terminal moves with it, so this is a re-resolve rather
   // than a repaint.
   reresolveBits();
@@ -1135,15 +1169,23 @@ function animateCursorLoop(): void {
   // so aiming past it makes the playhead arrive early and park there until the transport
   // wraps. bStep also indexes snapGrid rather than cursorSteps, so where B is the
   // terminal target the selector would miss entirely and the last interval would freeze.
+  // Past the final onset the next point is the terminal — the closing barline — for
+  // exactly the reason B is used above: it is the last position the playhead arrives
+  // at, and it is not in cursorSteps. Without it the final interval would have nothing
+  // to aim at and the playhead would freeze on the last notehead while its note was
+  // still sounding, which is the one measure in the piece it did not cross.
+  const terminal = snapGrid[snapGrid.length - 1];
   const nextPx =
     loopRegion !== null && targetStep + 1 >= loopRegion.bStep
       ? loopRegion.bPx
-      : (motionPxLeft(cursorSteps, targetStep + 1, startAnchorStep, loopAStep) ?? currPx);
+      : (motionPxLeft(cursorSteps, targetStep + 1, startAnchorStep, loopAStep) ??
+        terminal?.pxLeft ??
+        currPx);
   const currQ = cursorSteps[targetStep]?.quarters ?? 0;
   const nextQ =
     loopRegion !== null && targetStep + 1 >= loopRegion.bStep
       ? loopRegion.bTicks / TONE_PPQ
-      : (cursorSteps[targetStep + 1]?.quarters ?? currQ + 1);
+      : (cursorSteps[targetStep + 1]?.quarters ?? terminal?.quarters ?? currQ + 1);
   const fraction = nextQ > currQ ? Math.min(1, (effectiveQE - currQ) / (nextQ - currQ)) : 0;
   const rawInterpolatedPx = currPx + fraction * (nextPx - currPx);
   // Clamp to the loop's right boundary so the cursor never wanders into handle B.
@@ -2173,11 +2215,21 @@ function startMetronome(): void {
     // Round to nearest integer tick rather than nearest quarter so sub-quarter
     // downbeats (e.g. after an eighth-note pickup) are matched correctly.
     const ticks = Math.round(Tone.Transport.getTicksAtTime(time));
+
+    // This repeat has no end bound, and a click is a raw Web Audio node started at a
+    // *future* time, so `Transport.stop()` at the end of the piece cannot take it back:
+    // the click on the closing barline is already in the audio graph by the time the RAF
+    // loop notices the end. It has to be refused while it is still only scheduled — see
+    // metronomeClickSounds, which also covers the transport running on past the end when
+    // the RAF loop is throttled.
+    if (!metronomeClickSounds({ clickTicks: ticks, pieceEndTicks: totalQuarters * TONE_PPQ })) {
+      return;
+    }
+
     // downbeatTicks is musical and the transport can sit one tick behind it, so a
     // downbeat would lose its accent for a whole playthrough — the same off-by-one the
     // RAF absorbs above. See gridTransportTicks.
-    const onDownbeat =
-      downbeatTicks.has(ticks) || downbeatTicks.has(ticks + SEAM_EPSILON_TICKS);
+    const onDownbeat = downbeatTicks.has(ticks) || downbeatTicks.has(ticks + SEAM_EPSILON_TICKS);
     playClick(ctx, time, onDownbeat);
   }, '4n', pickupOffsetTicks > 0 ? `${pickupOffsetTicks}i` : 0);
 }
@@ -2483,11 +2535,9 @@ export function initPlayback(
   sectionMarksEl = document.getElementById('section-marks');
   previewEl = document.getElementById('snap-preview');
   bitPunchesEl = document.getElementById('bit-punches');
+  // scoreWidth has to land before recomputeViewportMetrics below, which rebuilds the
+  // snap grid: until this line it still held the previous score's value.
   scoreWidth = osmdEl?.scrollWidth ?? 0;
-  viewportWidth = window.innerWidth;
-  // Needs both buildTimelines (cursorSteps, totalQuarters) and scoreWidth, which
-  // until the line above still held the previous score's value.
-  rebuildSnapGrid();
 
   // Re-center on orientation/viewport changes (autoResize is off). Attached once.
   if (!resizeListenerAttached) {

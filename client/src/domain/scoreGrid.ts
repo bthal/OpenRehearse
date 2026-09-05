@@ -153,7 +153,7 @@ export interface LoopClampParams {
 export interface SnapGridParams {
   /** Note onsets, ascending in both fields — score-web's `cursorSteps`. */
   onsets: readonly GridPoint[];
-  /** Musical end of the piece, one quarter past the final onset in practice. */
+  /** Musical end of the piece — see {@link pieceEndQuarters}. */
   terminalQuarters: number;
   /** Where the final barline sits, already clamped to something reachable. */
   terminalPxLeft: number;
@@ -330,4 +330,45 @@ export function clampLoopIndices({ grid, aIndex, bIndex, moved }: LoopClampParam
   if (b <= a) a = Math.max(0, b - 1);
 
   return { aIndex: a, bIndex: b };
+}
+
+export interface PieceEndParams {
+  /** Where the closing measure's downbeat falls, fermata-expanded. */
+  lastMeasureStartQuarters: number;
+  /** That measure's own written length — its filled duration, not its meter. */
+  lastMeasureQuarters: number;
+  /** Hold time added by fermatas inside the closing measure. */
+  trailingHoldQuarters: number;
+  /** The final note onset, the floor the answer is kept above. */
+  lastOnsetQuarters: number;
+}
+
+/**
+ * Where the piece ends, in quarter notes — the terminal's musical position, the
+ * counterpart of the closing barline pixel the terminal is drawn at.
+ *
+ * The closing measure is measured the way every other measure is: it ends its own
+ * written length after its downbeat, plus whatever a fermata inside it holds. It
+ * used to be "one quarter past the final onset", which is neither the barline nor
+ * the last note's length, so a piece closing on a whole note stopped three quarters
+ * early and one closing on a quaver ran a quarter long.
+ *
+ * Read the length off the measure rather than off its time signature: a piece that
+ * opens with a pickup pays it back in a short closing bar, and a full bar's worth
+ * of meter would run past the double bar.
+ *
+ * The floor is for malformed MusicXML, where OSMD can report a zero-length measure.
+ * Without it the terminal would land on or behind the final onset — stopping the
+ * transport before that note sounds, and leaving {@link clampLoopIndices} with no
+ * legal loop at the end of the piece. It is the same margin {@link buildSnapGrid}
+ * keeps, so the two agree on where the end is.
+ */
+export function pieceEndQuarters({
+  lastMeasureStartQuarters,
+  lastMeasureQuarters,
+  trailingHoldQuarters,
+  lastOnsetQuarters,
+}: PieceEndParams): number {
+  const barline = lastMeasureStartQuarters + lastMeasureQuarters + trailingHoldQuarters;
+  return Math.max(barline, lastOnsetQuarters + LOOP_MIN_QUARTERS);
 }

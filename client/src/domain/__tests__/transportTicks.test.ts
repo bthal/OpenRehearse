@@ -1,4 +1,4 @@
-import { LOOP_FENCE_BACKOFF_TICKS, loopFence } from '../transportTicks';
+import { LOOP_FENCE_BACKOFF_TICKS, loopFence, metronomeClickSounds } from '../transportTicks';
 
 const TONE_PPQ = 192;
 
@@ -145,4 +145,47 @@ describe('loopFence invariants over every loop and tempo', () => {
       }
     },
   );
+});
+
+describe('metronomeClickSounds', () => {
+  // Hanon No. 1: sixteen 4/4 bars, so the closing barline is at quarter 64.
+  const PIECE_END = 64 * TONE_PPQ;
+
+  it('silences the click landing on the closing barline', () => {
+    // The beat that used to be heard as one too many, right as the piece ended. It is
+    // the downbeat of a measure that does not exist.
+    expect(metronomeClickSounds({ clickTicks: PIECE_END, pieceEndTicks: PIECE_END })).toBe(false);
+  });
+
+  it('silences it even when Tone files it a tick early', () => {
+    // The `TransportEvent` floor this module exists for: the click still *sounds* on the
+    // barline, it is merely filed at 12287 instead of 12288, so an exact comparison
+    // would let it through.
+    expect(metronomeClickSounds({ clickTicks: PIECE_END - 1, pieceEndTicks: PIECE_END })).toBe(
+      false,
+    );
+  });
+
+  it('sounds the last real beat of the closing measure', () => {
+    // Quarter 63 — inside the closing semibreve, and the beat a player is counting on.
+    expect(metronomeClickSounds({ clickTicks: 63 * TONE_PPQ, pieceEndTicks: PIECE_END })).toBe(
+      true,
+    );
+  });
+
+  it('sounds every beat of a closing measure that ends off the beat', () => {
+    // A short closing bar paying back a pickup: the piece ends at quarter 34.5, so the
+    // beat at 34 is the last one and nothing is due at the barline itself.
+    const end = 34.5 * TONE_PPQ;
+    expect(metronomeClickSounds({ clickTicks: 34 * TONE_PPQ, pieceEndTicks: end })).toBe(true);
+    expect(metronomeClickSounds({ clickTicks: 35 * TONE_PPQ, pieceEndTicks: end })).toBe(false);
+  });
+
+  it('silences everything past the end, however far past', () => {
+    // The metronome is an unbounded repeat: nothing in the audio schedule stops it, so
+    // if the RAF loop is throttled (backgrounded, screen off) it keeps arriving here.
+    expect(metronomeClickSounds({ clickTicks: 200 * TONE_PPQ, pieceEndTicks: PIECE_END })).toBe(
+      false,
+    );
+  });
 });
