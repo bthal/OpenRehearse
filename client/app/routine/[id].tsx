@@ -1,8 +1,6 @@
 import {
   mdiAlertCircleOutline,
-  mdiArrowLeft,
-  mdiMetronome,
-  mdiMetronomeTick,
+  mdiExitToApp,
   mdiMusicNoteOutline,
   mdiPause,
   mdiPencilOutline,
@@ -36,14 +34,14 @@ export default function RoutinePlayView() {
   const isLoadingScore = usePlayViewStore((s) => s.isLoadingScore);
   const scoreError = usePlayViewStore((s) => s.scoreError);
   const isPlaying = usePlayViewStore((s) => s.isPlaying);
-  const metronomeOn = usePlayViewStore((s) => s.metronomeOn);
 
   const setWebViewReady = usePlayViewStore((s) => s.setWebViewReady);
   const setLoadingScore = usePlayViewStore((s) => s.setLoadingScore);
   const setScoreError = usePlayViewStore((s) => s.setScoreError);
   const setPlaying = usePlayViewStore((s) => s.setPlaying);
-  const setMetronomeOn = usePlayViewStore((s) => s.setMetronomeOn);
   const reset = usePlayViewStore((s) => s.reset);
+
+  const metronomeOn = routine?.metronome ?? false;
 
   const webViewRef = useRef<WebView>(null);
 
@@ -130,11 +128,6 @@ export default function RoutinePlayView() {
     }
   }, [isPlaying]);
 
-  const handleMetronomeToggle = useCallback(() => {
-    webViewRef.current?.injectJavaScript('window.__rn_toggle_metronome();void 0;');
-    setMetronomeOn(!metronomeOn);
-  }, [metronomeOn, setMetronomeOn]);
-
   // Navigating to Edit pushes on top of this screen, so the WebView stays mounted and would
   // keep playing in the background. Stop playback before leaving.
   const handleEdit = useCallback(() => {
@@ -143,6 +136,15 @@ export default function RoutinePlayView() {
   }, [isPlaying, id]);
 
   const scoreReady = webViewReady && !isLoadingScore && !scoreError;
+
+  // The metronome belongs to the routine, not to the toolbar, so it is pushed to the
+  // WebView instead of toggled there — after the load, because the click schedule is
+  // built from the measure metadata the load creates, and again whenever the setting
+  // changes in the edit view, which returns here without necessarily reloading.
+  useEffect(() => {
+    if (!scoreReady) return;
+    webViewRef.current?.injectJavaScript(`window.__rn_set_metronome(${metronomeOn});void 0;`);
+  }, [scoreReady, metronomeOn]);
 
   if (!routine) {
     return (
@@ -238,21 +240,12 @@ export default function RoutinePlayView() {
               >
                 {/* Back */}
                 <TouchableOpacity onPress={() => router.back()} hitSlop={12} className="p-1">
-                  <AppIcon path={mdiArrowLeft} size={24} color={Colors.icon} />
+                  <AppIcon path={mdiExitToApp} size={24} color={Colors.icon} flip="vertical" />
                 </TouchableOpacity>
 
                 {/* Play / Pause */}
                 <TouchableOpacity onPress={handlePlayPause} hitSlop={8} className="p-1">
                   <AppIcon path={isPlaying ? mdiPause : mdiPlay} size={36} color={Colors.primary} />
-                </TouchableOpacity>
-
-                {/* Metronome toggle */}
-                <TouchableOpacity onPress={handleMetronomeToggle} hitSlop={8} className="p-1.5">
-                  <AppIcon
-                    path={metronomeOn ? mdiMetronome : mdiMetronomeTick}
-                    size={26}
-                    color={metronomeOn ? Colors.primary : Colors.icon}
-                  />
                 </TouchableOpacity>
 
                 {/* Edit routine */}

@@ -33,12 +33,23 @@ The entire piece is rendered in a **single horizontal line** — all measures la
     means "start of measure" — the cursor, a loop bound, a section junction — lands *after* the
     barline that defines it. The opening measure is deliberately excluded: its left edge is the edge
     of the engraving, so anchoring there would park the playhead left of the clef.
-  - That single pixel is shared by the snap search, the preview line, the loop overlay **and** the
-    playback interpolation, which is what keeps the playhead, the handles and the section seams from
-    ever disagreeing. The cost is slightly uneven playhead motion at each barline — the pixels
-    between barline and notehead move from the step arriving at the downbeat to the step leaving it
-    — but the engraving already spaces those steps unevenly, so anchoring only redistributes it
-    (measured: 1.50×/1.28× becomes 1.25×/1.52× of a normal step).
+  - That pixel is shared by the snap search, the preview line, the loop overlay and every resting
+    position, which is what keeps the playhead, the handles and the section seams from ever
+    disagreeing when the score is still.
+  - **A moving playhead follows noteheads instead.** Anchoring shifts pixels from the step arriving
+    at a downbeat to the step leaving it (measured: 1.50×/1.28× becomes 1.25×/1.52× of a normal
+    step), which is harmless once but repeats every measure — as continuous motion it reads as the
+    playhead lurching back to each barline and then hurrying to beat 2. So during playback the
+    playhead sits on the note that is sounding, and re-anchors only where it *arrives* rather than
+    flows: at a loop's or bit's start on every wrap, and at the step a fresh start began on, so
+    nothing jumps when the first note sounds after a count-in. Resuming a mid-note pause picks up
+    exactly where it froze.
+  - A loop's last interval aims at the loop's own right edge, so the playhead reaches the B bracket
+    at the moment the wrap fires rather than arriving early and waiting there.
+  - **The closing measure is crossed like any other.** The final note's interval aims at the closing
+    barline, so the playhead travels from that note's notehead to the double bar over exactly the
+    note's sounding length and playback ends there. It does not freeze on the last notehead, which
+    would make that one note the only one the playhead never moved across.
   - On next **play**: if no loop is set, playback resumes from the cursor's current position — which
     is already exactly on a note, so **nothing moves when playback starts**. If a loop is set, the
     cursor smoothly scrolls to the loop start and playback begins from there.
@@ -71,6 +82,15 @@ The entire piece is rendered in a **single horizontal line** — all measures la
   40/60/80. The reference resolves to `targetBpm ?? importedBpm ?? scoreBpm`; effective BPM =
   reference × multiplier. Bounds are **40–240** (`domain/tempo.ts`), chosen so every selectable
   speed stays inside the synth's `[20, 240]` clamp and the displayed BPM always equals playback.
+- **Speed and metronome are remembered per piece** (`Piece.tempoMultiplier`, `Piece.metronome`),
+  restored once when the piece opens so practice resumes where it left off, and written back on
+  every change made outside a bit — inside one the setting belongs to the bit. The **active hand
+  is deliberately not remembered**: it returns to both hands on every open, because a piece left
+  in one hand gives no clue on screen why the other has gone silent. Pieces last practised before
+  the fields existed read as ×1.0 with the metronome off.
+- The metronome reaches the WebView **only** as a mirror of `metronomeOn`, pushed with
+  `__rn_set_metronome` once the score has loaded and re-asserted after any reload — the click
+  schedule is built from measure metadata that the load creates. Nothing toggles it blind.
 
 ## Loop ("bit") — MVP rules
 
@@ -88,8 +108,10 @@ The entire piece is rendered in a **single horizontal line** — all measures la
   bracket around the region.
 - **End of the piece**: a virtual target on the **engraved closing barline** sits past the last
   onset, so dragging B fully right includes the final note and shades up to the double bar the user
-  can see. It is clamped to a reachable pixel, since the score only scrolls until the last onset
-  reaches the cursor and a handle parked beyond that could not be dragged back.
+  can see. The score scrolls until **that target** reaches the cursor, not merely until the last
+  onset does, so the target is always reachable and a handle parked on it can always be dragged
+  back. A clamp on the target's pixel survives only as a guard for viewports too narrow for the
+  double bar to be brought to the centre line at all.
 - **Handle dragging**:
   - Dragging is **continuous** — the handle follows the finger — but the position is **discretised
     to the note grid immediately**. The same **preview line** used by manual scroll marks the onset
@@ -295,7 +317,8 @@ else.
 ## State (Zustand)
 
 Slices: `activePieceId`, `webViewReady`, `isLoadingScore`, `scoreError`, `isPlaying`,
-`scoreBpm` (from MusicXML), `tempoMultiplier` (×0.5/×0.75/×1.0), `metronomeOn: boolean`,
+`scoreBpm` (from MusicXML), `tempoMultiplier` (×0.5/×0.75/×1.0) and `metronomeOn: boolean`
+(both seeded from the piece on open and persisted back to it),
 `activeHand: 'both' | 'right' | 'left'` (resets to `'both'` on piece unmount),
 `currentSectionIndex: number | null` (driven by `SECTION_INDEX` from the WebView, which owns position),
 `scoreMoving: boolean` (driven by `SCORE_MOTION` from the WebView, which owns the gesture),
@@ -315,6 +338,8 @@ before the first bit was entered, restored on leaving),
 - [x] Score BPM read from MusicXML; speed selector ×0.5/×0.75/×1.0 applied as multiplier. *(Phase 3b)*
 - [x] Target speed defaults to the imported tempo and is adjustable per piece; the speed selector
   scales the target (`targetBpm ?? importedBpm ?? scoreBpm` × multiplier).
+- [x] The chosen speed and metronome setting survive leaving and reopening the piece, and the app
+  being restarted; the hand still returns to both.
 - [x] Cursor visible at position 0 after load and after stop; smooth left-slide between beats. *(Phase 3b)*
 - [x] Score renders in one-line mode (single horizontal system; cursor pinned to center). *(Phase 4)*
 - [x] Manual horizontal scroll pauses playback; play resumes from scrolled position, or from loop start if a loop is active. *(Phase 4)*
@@ -323,6 +348,9 @@ before the first bit was entered, restored on leaving),
   glides onto it on settle. Pressing play after positioning by hand moves nothing.
 - [x] A measure's first onset sits on its barline, so the cursor, loop bounds and section junctions
   all align with the engraved barlines; the opening measure is excluded (`domain/scoreGrid.ts`).
+- [x] A moving playhead tracks noteheads rather than barlines, re-anchoring only at a loop or bit
+  start on each wrap and at the step a fresh start began on, so playback paces evenly across
+  barlines and nothing jumps when the first note sounds (`motionPxLeft`, `domain/scoreGrid.ts`).
 - [x] Toolbar renders vertically on the left. *(Phase 4)*
 - [x] Play/pause is a decorative translucent disc on the cursor at screen centre, not a toolbar
       button; it is hidden while the score is panning, coasting, gliding or a handle is dragged,

@@ -11,6 +11,7 @@ import {
   scrapeTempoBpm,
   validateMusicXml,
 } from '@domain/musicxml';
+import type { TempoMultiplier } from '@domain/practiceSettings';
 import { sectionsFromXml } from '@domain/sectionEditing';
 import type { Section } from '@domain/sections';
 import { SectionColors } from '@theme/colors';
@@ -87,6 +88,18 @@ interface PiecesState {
     partId: string | undefined,
   ) => Promise<void>;
   setBits: (id: string, bits: Bit[]) => Promise<void>;
+  /**
+   * Records the practice settings the piece is being worked on with, so reopening it
+   * resumes at that speed and metronome setting. Separate from `updatePiece` for the
+   * same reason `setBits` is: the PlayView changes these on its own, mid-practice, and
+   * has no business restating the title and composer to do it.
+   *
+   * The active hand is not among them — see `Piece.tempoMultiplier`.
+   */
+  setPracticeSettings: (
+    id: string,
+    settings: { tempoMultiplier?: TempoMultiplier; metronome?: boolean },
+  ) => Promise<void>;
   touchPiece: (id: string) => Promise<void>;
   deletePiece: (id: string) => Promise<void>;
   clearImportError: () => void;
@@ -215,6 +228,15 @@ export const usePiecesStore = create<PiecesState>()((set, get) => ({
     const existing = piecesById[id];
     if (!existing) return;
     const updated: Piece = { ...existing, bits };
+    await pieceRepository.update(updated);
+    set({ piecesById: { ...piecesById, [id]: updated } });
+  },
+
+  setPracticeSettings: async (id, settings) => {
+    const { piecesById } = get();
+    const existing = piecesById[id];
+    if (!existing) return;
+    const updated: Piece = { ...existing, ...settings };
     await pieceRepository.update(updated);
     set({ piecesById: { ...piecesById, [id]: updated } });
   },

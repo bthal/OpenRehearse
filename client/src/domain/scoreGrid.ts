@@ -65,11 +65,19 @@ export interface AnchorableStep {
  * to 1.25x / 1.52x — the engraving already bulges there, and anchoring only
  * redistributes the bulge. Not noticeable in practice.
  *
- * Do not "fix" even that by splitting the pixel in two, one for overlays and one
- * for playback. A single value shared by the snap search, the overlays and the
- * playback interpolation is exactly what guarantees the playhead and the loop
- * handles can never disagree at rest; the alternative parks the playhead inside
- * the loop shade forever.
+ * The pixel was once shared by every consumer without exception, on the reasoning
+ * that one value is what stops the playhead and the loop handles disagreeing. That
+ * reasoning still holds **at rest**, and every resting consumer still reads this one
+ * pixel: the snap search, the settle, the seek, the preview line, the overlays and
+ * the handles. Do not split those apart.
+ *
+ * It did not survive contact with playback. The redistribution above happens once per
+ * measure, and across a whole piece it reads as the playhead lurching back to each
+ * barline and then hurrying to beat 2 — noticeable after all. So the motion track, and
+ * only the motion track, reads a second pixel: see {@link motionPxLeft}, which keeps
+ * the playhead on the engraved notehead while it is moving and hands back the anchored
+ * pixel at the two positions the playhead *arrives* at, where disagreeing with the loop
+ * overlay would actually show.
  */
 export function anchorToBarlines(steps: readonly AnchorableStep[]): number[] {
   return steps.map((step, i) => {
@@ -90,6 +98,44 @@ export function anchorToBarlines(steps: readonly AnchorableStep[]): number[] {
   });
 }
 
+/** A step's two pixels: where it is placed, and where its notehead is engraved. */
+export interface MotionStep {
+  /** Placement pixel — barline-anchored where this onset opens a measure. */
+  pxLeft: number;
+  /** Where the notehead group is engraved, before {@link anchorToBarlines} pulls it. */
+  notePxLeft: number;
+}
+
+/**
+ * The pixel a step exposes to the playback animation, as opposed to at rest.
+ *
+ * Motion runs on noteheads: a playhead sweeping through a measure belongs on the note
+ * that is sounding, not on the barline behind it. Two positions are exceptions, and
+ * both are places the playhead *arrives* at rather than flows through:
+ *
+ * - `loopAStep` — where a loop wraps back to. No arrival test is needed: the transport
+ *   is fenced inside [A, B), so A is only ever reached by the wrap.
+ * - `startAnchorStep` — where a fresh start begins. Without it the cursor sits parked
+ *   on the barline for the whole count-in and then yanks right the instant the first
+ *   note sounds. Callers must pass null when resuming a mid-note pause, which would
+ *   otherwise jerk the playhead *backwards* onto the barline, and should clear it once
+ *   the playhead moves past, so a start made inside a loop cannot leave a stale
+ *   downbeat anchored on every later pass.
+ *
+ * Returns undefined for an out-of-range index so callers keep their own fallback —
+ * the interpolation wants 0 for the current step but the current pixel for the next.
+ */
+export function motionPxLeft(
+  steps: readonly MotionStep[],
+  index: number,
+  startAnchorStep: number | null,
+  loopAStep: number | null,
+): number | undefined {
+  const step = steps[index];
+  if (step === undefined) return undefined;
+  return index === startAnchorStep || index === loopAStep ? step.pxLeft : step.notePxLeft;
+}
+
 export interface LoopIndices {
   aIndex: number;
   bIndex: number;
@@ -107,7 +153,7 @@ export interface LoopClampParams {
 export interface SnapGridParams {
   /** Note onsets, ascending in both fields — score-web's `cursorSteps`. */
   onsets: readonly GridPoint[];
-  /** Musical end of the piece, one quarter past the final onset in practice. */
+  /** Musical end of the piece — see {@link pieceEndQuarters}. */
   terminalQuarters: number;
   /** Where the final barline sits, already clamped to something reachable. */
   terminalPxLeft: number;
@@ -284,4 +330,45 @@ export function clampLoopIndices({ grid, aIndex, bIndex, moved }: LoopClampParam
   if (b <= a) a = Math.max(0, b - 1);
 
   return { aIndex: a, bIndex: b };
+}
+
+export interface PieceEndParams {
+  /** Where the closing measure's downbeat falls, fermata-expanded. */
+  lastMeasureStartQuarters: number;
+  /** That measure's own written length — its filled duration, not its meter. */
+  lastMeasureQuarters: number;
+  /** Hold time added by fermatas inside the closing measure. */
+  trailingHoldQuarters: number;
+  /** The final note onset, the floor the answer is kept above. */
+  lastOnsetQuarters: number;
+}
+
+/**
+ * Where the piece ends, in quarter notes — the terminal's musical position, the
+ * counterpart of the closing barline pixel the terminal is drawn at.
+ *
+ * The closing measure is measured the way every other measure is: it ends its own
+ * written length after its downbeat, plus whatever a fermata inside it holds. It
+ * used to be "one quarter past the final onset", which is neither the barline nor
+ * the last note's length, so a piece closing on a whole note stopped three quarters
+ * early and one closing on a quaver ran a quarter long.
+ *
+ * Read the length off the measure rather than off its time signature: a piece that
+ * opens with a pickup pays it back in a short closing bar, and a full bar's worth
+ * of meter would run past the double bar.
+ *
+ * The floor is for malformed MusicXML, where OSMD can report a zero-length measure.
+ * Without it the terminal would land on or behind the final onset — stopping the
+ * transport before that note sounds, and leaving {@link clampLoopIndices} with no
+ * legal loop at the end of the piece. It is the same margin {@link buildSnapGrid}
+ * keeps, so the two agree on where the end is.
+ */
+export function pieceEndQuarters({
+  lastMeasureStartQuarters,
+  lastMeasureQuarters,
+  trailingHoldQuarters,
+  lastOnsetQuarters,
+}: PieceEndParams): number {
+  const barline = lastMeasureStartQuarters + lastMeasureQuarters + trailingHoldQuarters;
+  return Math.max(barline, lastOnsetQuarters + LOOP_MIN_QUARTERS);
 }

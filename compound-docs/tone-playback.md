@@ -654,6 +654,64 @@ metronomeEventId = Tone.Transport.scheduleRepeat((time) => {
 
 Use `Tone.Transport.clear(id)` to cancel on toggle-off or dispose.
 
+### LANDMINE: the repeat is unbounded, and its clicks cannot be taken back
+
+Both halves of the pattern above have a cost, and together they produce a click **after** the piece
+ends — one beat too many, landing exactly as it finishes:
+
+- `scheduleRepeat` has **no end bound**. It clicks for as long as the transport runs.
+- A click is a raw `OscillatorNode` with `osc.start(futureTime)`, scheduled ahead of the playhead by
+  Tone's lookahead. It is committed to the audio graph, outside Tone's control.
+
+So `Transport.stop()` cannot silence it. By the time the RAF loop sees `quartersElapsed >=
+totalQuarters` and calls `_stopInternal()`, the click on the closing barline has already been
+started, and stopping the transport does not unschedule a Web Audio node. Measured on a two-bar
+C major scale (`totalQuarters` 8): clicks at quarters 0…8, the one at 8 being the downbeat of a
+measure that does not exist.
+
+**Fix:** refuse the click while it is still only *scheduled*, inside the callback, against the
+click's own tick rather than the live transport position — `domain/transportTicks.ts`'s
+`metronomeClickSounds`:
+
+```typescript
+const ticks = Math.round(Tone.Transport.getTicksAtTime(time));
+if (!metronomeClickSounds({ clickTicks: ticks, pieceEndTicks: totalQuarters * TONE_PPQ })) return;
+```
+
+The tolerance is a whole tick — the same "filed one tick early" defect the loop fence backs off
+from, so the comparison meets the click where Tone files it rather than where the beat is.
+
+**Do not try to fix this by stopping the transport earlier.** The RAF loop is the wrong instrument:
+it runs a frame late by construction, and it does not run at all when frames are throttled — a
+backgrounded WebView or a locked screen left the metronome clicking indefinitely (observed running
+to quarter 44 of an 8-quarter piece). The guard above is what actually bounds the metronome; the
+RAF stop only ends playback.
+
+### Set it, don't toggle it — and only after the load
+
+The web side exposed `toggleMetronome()` and nothing else. That is enough for a toolbar button
+whose whole job is to flip whatever state the WebView is in, and unusable the moment the setting
+comes from *data*: a routine that stores `metronome: true`, or a piece that remembers the click
+from its last session, needs the metronome driven to a **known** state, and a blind toggle
+inverts it whenever the WebView happens to disagree. `setMetronome(enabled)` is now the
+primitive and `toggleMetronome()` delegates to it.
+
+Native then mirrors its own state into the WebView rather than firing and forgetting:
+
+```typescript
+useEffect(() => {
+  if (!scoreReady) return;
+  webViewRef.current?.injectJavaScript(`window.__rn_set_metronome(${metronomeOn});void 0;`);
+}, [scoreReady, metronomeOn]);
+```
+
+**LANDMINE:** the injection has to wait for the score *load*, not merely `webViewReady`.
+`startMetronome` reads `downbeatTicks`, which `initPlayback` builds during the cursor walk —
+set the metronome before that and `scheduleRepeat` is armed against an empty set, so every
+click is unaccented until something re-schedules it. Keying the effect on "score loaded" also
+re-asserts the setting after any reload, which is what a one-shot injection on the `LOADED`
+message quietly gets wrong.
+
 ## LANDMINE: `'@4n'` quantize syntax is NOT valid as `scheduleRepeat`'s `startTime`
 
 Tone.js's `'@4n'` notation ("next quarter-note boundary") works for `Transport.schedule()` but
@@ -710,15 +768,14 @@ Clamping `translateX` to `[viewportWidth - scoreWidth, 0]` limits the score so i
 reaches the screen left and its right edge reaches the screen right. But the cursor line is fixed
 at screen centre — at either boundary the cursor line sits over blank space, not a note.
 
-**Fix:** clamp to `[viewportWidth/2 - pxLast, viewportWidth/2 - px0]` where `px0` and `pxLast`
-are the pixel positions of the first and last cursor steps. Compute in `initPlayback` after
-`buildTimelines`:
+**Fix:** clamp to `[viewportWidth/2 - pxLast, viewportWidth/2 - px0]` — the first cursor step at
+one end and the snap grid's terminal at the other, both computed in `recomputeViewportMetrics`:
 
 ```typescript
-const px0    = cursorSteps[0]?.pxLeft ?? 0;
-const pxLast = cursorSteps[cursorSteps.length - 1]?.pxLeft ?? scoreWidth;
-scrollMaxPx  = viewportWidth / 2 - px0;    // first note centred
-scrollMinPx  = viewportWidth / 2 - pxLast; // last note centred
+const px0 = cursorSteps[0]?.pxLeft ?? 0;
+const pxLast = snapGrid[snapGrid.length - 1]?.pxLeft ?? ...;
+scrollMaxPx = viewportWidth / 2 - px0; // first note centred
+scrollMinPx = viewportWidth / 2 - pxLast; // closing barline centred
 ```
 
 **Secondary LANDMINE (same root cause):** On load, `applyTranslate(viewportWidth/2 - px0)`
@@ -727,10 +784,22 @@ this value, so any `touchmove` event — even a zero-delta tap — clamped the o
 snapped the score to the left edge. The corrected `scrollMaxPx` bound is always ≥ the initial
 translateX, so no snap occurs.
 
-**Do not widen these bounds to the snap grid's terminal target.** The terminal exists so handle B
-can reach past the final note; the *playhead* must never park there, because there is nothing to
-play and nothing to snap to. `recomputeViewportMetrics` deliberately reads `cursorSteps` extremes,
-not `snapGrid` extremes, and carries a comment saying so.
+**The right bound is the terminal, not the final onset — and it has to be.** This used to say the
+opposite ("the playhead must never park there"), which stopped being true once the last note began
+gliding to the closing barline over its sounding length: with the bound at the final onset the score
+spent that whole note outside its own pan range, so pausing on it and then panning yanked the score
+right by a barline. The bound follows the playhead.
+
+It still puts the centre line nowhere the playhead cannot go, which is what the bounds are for.
+Nothing sounds past the final onset and nothing needs to — **the settle is still onsets-only**
+(`nearestGridIndex(cursorSteps, ...)`), so a pan into the closing bar glides back onto the last note
+rather than sticking in the gap. Keep those two apart: bounds follow the playhead, the settle follows
+the notes.
+
+**One dependency chain, one place.** The viewport fixes the terminal's reachable pixel, and the
+terminal fixes `scrollMinPx`, so `recomputeViewportMetrics` calls `rebuildSnapGrid` itself between
+the two. Do not rebuild the grid anywhere else on a resize — the bounds would be left a resize behind
+the terminal they are derived from.
 
 ## Fermata: expand the tick timeline, don't just extend the note duration
 
@@ -898,32 +967,80 @@ position is not an exact tick multiple — tuplets, mostly. `seekToStep(step, ti
 wherever the caller already knows the index, pass the index. `startPlayback`'s seek to loop A goes
 through it, otherwise a loop starting on a triplet would begin one note early.
 
-## A measure's first onset is anchored to its barline — one pixel, shared by everything
+## A measure's first onset is anchored to its barline — one pixel at rest, two in motion
 
 **PATTERN:** `buildTimelines` records each measure-opening step's barline (`measureBoundsPx`) and
-`anchorToBarlines` (`domain/scoreGrid.ts`) writes the result straight into `CursorStep.pxLeft`.
-There is exactly **one** pixel per grid point, read by the snap search, the preview line, the loop
-overlay, `pxAtTicks` for section seams, the scroll clamp and the playback interpolation alike.
+`anchorToBarlines` (`domain/scoreGrid.ts`) writes the result into `CursorStep.pxLeft`. That is the
+**placement** pixel, and at rest it is the only one: the snap search, the settle, the seek, the
+preview line, the loop overlay, `pxAtTicks` for section seams and the scroll clamp all read it.
+**Never split those apart** — one shared value is what stops the resting playhead and the loop
+handles disagreeing.
 
-That single value is the whole point. The obvious alternative — a "notehead pixel" for playback and
-a "barline pixel" for overlays — was designed and rejected: it parks the playhead ~22 px inside the
-loop shade at every loop start and wrap, which is the same defect as the off-grid cursor bug that
-motivated the grid in the first place, only permanent.
+The raw notehead pixel survives alongside it as `CursorStep.notePxLeft`, and the RAF playback
+interpolation is the **only** reader, through `motionPxLeft` (`domain/scoreGrid.ts`).
 
-**The cost, measured on Bach BWV 846 (28 px per sixteenth as 1.0×; median shift 6.9 px, max 22.8):**
+**Why the split exists, after this note spent a release forbidding it.** The original rejection was
+right about its defect and wrong about the cost:
 
-| step | before | after |
+- *Right:* a naive split parks the playhead ~22 px inside the loop shade at every loop start and
+  wrap — the off-grid cursor bug the grid was built to kill, made permanent. `motionPxLeft` avoids
+  it by re-anchoring at exactly the two positions the playhead *arrives* at rather than flows
+  through: `loopRegion.aStep`, and the step a fresh start began on. **Remove either exception and
+  that bug is back.**
+- *Wrong:* "not noticeable in practice". The table below is a fair account of one barline, but the
+  event repeats every measure, and over a piece it reads as the playhead lurching back to each
+  barline and then hurrying to beat 2. It was reported as a bug.
+
+**The redistribution at one barline, measured on Bach BWV 846** (28 px per sixteenth as 1.0×;
+median shift 6.9 px, max 22.8) — this is what motion now avoids, and what still happens at the two
+anchored positions:
+
+| step | notehead | anchored |
 |---|---|---|
 | into the barline (last note of the measure) | 1.50× | **1.25×** |
 | out of the barline (downbeat) | 1.28× | **1.52×** |
 
-The engraving already bulges either side of a barline; anchoring only redistributes the bulge, and
-the result is not noticeable in practice. **Do not "smooth" even that** by reintroducing a second
-pixel per step.
-
 An earlier revision of this note claimed 0.71× / 2.06×. That was measured while `measureBoundsPx`
 still carried the cursor's `- 1.5` offset (see `osmd-webview.md`), which inflated the shift from
-6.9 px to 21.9 px. If you find figures in that range anywhere, the offset bug is back.
+6.9 px to 21.9 px. If you find figures in that range anywhere, the offset bug is back — and the
+motion track then also breaks `settleToNearestStep`, which resolves a paused playhead against
+`pxLeft` and only has ~11 px of margin (half the minimum note gap) to absorb the difference.
+
+### LANDMINE: `loopRegion.aStep`/`bStep` index `snapGrid`, not `cursorSteps`
+
+`snapGrid` is `cursorSteps` plus the terminal target standing for the closing barline, so **B can be
+one past the end of `cursorSteps`**. Any per-step lookup on a loop bound has to account for that.
+
+The first attempt at the motion track did not, and produced a playhead that reached the end of a
+loop early and then stuck there until the transport wrapped. Two causes, both in the interval that
+ends the loop:
+
+- `nextPx` read `motionPxLeft(cursorSteps, bStep, …)`. B is not an anchor index, so it returned B's
+  *notehead* — right of `bPx`. The playhead aimed past the bracket, hit the `Math.min(…, bPx)` clamp
+  early and parked. Where B was the terminal target the lookup missed entirely and `nextPx` fell
+  back to `currPx`, freezing the playhead for the whole interval.
+- `nextQ` had the same shape. It happened to be correct only because the terminal sits exactly
+  `LOOP_MIN_QUARTERS` past the final onset.
+
+**Fix:** the interval ending a loop aims at the region's own edge — `loopRegion.bPx` and
+`loopRegion.bTicks / TONE_PPQ`, the same value the wrap predicate tests. `fraction` then reaches 1.0
+at the instant the wrap fires, and the clamp goes back to being a safety net instead of the thing
+that stops the playhead.
+
+### The start anchor is a tick test, not `isFreshStart`
+
+`startAnchorStep` is armed by `startAnchorFor(countInOriginTicks)`, which asks only whether the
+transport sits *on* an onset. Do not reach for `isFreshStart` here: it answers whether the **player**
+lost the pulse, by provenance. Its loop branch is `didLoopSeek || resumingAbortedCountIn` and never
+inspects position; its piece branch is `posTicks <= firstStepTicks`, false at every mid-piece onset.
+
+Without the anchor the cursor sits parked on the barline through the whole count-in and then yanks
+right the instant the first note sounds. With it applied to a *mid-note resume* it jerks
+**backwards** instead — hence the tick test. `startAnchorFor` reads `currentCursorStep` rather than
+`ticksToStep` because the latter is a floor search (see the round-trip landmine above), and allows
+`SEAM_EPSILON_TICKS` of slack for whole-tick rounding. The anchor expires the first time the RAF
+sees a `targetStep` past it, so a playback started *inside* a loop cannot leave a stale downbeat
+pinned on every later pass.
 
 Two rules inside `anchorToBarlines` that are not decoration:
 
@@ -936,31 +1053,161 @@ Two rules inside `anchorToBarlines` that are not decoration:
   binary-searches on. On the prelude it never has to fire (34 anchored steps, 0 clamped), but a
   measure whose first entry carries accidentals has a 37.8 px inset against ~28 px steps, so it can.
 
-## LANDMINE: `Iterator.EndReached` fires while cursor is still AT the final note
+## LANDMINE: the iterator is a whole measure past the music once `EndReached` is set
 
-**LANDMINE:** Some OSMD builds set `cursor.Iterator.EndReached = true` while the cursor is still
-positioned AT the final note — not past it. The standard `while (!EndReached)` walk exits before
-pushing that position, so the final note is never captured in `cursorSteps`. Effects:
-- Handle B cannot reach the last note's pixel position (it clamps to the second-to-last note).
-- The cursor never visually reaches the final note during playback.
-- The snap grid's terminal target is derived from the final onset, so a missing final step puts the
-  end of the piece in the wrong place and the last note cannot be looped.
+**LANDMINE:** once `cursor.Iterator.EndReached` is true, nothing the iterator reports is a musical
+position any more. On OSMD 1.9.9 it has advanced `CurrentEnrolledTimestamp` a **full measure past the
+end of the piece** and `CurrentMeasureIndex` one past the last measure, while the cursor element has
+drifted a few pixels right of the final notehead. Measured:
 
-**Fix:** After the while-loop, check whether the cursor element's current `style.left` is strictly
-beyond the last captured step's `pxLeft`. If so, capture it as an extra step:
+| score                   | final onset | music ends     | iterator after the walk |
+| ----------------------- | ----------- | -------------- | ----------------------- |
+| C major scale, 2 bars   | q=7         | q=8            | q=12                    |
+| Hanon No. 1, 16 bars    | q=60        | q=64           | q=68                    |
+| Bach BWV 846, 35 bars   | q=136       | q=143 (fermata)| q=147                   |
+
+**Do not push a step from it after the loop, and do not derive `totalQuarters` from one.** A step
+built from that pair is a note onset that does not exist, and every consumer believes it: the
+playhead spent 8 quarters crossing Hanon's closing semibreve and 11 crossing Bach's fermata — twice
+the written value, longer than the fermata itself — and `totalQuarters` held the transport open
+behind it. The walk already captures the final note (Hanon No. 1 ends at step 120 of 121), so nothing
+is missing that needs recovering.
+
+This block previously existed for the opposite belief — "some OSMD builds set `EndReached` while the
+cursor is still AT the final note" — guarded by `finalPxLeft > lastCapturedPx`. That test cannot tell
+the two cases apart: the cursor element moves past the last notehead either way, so the guard fires
+unconditionally. If a future OSMD really does exit the walk early, detect it against the *score*, not
+against a pixel.
+
+**`cursorSteps` holds real note onsets only.** The point standing for the closing barline is
+`buildSnapGrid`'s terminal, appended on top — see below.
+
+## The end of the piece is the closing barline, not "one quarter past the last note"
+
+`totalQuarters` used to be `lastExpandedQuarters + 1`, which is neither the barline nor the last
+note's length: a piece closing on a semibreve stopped three quarters early, one closing on a quaver
+ran a quarter long. `domain/scoreGrid.ts`'s `pieceEndQuarters` measures the closing measure the way
+every other measure is measured — its downbeat, plus its own length, plus any fermata inside it:
 
 ```typescript
-const finalPxLeft = parseFloat(el?.style.left ?? '0');
-const lastCapturedPx = steps[steps.length - 1]?.pxLeft ?? -1;
-if (finalPxLeft > lastCapturedPx) {
-  const q = osmd.cursor.Iterator.CurrentEnrolledTimestamp.RealValue * WHOLE_TO_QUARTER;
-  const expandedQ = q + tickShift / TONE_PPQ;
-  lastExpandedQuarters = expandedQ;
-  steps.push({ quarters: expandedQ, pxLeft: finalPxLeft, osmdIdx });
-}
+totalQuarters = pieceEndQuarters({
+  lastMeasureStartQuarters, // captured on the last measure change, fermata-expanded
+  lastMeasureQuarters, // SourceMeasure.Duration, NOT the time signature
+  trailingHoldQuarters: (tickShift - tickShiftAtLastMeasure) / TONE_PPQ,
+  lastOnsetQuarters: lastExpandedQuarters,
+});
 ```
 
-Place this immediately after the while-loop, before setting `totalQuarters`.
+- **`Duration`, not `ActiveTimeSignature`.** A piece that opens with a pickup pays it back in a short
+  closing bar, and a full bar's worth of meter would run past the double bar.
+- **Snapshot `tickShift` at the measure change**, so a fermata _inside_ the closing measure counts
+  and one before it does not.
+- The floor at `lastOnset + LOOP_MIN_QUARTERS` is for malformed MusicXML, where OSMD can report a
+  zero-length measure. Without it the terminal lands on or behind the final onset, stopping the
+  transport before that note sounds and leaving `clampLoopIndices` with no legal loop at the end.
+
+**The RAF loop's final interval aims at the terminal**, for the same reason the loop's last interval
+aims at handle B: it is a position the playhead _arrives_ at, and it is not in `cursorSteps`.
+
+```typescript
+const terminal = snapGrid[snapGrid.length - 1];
+// ... ?? terminal?.pxLeft ?? currPx     and     ?? terminal?.quarters ?? currQ + 1
+```
+
+Without it the playhead freezes on the last notehead while its note is still sounding — the one
+measure in the piece it does not cross. With it, the last note glides from its notehead to the double
+bar over exactly its sounding length (4 quarters for Hanon, 7 for Bach's fermata), and playback stops
+there.
+
+## LANDMINE: Tone files a scheduled event one tick early, so a loop's first note never sounds
+
+**LANDMINE:** the tick you hand Tone is not the tick Tone stores. Every tick position goes
+through `ToneWithContext.toTicks` → `TransportTimeClass.toTicks`, which converts to seconds
+at the current BPM and straight back:
+
+```
+_ticksToUnits(n) = (n * (60 / bpm)) / PPQ      // to seconds
+toTicks()        = (seconds / (60 / bpm)) * PPQ // and back
+```
+
+That round trip is not exact. At 100 BPM `"43776i"` returns **43775.99999999999**, and
+`TransportEvent` then does `this.time = Math.floor(options.time)`, keeping the remainder in
+`_remainderTime` and adding it back to the audio time in `invoke()`. So the note still
+*sounds* on the beat — it is merely **filed one tick early**. That is why this hid for
+several releases.
+
+The clock only ever emits whole ticks, so anything that compares a transport position
+against a *musical* tick misses by one wherever this bites:
+
+- `Transport.ticks = <onset>` then play leaves that onset's notes filed *behind* the
+  playhead, and they never sound. That is the first note of a piece, of a bit, or of
+  whatever position the user panned to.
+- `Transport.loop` fences the clock to `[loopStart, loopEnd)`, so **A's notes fall outside
+  the loop and never sound, while B's own notes fall inside it and sound at the end of every
+  pass**. Measured on `waltz-for-nala` with a loop over measures 77–82: A silent on all
+  three passes, B sounding on every one, and the emitted ticks resuming at 43777 after each
+  wrap.
+
+Neither drift nor rare, and not fixable by choosing better numbers:
+
+| | affected onsets at the score's own tempo |
+|---|---|
+| `waltz-for-nala` (100 BPM) | 32 of 623 — measures 77 and 82 among them |
+| Chopin nocturne op. 9 no. 2 (92 BPM) | 71 of 558 |
+| `adele-set-fire-to-the-rain` (108 BPM) | 112 of 894 |
+| `maple-leaf-rag` (100 BPM) | 57 of 1019 |
+| BWV 846 prelude (100 BPM) | 32 of 547 |
+| `Grüne_Augen_lügen_nicht` (80 BPM) | 0 of 196 — until the speed control moves off 80 |
+
+Which onsets are hit depends on the tempo (0 at 60/80/120, 138 of 623 at 72), so the speed
+control moves the failures around rather than removing them. **No PPQ escapes it** — 192,
+256, 384, 512, 960 and 1920 all fail at some tempo — and **no input representation does
+either**: the `"Ni"` string, a `Tone.Ticks` and raw seconds all land on the same floor, and
+the `i` notation is whole ticks only (`/^(\d+)i$/`) so there is nothing to bias it with.
+`Math.round` of the round trip is never wrong (the error is ≤1.5e-11 ticks and goes **both
+ways**), but Tone floors rather than rounds and the floor is inside `TransportEvent`.
+
+**Fix:** stop arguing with it and meet it where it files. `gridTransportTicks` in
+`playback.ts` asks the live transport for each grid position's filed tick
+(`Math.floor(Transport.toTicks("<ticks>i"))`) and everything that talks to the transport
+reads that: the fence, the seek in `seekToStep`, the settle in `settleToNearestStep`, and
+`startPlayback`'s "is the playhead inside the loop" test. `loopRegion` carries both spaces —
+`aTicks`/`bTicks` stay musical for the count-in's meter and for a saved bit's stored bounds.
+
+Two rules for the fence itself, both load-bearing, and both owned by
+`domain/transportTicks.ts` (`loopFence`) so they are testable without a browser:
+
+- **`loopStart` is A's filed tick exactly.** The wrap seeks the clock there and then fires
+  that tick's timeline events, so a bound one tick off means A never sounds — first pass or
+  any later one. It survives the setter's own re-conversion because both readers tolerate the
+  error (`forEachAtTime` matches within `EPSILON` = 1e-6, and emitted ticks are rounded).
+- **`loopEnd` is half a tick *below* B's filed tick.** Tone tests `ticks >= loopEnd` against
+  the raw float, and the round trip can leave it a hair *above* the integer — 96 ticks at
+  41 BPM comes back as 96.00000000000003 — which slips the wrap by a tick and sounds B's own
+  notes. Assign it in **seconds**, since the tick notation cannot carry a fraction.
+
+**The capture is paired with the `Part`, not with the grid.** A Part's event ticks are frozen
+when it is built, while the speed control moves `Transport.bpm` afterwards, so
+`captureTransportTicks()` runs immediately before each `new Tone.Part` — in `initPlayback`
+(after `bpm.value = initialBpm`) and in `setActiveHand`. Splitting that pair silently
+re-introduces the bug at every tempo the user has touched.
+
+**Two consequences elsewhere**, both a whole tick — 3 ms at 100 BPM — and both absorbed with
+the existing `SEAM_EPSILON_TICKS`:
+
+- `animateCursorLoop` reads `Tone.Transport.ticks + SEAM_EPSILON_TICKS`. Without it the first
+  frame of a fresh start or of a loop pass resolves to the step *before* the one sounding, and
+  the playhead flicks backwards for a frame at every wrap.
+- the metronome's downbeat test accepts `ticks` or `ticks + SEAM_EPSILON_TICKS`, or a downbeat
+  loses its accent for a whole playthrough.
+
+**How to re-verify** (there is no Tone in the app's Jest environment — it is a score-web
+dependency and needs an AudioContext, so `transportTicks.test.ts` asserts the fence against a
+*model* of the arithmetic above). Build the bundle with `minify: false` into a standalone page
+next to the unzipped MusicXML, stub `window.ReactNativeWebView`, call `__rn_load_xml`, and wrap
+`(Tone.Transport as any)._clock.callback` to record the emitted ticks plus a probe in the
+`Part` callback to record what fires. Then arm a loop over an affected onset and count. The
+numbers in this note came from exactly that, on all eleven files in `testfiles/`.
 
 ## PATTERN: `effectiveQE` snap — prevent cursor sitting at B for an extra RAF frame
 
@@ -1392,3 +1639,15 @@ notes at A. Three traps in it:
 
 `initPlayback` runs again on every score load, so the handler is removed before it is added —
 otherwise the previous score's closure stays subscribed and every held note sounds twice.
+
+**Both resume paths work in the transport's tick space, not the musical one.** This is the trap
+the two fixes set for each other. `notesSoundingAt` compares an onset against the position
+playback resumes at, and after the filed-tick work above those are different spaces: the position
+read off the transport is filed, a note event's tick is musical, and they differ by up to a whole
+tick. Mixed, a note ending exactly where you resume looks like it has a tick left, and the 50 ms
+floor on the note duration turns that into an audible stub of the previous note under the right
+one. So the events are put through `Transport.toTicks` and floored, the same way
+`captureTransportTicks` does for the grid — asked of Tone rather than recomputed — the wrap passes
+`aTransportTicks` rather than `aTicks`, and the loop bound is `bTransportTicks`. A one-tick end
+tolerance (`SEAM_EPSILON_TICKS`) absorbs what is left, since a note with a tick to live is not
+worth sounding anyway.

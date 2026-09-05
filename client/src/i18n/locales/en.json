@@ -217,7 +217,8 @@
     "longNoteRepeats": "×{{times}}",
     "exerciseNo": "No. {{number}}",
     "swapExercises": "Swap Exercises",
-    "instrumentFixed": "For {{instrument}}"
+    "instrumentFixed": "For {{instrument}}",
+    "metronome": "Metronome"
   },
   "routineRow": {
     "exercise_one": "{{count}} exercise",

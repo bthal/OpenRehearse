@@ -39,7 +39,7 @@ RN/OSMD/Tone imports. See `specs/architecture.md` for the authoritative version.
 | Bits (saved loops), the marker strip & the bit toolbar | `specs/features/playview.md`, `specs/features/pieces-domain.md`, `compound-docs/osmd-webview.md` |
 | Play-surface overlays & animation | `specs/features/playview.md`, `compound-docs/expo-rn-setup.md` |
 | Local data & offline | `specs/features/offline-storage.md` |
-| Audio + cursor sync | `specs/features/playback-synthesis.md`, `specs/features/playview.md` |
+| Audio + cursor sync | `specs/features/playback-synthesis.md`, `specs/features/playview.md`, `compound-docs/tone-playback.md` |
 | State & domain | `specs/features/pieces-domain.md` |
 | Warm-up exercises | `specs/features/warmup.md`, `compound-docs/settings-persistence.md` (the measure-count memo key) |
 | Instruments, transposition, part selection | `specs/features/instruments.md` |
@@ -178,9 +178,11 @@ The `/commit` command runs a guided pass over all of this: assess scope → read
 - **Cursor**: **OSMD standard cursor**, **smooth continuous movement** — prefer OSMD APIs over custom
   overlays. Manual positioning is continuous but resolves to a **note onset**, previewed by a guide
   line and settled with a glide — so playback never has to correct the position.
-- **Note grid**: a measure's first onset is anchored to its **barline**, and that one pixel is shared
-  by snapping, the overlays, the section seams *and* the playback interpolation. Never split it into
-  separate render/playback values — see `compound-docs/tone-playback.md`.
+- **Note grid**: a measure's first onset is anchored to its **barline**, and that pixel
+  (`CursorStep.pxLeft`) is shared by snapping, the overlays, the section seams and every *resting*
+  position. **Never split those apart.** Playback motion is the one exception: it reads
+  `CursorStep.notePxLeft` via `motionPxLeft`, and re-anchors only at a loop's A and at the step a
+  fresh start began on — see `compound-docs/tone-playback.md`.
 - **Tempo**: user-adjustable **from the first PlayView slice** that includes playback.
 - **State**: **Zustand** (not TanStack Query) unless specs are formally amended.
 - **Orientation**: PlayView → **landscape**; Dashboard → **portrait**. `app.json` uses `"default"`; each screen locks via `<Stack.Screen options>` (react-native-screens, no extra package).
@@ -189,6 +191,18 @@ The `/commit` command runs a guided pass over all of this: assess scope → read
   count-in schedules the transport to start in the *future*, so the state getter reads `'stopped'`
   for the whole pre-roll — and again while `startPlayback` awaits the sample load. Both windows look
   like playback to the user. See `compound-docs/tone-playback.md`.
+- **The tick you hand Tone is not the tick Tone stores.** Tone converts every tick position
+  through seconds and back, floors the result, and adds the lost fraction to the audio time — so a
+  note sounds on the beat but is *filed* up to one tick early. **Never compare a transport position
+  against a musical tick**: read the filed tick from `gridTransportTicks`, and take loop bounds from
+  `domain/transportTicks.ts`. Left uncorrected a loop's first note never sounds and its last one
+  sounds on every pass. See `compound-docs/tone-playback.md`.
+- **A scheduled audio event cannot be taken back.** Tone schedules ahead of the playhead, and a
+  click is a raw Web Audio node started at a future time — `Transport.stop()` does not unschedule
+  it. Anything that must not sound has to be **refused when it is scheduled**, inside the callback
+  and against the event's own tick, never by stopping the transport later. Stopping from the RAF
+  loop is doubly wrong: it is a frame late by construction and does not run at all when frames are
+  throttled. See `compound-docs/tone-playback.md`.
 - **Animation**: RN core `Animated` with **`useNativeDriver: false`**. Not a preference — a
   native-driven transform falls back to React's last committed value when it completes, which
   flickers on any component that does not re-render mid-animation. `react-native-reanimated` is

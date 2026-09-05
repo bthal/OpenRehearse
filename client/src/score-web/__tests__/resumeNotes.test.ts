@@ -56,13 +56,13 @@ describe('notesSoundingAt', () => {
     // Loop A at 4q, B at 6q, inside a note running 0-8q. Left unbounded the voice
     // would still have 2q to run when the wrap sounds another copy of the same pitch,
     // and every pass would add one more.
-    expect(notesSoundingAt(HELD, q(4), PPQ, q(6))).toEqual([
+    expect(notesSoundingAt(HELD, q(4), PPQ, { untilTicks: q(6) })).toEqual([
       { midi: 67, elapsedQ: 4, remainingQ: 2 },
     ]);
   });
 
   it('leaves a note that already ends before the loop end alone', () => {
-    expect(notesSoundingAt(HELD, q(4), PPQ, q(99))).toEqual([
+    expect(notesSoundingAt(HELD, q(4), PPQ, { untilTicks: q(99) })).toEqual([
       { midi: 67, elapsedQ: 4, remainingQ: 4 },
     ]);
   });
@@ -70,12 +70,25 @@ describe('notesSoundingAt', () => {
   it('ignores a bound that is not a usable one rather than falling silent', () => {
     // A bound at or behind the resume position would leave nothing to sound. That is
     // a caller bug, and a slightly long note is a better failure than silence.
-    expect(notesSoundingAt(HELD, q(4), PPQ, q(4))).toEqual([
+    expect(notesSoundingAt(HELD, q(4), PPQ, { untilTicks: q(4) })).toEqual([
       { midi: 67, elapsedQ: 4, remainingQ: 4 },
     ]);
-    expect(notesSoundingAt(HELD, q(4), PPQ, Number.NaN)).toEqual([
+    expect(notesSoundingAt(HELD, q(4), PPQ, { untilTicks: Number.NaN })).toEqual([
       { midi: 67, elapsedQ: 4, remainingQ: 4 },
     ]);
+  });
+
+  it('does not sound a stub of a note that has all but ended', () => {
+    // Tone files a tick position up to one tick early (domain/transportTicks.ts), so a
+    // note ending exactly where playback resumes can look like it has a tick left.
+    // Without the tolerance that became a 50 ms blip of the previous note, underneath
+    // the correct one.
+    expect(notesSoundingAt(HELD, q(8) - 1, PPQ, { endToleranceTicks: 1 })).toEqual([]);
+  });
+
+  it('still sounds a note with real time left on it', () => {
+    const [note] = notesSoundingAt(HELD, q(7), PPQ, { endToleranceTicks: 1 });
+    expect(note?.remainingQ).toBe(1);
   });
 
   it('tolerates a zero or negative duration rather than sounding a phantom note', () => {

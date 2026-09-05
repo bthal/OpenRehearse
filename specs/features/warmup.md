@@ -181,14 +181,15 @@ instruments existed are piano ones.
 
 - Accessible via **New Routine** (no id param) or **Edit** (id param) from the dashboard.
 - Header: back arrow (with unsaved-changes guard) | title "New Routine"/"Edit Routine" | Save button.
-- Body: name TextInput field, then a `FlatList` of blocks with **+ Add Exercise** buttons between/after every block.
+- Body: name TextInput field with a routine-level **metronome toggle button** to its right (same icon and on/off colouring as the playview toolbars), then a `FlatList` of blocks with **+ Add Exercise** buttons between/after every block.
+- The metronome belongs to the routine, not to a block: it is saved with the routine and applied when the playview loads the score. Routines saved before the field existed have no value and play with the metronome off.
 - Each exercise block row: up/down arrow buttons (reorder) | exercise name | delete (with confirm). Below: parameter pills (Key, BPM, Hand, Octaves) that open a centred picker Modal on tap. Key and Octave pills are hidden for drill45 blocks, which show a Peak Repeats pill instead. Blocks saved before Peak Repeats existed have no value and play as ×1.
 - Each pause block row: up/down arrow buttons | "Pause" | delete. Below: a measures pill (1 / 2 / 3 / 4 measures) that opens the same centred picker Modal.
 - **Validation** (enforced before Save is enabled): at least one exercise block; last block is not a pause.
 
 ### Routine Playview (landscape, `app/routine/[id].tsx`)
 
-- Simplified toolbar: back arrow, play/pause, metronome only. No loop, no speed panel.
+- Simplified toolbar: leave (exit-to-app), play/pause, edit only. No metronome toggle — the routine carries its own setting — no loop, no speed panel.
 - Generates a combined MusicXML via `generateRoutineXml(routine)` in `domain/routineMusicXml.ts`.
 - A piano routine uses 2 staves (treble + bass); single-hand exercises fill the unused staff with
   whole-note rests. A single-staff instrument's routine emits **one part** — the bass staff is not
@@ -207,5 +208,5 @@ instruments existed are piano ones.
 - [X] Opening a routine in the playview renders the combined score with section labels, tempo markers, and pause measures.
 - [X] Playback respects per-block BPM: exercise 1 at 60 BPM, exercise 2 at 120 BPM plays at the correct speeds.
 - [X] Pause measures are silent and at the correct duration.
-- [X] Metronome toggle works in routine playview.
+- [X] The metronome is set per routine in the edit view and applied on playback; the routine playview has no metronome toggle.
 - [X] Routine and piece selection modes are mutually exclusive in the dashboard.

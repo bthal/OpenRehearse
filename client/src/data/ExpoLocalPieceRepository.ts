@@ -6,6 +6,7 @@ import { normaliseInstrumentId } from '@domain/instrumentRegistry';
 import type { ScorePart } from '@domain/musicxml';
 import { repairPieceInstrument } from '@domain/partCompatibility';
 import type { Piece } from '@domain/piece';
+import { coerceTempoMultiplier } from '@domain/practiceSettings';
 import { normaliseSections } from '@domain/sectionEditing';
 import type { Section } from '@domain/sections';
 // The one place storage reaches for the theme: section colors became part of the
@@ -26,6 +27,10 @@ interface PieceRow {
   last_opened_at: string | null;
   imported_bpm: number | null;
   target_bpm: number | null;
+  /** Last practised speed; NULL for pieces last opened before the speed was remembered. */
+  tempo_multiplier: number | null;
+  /** 0/1; NULL for pieces last opened before the metronome was remembered. */
+  metronome: number | null;
   /** JSON-encoded Section[]; NULL for pieces imported before detection existed. */
   sections: string | null;
   /** JSON-encoded Bit[]; NULL until the piece's first bit is saved. */
@@ -69,6 +74,8 @@ export class ExpoLocalPieceRepository implements PieceRepository {
       'ALTER TABLE pieces ADD COLUMN last_opened_at TEXT',
       'ALTER TABLE pieces ADD COLUMN imported_bpm INTEGER',
       'ALTER TABLE pieces ADD COLUMN target_bpm INTEGER',
+      'ALTER TABLE pieces ADD COLUMN tempo_multiplier REAL',
+      'ALTER TABLE pieces ADD COLUMN metronome INTEGER',
       'ALTER TABLE pieces ADD COLUMN sections TEXT',
       'ALTER TABLE pieces ADD COLUMN bits TEXT',
       'ALTER TABLE pieces ADD COLUMN instrument TEXT',
@@ -93,7 +100,7 @@ export class ExpoLocalPieceRepository implements PieceRepository {
   }
 
   private static readonly SELECT_COLUMNS =
-    'id, title, composer, xml_filename, imported_at, last_opened_at, imported_bpm, target_bpm, sections, bits, instrument, part_id, transpose_base, transpose_practice, parts, instrument_confirmed';
+    'id, title, composer, xml_filename, imported_at, last_opened_at, imported_bpm, target_bpm, tempo_multiplier, metronome, sections, bits, instrument, part_id, transpose_base, transpose_practice, parts, instrument_confirmed';
 
   /**
    * A corrupt sections blob degrades the piece to "never analysed" rather than
@@ -152,6 +159,13 @@ export class ExpoLocalPieceRepository implements PieceRepository {
       ...(r.last_opened_at ? { lastOpenedAt: r.last_opened_at } : {}),
       ...(r.imported_bpm != null ? { importedBpm: r.imported_bpm } : {}),
       ...(r.target_bpm != null ? { targetBpm: r.target_bpm } : {}),
+      // Coerced rather than trusted: the column is a bare REAL, and a value that no
+      // longer maps to a speed the selector offers has to read as full speed rather
+      // than putting the piece at a tempo the user cannot get back from.
+      ...(r.tempo_multiplier != null
+        ? { tempoMultiplier: coerceTempoMultiplier(r.tempo_multiplier) }
+        : {}),
+      ...(r.metronome != null ? { metronome: r.metronome === 1 } : {}),
       sections,
       // Normalised on read like sections, so nothing downstream has to defend against a
       // half-written bit. A null column stays null until the user saves their first bit.
@@ -215,7 +229,7 @@ export class ExpoLocalPieceRepository implements PieceRepository {
     try {
       const db = await this.getDb();
       await db.runAsync(
-        'INSERT INTO pieces (id, title, composer, xml_filename, imported_at, imported_bpm, target_bpm, sections, bits, instrument, part_id, transpose_base, transpose_practice, parts, instrument_confirmed) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        'INSERT INTO pieces (id, title, composer, xml_filename, imported_at, imported_bpm, target_bpm, tempo_multiplier, metronome, sections, bits, instrument, part_id, transpose_base, transpose_practice, parts, instrument_confirmed) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
         piece.id,
         piece.title,
         piece.composer ?? null,
@@ -223,6 +237,8 @@ export class ExpoLocalPieceRepository implements PieceRepository {
         piece.importedAt,
         piece.importedBpm ?? null,
         piece.targetBpm ?? null,
+        piece.tempoMultiplier ?? null,
+        piece.metronome == null ? null : piece.metronome ? 1 : 0,
         piece.sections ? JSON.stringify(piece.sections) : null,
         piece.bits && piece.bits.length > 0 ? JSON.stringify(piece.bits) : null,
         piece.instrument,
@@ -251,11 +267,15 @@ export class ExpoLocalPieceRepository implements PieceRepository {
       // Instrument, part and both transpositions take the same COALESCE guard for the
       // same reason: a caller holding a Piece that never went through rowToPiece has
       // them undefined, and that has to leave the stored values alone rather than
-      // resetting the user's clarinet piece to piano at concert pitch.
-      'UPDATE pieces SET title = ?, composer = ?, target_bpm = ?, sections = COALESCE(?, sections), bits = COALESCE(?, bits), instrument = COALESCE(?, instrument), part_id = COALESCE(?, part_id), transpose_base = COALESCE(?, transpose_base), transpose_practice = COALESCE(?, transpose_practice), parts = COALESCE(?, parts), instrument_confirmed = COALESCE(?, instrument_confirmed) WHERE id = ?',
+      // resetting the user's clarinet piece to piano at concert pitch. Tempo and
+      // metronome deliberately do not: they are written on every save, so an absent
+      // value means "back to the default", not "leave what is there".
+      'UPDATE pieces SET title = ?, composer = ?, target_bpm = ?, tempo_multiplier = ?, metronome = ?, sections = COALESCE(?, sections), bits = COALESCE(?, bits), instrument = COALESCE(?, instrument), part_id = COALESCE(?, part_id), transpose_base = COALESCE(?, transpose_base), transpose_practice = COALESCE(?, transpose_practice), parts = COALESCE(?, parts), instrument_confirmed = COALESCE(?, instrument_confirmed) WHERE id = ?',
       piece.title,
       piece.composer ?? null,
       piece.targetBpm ?? null,
+      piece.tempoMultiplier ?? null,
+      piece.metronome == null ? null : piece.metronome ? 1 : 0,
       piece.sections ? JSON.stringify(piece.sections) : null,
       piece.bits ? JSON.stringify(piece.bits) : null,
       piece.instrument ?? null,

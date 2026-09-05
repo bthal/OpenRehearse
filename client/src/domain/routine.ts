@@ -54,6 +54,9 @@ export interface Routine {
    */
   instrument: InstrumentId;
   blocks: RoutineBlock[];
+  // Absent on routines saved before the metronome became part of the routine (treated as
+  // off, which is how every such routine played by default).
+  metronome?: boolean;
   createdAt: string;
   lastOpenedAt?: string; // ISO 8601; undefined for routines never opened after this field was added
 }

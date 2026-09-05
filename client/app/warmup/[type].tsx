@@ -1,6 +1,6 @@
 import {
   mdiAlertCircleOutline,
-  mdiArrowLeft,
+  mdiExitToApp,
   mdiHandBackLeft,
   mdiHandBackRight,
   mdiHandClap,
@@ -575,7 +575,7 @@ export default function WarmUpView() {
             <ToolbarShell ref={toolbarRef} hidden={isPlaying}>
               {/* Back */}
               <TouchableOpacity onPress={() => router.back()} hitSlop={12} className="p-1">
-                <AppIcon path={mdiArrowLeft} size={24} color={Colors.icon} />
+                <AppIcon path={mdiExitToApp} size={24} color={Colors.icon} flip="vertical" />
               </TouchableOpacity>
 
               {/* Metronome */}

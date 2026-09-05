@@ -3,14 +3,17 @@ import {
   buildSnapGrid,
   clampLoopIndices,
   LOOP_MIN_QUARTERS,
+  motionPxLeft,
   nearestGridIndex,
   type AnchorableStep,
   type GridPoint,
+  type MotionStep,
   nearestIndexByQuarters,
+  pieceEndQuarters,
 } from '../scoreGrid';
 
-// Four quarter notes plus the terminal target. The terminal always sits exactly
-// LOOP_MIN_QUARTERS past the final onset, mirroring `totalQuarters` in playback.ts.
+// Four quarter notes plus the terminal target, which stands for the closing barline
+// — here a quarter past the final onset, because the final note is a quarter.
 const QUARTERS: GridPoint[] = [
   { quarters: 0, pxLeft: 100 },
   { quarters: 1, pxLeft: 200 },
@@ -273,6 +276,59 @@ describe('anchorToBarlines', () => {
   });
 });
 
+describe('motionPxLeft', () => {
+  // Same BWV 846 geometry as above: a measure's first notehead sits 22 px right of the
+  // barline it was anchored onto, and successive onsets are 28 px apart. Steps 0 and 3
+  // open measures, so their two pixels differ; steps 1, 2 and 4 do not, so theirs agree.
+  const STEPS: MotionStep[] = [
+    { pxLeft: 100, notePxLeft: 122 },
+    { pxLeft: 150, notePxLeft: 150 },
+    { pxLeft: 178, notePxLeft: 178 },
+    { pxLeft: 206, notePxLeft: 228 },
+    { pxLeft: 256, notePxLeft: 256 },
+  ];
+
+  it('puts a measure-start step on its notehead when it is not an anchor', () => {
+    expect(motionPxLeft(STEPS, 3, null, null)).toBe(228);
+  });
+
+  it('leaves the two tracks identical away from a measure start', () => {
+    expect(motionPxLeft(STEPS, 1, null, null)).toBe(150);
+    expect(motionPxLeft(STEPS, 2, 2, null)).toBe(178);
+  });
+
+  it('holds the loop A step on its barline, which is where the wrap lands', () => {
+    expect(motionPxLeft(STEPS, 3, null, 3)).toBe(206);
+  });
+
+  it('holds the step a fresh start began on, so the first note does not yank', () => {
+    expect(motionPxLeft(STEPS, 3, 3, null)).toBe(206);
+  });
+
+  it('anchors nothing once both anchors are spent', () => {
+    expect(STEPS.map((_, i) => motionPxLeft(STEPS, i, null, null))).toEqual([
+      122, 150, 178, 228, 256,
+    ]);
+  });
+
+  // Starting playback at a loop's A handle sets both anchors to the same index.
+  it('treats the two anchors landing on one step as a single anchor', () => {
+    expect(motionPxLeft(STEPS, 0, 0, 0)).toBe(100);
+  });
+
+  it('anchors only the named steps, never their neighbours', () => {
+    expect(motionPxLeft(STEPS, 0, 3, 3)).toBe(122);
+    expect(motionPxLeft(STEPS, 4, 3, 3)).toBe(256);
+  });
+
+  // The interpolation reads index + 1 every frame and falls back to the current pixel,
+  // so the final step must report a miss rather than a zero.
+  it('returns undefined past the end of the grid', () => {
+    expect(motionPxLeft(STEPS, 5, null, null)).toBeUndefined();
+    expect(motionPxLeft([], 0, 0, 0)).toBeUndefined();
+  });
+});
+
 describe('nearestIndexByQuarters', () => {
   // The musical-time counterpart of nearestGridIndex, used to place a saved bit back on
   // the grid: bits persist in ticks because pixels do not survive a reload.
@@ -305,5 +361,70 @@ describe('nearestIndexByQuarters', () => {
 
   it('returns 0 for an empty grid, like its pixel counterpart', () => {
     expect(nearestIndexByQuarters([], 3)).toBe(0);
+  });
+});
+
+describe('pieceEndQuarters', () => {
+  it('ends the piece at the final barline, not one quarter past the final onset', () => {
+    // Hanon No. 1: fifteen bars of quavers, then a bar holding one whole note.
+    expect(
+      pieceEndQuarters({
+        lastMeasureStartQuarters: 60,
+        lastMeasureQuarters: 4,
+        trailingHoldQuarters: 0,
+        lastOnsetQuarters: 60,
+      }),
+    ).toBe(64);
+  });
+
+  it('carries a fermata in the final measure past the barline', () => {
+    // Bach BWV 846: a whole-note chord under a fermata, held 1.75x, so the bar
+    // sounds for seven quarters rather than its written four.
+    expect(
+      pieceEndQuarters({
+        lastMeasureStartQuarters: 136,
+        lastMeasureQuarters: 4,
+        trailingHoldQuarters: 3,
+        lastOnsetQuarters: 136,
+      }),
+    ).toBe(143);
+  });
+
+  it('ends a short final note at the barline it is engraved before', () => {
+    // A scale whose run lands mid-bar: seven quavers and a closing crotchet.
+    expect(
+      pieceEndQuarters({
+        lastMeasureStartQuarters: 4,
+        lastMeasureQuarters: 4,
+        trailingHoldQuarters: 0,
+        lastOnsetQuarters: 7,
+      }),
+    ).toBe(8);
+  });
+
+  it('honours a short final measure rather than assuming a full bar', () => {
+    // A piece that opens with a pickup pays it back in the closing bar.
+    expect(
+      pieceEndQuarters({
+        lastMeasureStartQuarters: 32,
+        lastMeasureQuarters: 3,
+        trailingHoldQuarters: 0,
+        lastOnsetQuarters: 34,
+      }),
+    ).toBe(35);
+  });
+
+  it('keeps the terminal ahead of the final onset when the measure duration is unusable', () => {
+    // Malformed MusicXML can leave OSMD reporting a zero-length measure. Falling
+    // back below the final onset would stop the transport before that note sounds
+    // and leave `clampLoopIndices` with no legal loop at the end of the piece.
+    expect(
+      pieceEndQuarters({
+        lastMeasureStartQuarters: 8,
+        lastMeasureQuarters: 0,
+        trailingHoldQuarters: 0,
+        lastOnsetQuarters: 10,
+      }),
+    ).toBe(10 + LOOP_MIN_QUARTERS);
   });
 });

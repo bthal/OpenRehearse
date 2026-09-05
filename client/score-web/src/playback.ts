@@ -24,11 +24,14 @@ import {
 import { computeCountIn, isFreshStart, loopLeadInBeats } from '../../src/domain/countIn';
 import { placeLoopAtCursor } from '../../src/domain/loop';
 import { soundingLengthWholes } from '../../src/domain/ties';
+import { loopFence, metronomeClickSounds } from '../../src/domain/transportTicks';
 import {
   anchorToBarlines,
   buildSnapGrid,
   clampLoopIndices,
+  motionPxLeft,
   nearestGridIndex,
+  pieceEndQuarters,
   type AnchorableStep,
   type GridPoint,
 } from '../../src/domain/scoreGrid';
@@ -295,11 +298,17 @@ interface NoteEvent {
 
 interface CursorStep {
   quarters: number; // expanded time (fermata hold adds extra quarters)
-  // Where this step sits in the score, and the single pixel every part of the UI
-  // reads: the snap search, the preview line, the loop overlay and the playback
-  // interpolation. It starts as cursorElement.style.left, but the onset that opens
-  // a measure is then pulled onto that measure's barline — see anchorToBarlines.
+  // Where this step sits in the score, and the pixel every part of the UI reads *at
+  // rest*: the snap search, the settle, the seek, the preview line and the loop
+  // overlay. It starts as cursorElement.style.left, but the onset that opens a measure
+  // is then pulled onto that measure's barline — see anchorToBarlines. The resting
+  // playhead and the loop handles agree only because they all read this one value, so
+  // nothing at rest may be moved off it.
   pxLeft: number;
+  // The same onset before that pull: where the notehead group is actually engraved.
+  // Read by the playback RAF alone, through motionPxLeft — a moving playhead belongs
+  // on the note that is sounding, not on the barline behind it.
+  notePxLeft: number;
   osmdIdx: number; // how many cursor.next() calls from start to reach this OSMD position
 }
 
@@ -315,6 +324,13 @@ interface LoopRegion {
   bPx: number;
   aTicks: number;
   bTicks: number;
+  // The same two bounds in the transport's own tick space, which is not the musical
+  // one — see gridTransportTicks. Everything that talks to Tone.Transport about this
+  // loop (the fence, the seek to A, the "is the playhead inside it" test) reads these;
+  // everything musical (the count-in's meter, a saved bit's stored bounds) reads the
+  // pair above.
+  aTransportTicks: number;
+  bTransportTicks: number;
 }
 
 function postToNative(msg: OutboundMessage): void {
@@ -457,6 +473,10 @@ let cursorSteps: CursorStep[] = [];
 // play, so the pan and handle A snap against cursorSteps directly.
 let snapGrid: GridPoint[] = [];
 let currentCursorStep = -1;
+// The step a fresh start began on. It keeps its barline anchor for as long as the RAF
+// is on it, so the playhead does not yank off the barline the instant the first note
+// sounds. Null for a mid-note resume, and cleared as soon as the playhead moves past.
+let startAnchorStep: number | null = null;
 let totalQuarters = 0;
 let animFrameId: number | null = null;
 let osmdRef: OpenSheetMusicDisplay | null = null;
@@ -499,7 +519,7 @@ let scoreWidth = 0;
 // pixel frame. 0 until a score has been walked.
 let finalBarlinePx = 0;
 let viewportWidth = 0;
-let scrollMinPx = 0; // translateX that puts the last note at center
+let scrollMinPx = 0; // translateX that puts the closing barline at center
 let scrollMaxPx = 0; // translateX that puts the first note at center
 // Intrinsic geometry of the rendered staff system (independent of viewport size), cached at
 // load so the layout can be re-centered on viewport changes without re-rendering OSMD.
@@ -632,7 +652,10 @@ function buildTimelines(osmd: OpenSheetMusicDisplay): {
   tempoChanges: TempoChange[];
 } {
   const noteEvents: NoteEvent[] = [];
-  const steps: (CursorStep & AnchorableStep)[] = [];
+  // Not CursorStep: here pxLeft is still the raw notehead straight off the cursor
+  // element. It only becomes a CursorStep's placement pixel after anchorToBarlines
+  // below, and the raw value survives as CursorStep.notePxLeft.
+  const steps: (Omit<CursorStep, 'pxLeft' | 'notePxLeft'> & AnchorableStep)[] = [];
   const tempoChanges: TempoChange[] = [];
 
   osmd.cursor.reset();
@@ -652,6 +675,13 @@ function buildTimelines(osmd: OpenSheetMusicDisplay): {
   let tickShift = 0;
   let osmdIdx = 0; // cursor.next() call count — shared by hold steps at the same position
   let lastBpm = scoreBpm;
+  // The closing measure, as it stood when the walk last entered a measure. Its
+  // downbeat and its own written length are what pieceEndQuarters reads to place
+  // the terminal on the double bar; `tickShift` is snapshotted alongside so a
+  // fermata *inside* the closing measure counts and one before it does not.
+  let lastMeasureStartQuarters = 0;
+  let lastMeasureQuarters = 0;
+  let tickShiftAtLastMeasure = 0;
   downbeatTicks = new Set();
   measureMeta = [];
   firstTicksBySourceIndex = [];
@@ -677,6 +707,7 @@ function buildTimelines(osmd: OpenSheetMusicDisplay): {
       const sm = measure as {
         ActiveTimeSignature?: { Numerator?: number; Denominator?: number };
         ImplicitMeasure?: boolean;
+        Duration?: { RealValue?: number };
       };
       const num = sm.ActiveTimeSignature?.Numerator;
       const den = sm.ActiveTimeSignature?.Denominator;
@@ -686,6 +717,12 @@ function buildTimelines(osmd: OpenSheetMusicDisplay): {
         den: den && den > 0 ? den : 4,
         implicit: sm.ImplicitMeasure === true,
       });
+      // `Duration` is what the measure is actually filled with, which is the meter
+      // everywhere except a pickup or a short closing bar — the two places the
+      // difference decides where the piece ends.
+      lastMeasureStartQuarters = expandedQuarters;
+      lastMeasureQuarters = (sm.Duration?.RealValue ?? 0) * WHOLE_TO_QUARTER;
+      tickShiftAtLastMeasure = tickShift;
       // CurrentMeasureIndex indexes Sheet.SourceMeasures — the printed score — and is
       // rewound by the iterator on a repeat's back-jump. Keeping only the first visit
       // maps a printed measure to the tick it first sounds at, which is where a
@@ -821,27 +858,38 @@ function buildTimelines(osmd: OpenSheetMusicDisplay): {
     osmd.cursor.next();
   }
 
-  // Some OSMD builds set EndReached while the cursor is still AT the final note,
-  // not past it, so the while-loop exits before that position is pushed. Capture
-  // it here when pxLeft is strictly beyond the last captured step.
-  const finalPxLeft = parseFloat(el?.style.left ?? '0');
-  const lastCapturedPx = steps[steps.length - 1]?.pxLeft ?? -1;
-  if (finalPxLeft > lastCapturedPx) {
-    const q = osmd.cursor.Iterator.CurrentEnrolledTimestamp.RealValue * WHOLE_TO_QUARTER;
-    const expandedQ = q + tickShift / TONE_PPQ;
-    lastExpandedQuarters = expandedQ;
-    steps.push({ quarters: expandedQ, pxLeft: finalPxLeft, osmdIdx });
-  }
+  // Do NOT read the iterator once EndReached is set, and do not push a step from
+  // what it says. OSMD leaves `CurrentEnrolledTimestamp` a whole measure past the
+  // end of the music (Bach BWV 846: 147 quarters against the closing barline's 143)
+  // and `CurrentMeasureIndex` one past the last measure, while the cursor element
+  // drifts a few pixels right of the final notehead. A step built from that pair is
+  // a note onset that does not exist, and everything downstream believes it: the
+  // playhead spent eight quarters crossing Hanon's closing semibreve and eleven
+  // crossing Bach's fermata, and `totalQuarters` held the transport open behind it.
+  //
+  // This block used to exist for the opposite reason — "some OSMD builds set
+  // EndReached while the cursor is still AT the final note". On 1.9.9 they do not:
+  // the walk above captures the final note itself (Hanon No. 1 ends at step 120 of
+  // 121). A pixel comparison cannot tell the two cases apart anyway, since the
+  // cursor moves past the last notehead either way. `cursorSteps` holds real onsets
+  // only; the terminal standing for the closing barline is buildSnapGrid's job.
 
   // The closing barline, for the loop's terminal target. Falls back to 0, which
   // rebuildSnapGrid reads as "unknown" and replaces with the score's full width.
   finalBarlinePx = measureBoundsPx(osmd, osmd.GraphicSheet.MeasureList.length - 1)?.rightPx ?? 0;
 
-  totalQuarters = lastExpandedQuarters + 1;
+  totalQuarters = pieceEndQuarters({
+    lastMeasureStartQuarters,
+    lastMeasureQuarters,
+    trailingHoldQuarters: (tickShift - tickShiftAtLastMeasure) / TONE_PPQ,
+    lastOnsetQuarters: lastExpandedQuarters,
+  });
   const anchoredPx = anchorToBarlines(steps);
   cursorSteps = steps.map((step, i) => ({
     quarters: step.quarters,
     pxLeft: anchoredPx[i] ?? step.pxLeft,
+    // steps[].pxLeft is the raw cursorElement.style.left, i.e. pre-anchor.
+    notePxLeft: step.pxLeft,
     osmdIdx: step.osmdIdx,
   }));
   osmd.cursor.reset();
@@ -1021,18 +1069,29 @@ function startScoreGlide(step: number, onDone: () => void): void {
 function recomputeViewportMetrics(): void {
   if (!osmdEl) return;
   viewportWidth = window.innerWidth;
+  // One dependency chain, so it runs in one place: the viewport fixes the terminal's
+  // reachable pixel, and the terminal fixes scrollMinPx below. Rebuilding the grid
+  // anywhere else would leave the bounds a resize behind it.
+  rebuildSnapGrid();
 
   const viewportHeight = window.innerHeight;
   const centeredTop = Math.round((viewportHeight - systemHeightPx) / 2);
   osmdOffsetTopPx = centeredTop - systemTopPx;
   osmdEl.style.top = `${osmdOffsetTopPx}px`;
 
-  // Bounds are the first and last *onsets*, deliberately not the snap grid's
-  // terminal: the centre line must always sit over a note. Widening scrollMinPx to
-  // reach the terminal would let the playhead park past the final note, where there
-  // is nothing to play and nothing to snap to.
+  // The right bound is the snap grid's terminal — the closing barline — not the final
+  // onset. The playhead travels there under its own steam: the last note glides from
+  // its notehead to the double bar over its sounding length, and a bound stopping at
+  // the onset would leave the score parked outside its own pan range for that whole
+  // note, so pausing on it and then panning yanked the score right by a barline.
+  //
+  // This does not put the centre line anywhere the playhead cannot already go, which
+  // is what the bounds are really for. Nothing sounds past the final onset, and
+  // nothing needs to: the settle still resolves to the nearest *onset*, so a pan into
+  // the closing bar glides back onto the last note rather than sticking in the gap.
   const px0 = cursorSteps[0]?.pxLeft ?? 0;
-  const pxLast = cursorSteps[cursorSteps.length - 1]?.pxLeft ?? scoreWidth;
+  const pxLast =
+    snapGrid[snapGrid.length - 1]?.pxLeft ?? cursorSteps[cursorSteps.length - 1]?.pxLeft ?? scoreWidth;
   scrollMaxPx = viewportWidth / 2 - px0;
   scrollMinPx = viewportWidth / 2 - pxLast;
 }
@@ -1047,10 +1106,9 @@ function onViewportResize(): void {
   const prevViewportWidth = viewportWidth;
   const centeredScoreX = prevViewportWidth > 0 ? prevViewportWidth / 2 - scrollOffsetPx : 0;
   const wasGliding = glideFrameId !== null;
+  // Rebuilds the grid against the new width on its way through, so the terminal and
+  // the bounds that follow it move together.
   recomputeViewportMetrics();
-  // The terminal target's reachable pixel depends on the viewport width, so the grid
-  // has to follow a resize or handle B could end up outside the scrollable span.
-  rebuildSnapGrid();
   // A bit whose end sits on the terminal moves with it, so this is a re-resolve rather
   // than a repaint.
   reresolveBits();
@@ -1105,6 +1163,81 @@ function advanceCursorTo(targetStep: number): void {
   currentCursorStep = targetStep;
 }
 
+/**
+ * The step to hold on its barline for this start, or null when the start is resuming
+ * inside a note and must pick up exactly where it froze.
+ *
+ * Deliberately not `isFreshStart`: that decides whether the player lost the pulse, by
+ * provenance — its loop branch reads `didLoopSeek` and never looks at position at all,
+ * and its piece branch is `posTicks <= firstStepTicks`, which is false at every
+ * mid-piece onset. The question here is only whether the transport sits *on* an onset.
+ *
+ * Deliberately not `ticksToStep` either: that is a floor search, and the landmine is
+ * that round-tripping a step through ticks lands one note early on tuplets.
+ * `currentCursorStep` is already a valid index — the settle, the seek and the RAF all
+ * keep it current — so this only has to test the tick. Whole-tick rounding can put an
+ * exact onset one tick out, the same tolerance a section junction allows.
+ */
+function startAnchorFor(ticks: number): number | null {
+  const onset = cursorSteps[currentCursorStep];
+  if (onset === undefined) return null;
+  const onsetTicks = Math.round(onset.quarters * TONE_PPQ);
+  return Math.abs(ticks - onsetTicks) <= SEAM_EPSILON_TICKS ? currentCursorStep : null;
+}
+
+// ─── Transport tick space ─────────────────────────────────────────────────────
+
+/**
+ * Each snap-grid position's tick **as Tone files it**, which is not its musical tick.
+ *
+ * Read from the live transport rather than recomputed, and captured at the BPM the
+ * `Part` was filed with rather than the live one: a Part's event ticks are frozen when it
+ * is built, while the speed control moves `Transport.bpm` afterwards. Both Part builds
+ * call {@link captureTransportTicks} immediately before constructing one, and that
+ * pairing is the whole invariant — keep them together.
+ *
+ * `domain/transportTicks.ts` has the landmine this exists for in full: in short, Tone
+ * converts every tick position through seconds and back, floors the result, and adds the
+ * lost fraction to the audio time — so a note sounds on the beat but is *filed* up to one
+ * tick early, and any comparison against a musical tick misses it. Left uncorrected, a
+ * loop's A never sounds and its B sounds on every pass, and playing from a position the
+ * user panned to drops that first note.
+ */
+let gridTransportTicks: number[] = [];
+
+function captureTransportTicks(): void {
+  gridTransportTicks = snapGrid.map((point) =>
+    Math.floor(Tone.Transport.toTicks(`${Math.round(point.quarters * TONE_PPQ)}i`)),
+  );
+}
+
+/**
+ * A snap-grid index's transport tick, falling back to its musical tick before the
+ * first capture (no Part exists yet, so nothing is filed to disagree with).
+ */
+function transportTicksAt(step: number): number {
+  return gridTransportTicks[step] ?? Math.round((snapGrid[step]?.quarters ?? 0) * TONE_PPQ);
+}
+
+/**
+ * Fences the transport to the loop, in the transport's own tick space.
+ *
+ * `domain/transportTicks.ts` owns the two rules — start exactly on A's filed tick, end a
+ * fraction of a tick below B's — and its tests hold them against a model of Tone's own
+ * arithmetic. All that is left here is the assignment: the start bound goes in as tick
+ * notation, the end bound in seconds, because the notation is whole ticks only
+ * (`/^(\d+)i$/`) and the end bound is deliberately not one. The setter converts it back
+ * at this same BPM, so the fraction survives the trip.
+ */
+function applyTransportLoop(): void {
+  if (!loopRegion) return;
+  const { loopStartTicks, loopEndTicks } = loopFence(loopRegion);
+  const secondsPerTick = 60 / Tone.Transport.bpm.value / TONE_PPQ;
+  Tone.Transport.loop = true;
+  Tone.Transport.loopStart = `${loopStartTicks}i`;
+  Tone.Transport.loopEnd = loopEndTicks * secondsPerTick;
+}
+
 // ─── Binary search helpers ────────────────────────────────────────────────────
 
 // Pixel→step lookups all go through nearestGridIndex in domain/scoreGrid.ts, which
@@ -1129,20 +1262,24 @@ function ticksToStep(ticks: number): number {
  * the visible cursor disagree, so every seek goes through here.
  */
 function seekToTicks(ticks: number): void {
-  seekToStep(ticksToStep(ticks), ticks);
+  seekToStep(ticksToStep(ticks));
 }
 
 /**
- * Seeks by step index rather than by ticks.
+ * Seeks by step index — the only way in, since the transport position a step maps to
+ * cannot be recovered from a tick count.
  *
- * Preferred wherever the caller already knows the step: `ticksToStep` floors over
- * `quarters`, and `Math.round(quarters * TONE_PPQ)` can round *up*, so the
- * round-trip lands on the previous step for positions that are not exact multiples
- * of a tick — tuplets, mostly. Passing the index avoids the trip entirely.
+ * The index is the authority for two separate reasons. `ticksToStep` floors over
+ * `quarters` while `Math.round(quarters * TONE_PPQ)` can round *up*, so a tick
+ * round-trip lands on the previous step wherever a position is not an exact tick
+ * multiple — tuplets, mostly. And the tick written to the transport is not the musical
+ * one at all but the tick Tone files this onset's notes at, which only the index can
+ * look up; seeking to the musical tick leaves those notes one tick behind the playhead,
+ * where they never sound. See {@link gridTransportTicks}.
  */
-function seekToStep(step: number, ticks?: number): void {
+function seekToStep(step: number): void {
   const point = cursorSteps[step];
-  Tone.Transport.ticks = ticks ?? Math.round((point?.quarters ?? 0) * TONE_PPQ);
+  Tone.Transport.ticks = transportTicksAt(step);
   advanceCursorTo(step);
   const px = point?.pxLeft ?? 0;
   const el = cursorEl();
@@ -1170,6 +1307,8 @@ function loopFromSteps(aStep: number, bStep: number): LoopRegion {
     bPx: b?.pxLeft ?? 0,
     aTicks: Math.round((a?.quarters ?? 0) * TONE_PPQ),
     bTicks: Math.round((b?.quarters ?? 0) * TONE_PPQ),
+    aTransportTicks: transportTicksAt(aStep),
+    bTransportTicks: transportTicksAt(bStep),
   };
 }
 
@@ -1196,7 +1335,13 @@ function animateCursorLoop(): void {
     countInArmed = false;
   }
 
-  const quartersElapsed = Tone.Transport.ticks / TONE_PPQ;
+  // Tone files every event at Math.floor of its tick position, so the transport runs up
+  // to one tick — 3 ms at 100 BPM — behind the musical grid searched below (see
+  // gridTransportTicks). Without the slack the first frame of a fresh start or of a
+  // loop pass resolves to the step *before* the one that is sounding, and the playhead
+  // flicks backwards for a frame at every wrap. Same tolerance, and the same
+  // whole-tick-rounding reason, as SEAM_EPSILON_TICKS.
+  const quartersElapsed = (Tone.Transport.ticks + SEAM_EPSILON_TICKS) / TONE_PPQ;
 
   // Tone.js may take a frame or two for Transport.ticks to wrap back to loopStart
   // after the audio loop fires. Snap effectiveQE to loopStart the moment elapsed
@@ -1219,6 +1364,11 @@ function animateCursorLoop(): void {
   // advanced here to avoid main-thread stalls on backward seeks (loop wraps).
   currentCursorStep = targetStep;
 
+  // The start anchor is spent once the playhead is past it. Holding it would keep a
+  // stale downbeat pinned to its barline on every later pass of a loop that was
+  // started from inside rather than at its A handle.
+  if (startAnchorStep !== null && targetStep > startAnchorStep) startAnchorStep = null;
+
   // Cheap: a scan over at most a dozen section starts, and it posts nothing unless
   // the cursor actually crossed a junction.
   emitSectionIfChanged(effectiveQE * TONE_PPQ);
@@ -1226,13 +1376,38 @@ function animateCursorLoop(): void {
   // Interpolate position between current step and the next for smooth scrolling.
   // The interpolated px is used for BOTH the score translation AND the cursor element's
   // left position so they always align on the center line.
-  const currPx = cursorSteps[targetStep]?.pxLeft ?? 0;
-  const nextPx = cursorSteps[targetStep + 1]?.pxLeft ?? currPx;
+  // Noteheads, not barlines — except at the two positions the playhead arrives at
+  // rather than flows through. Both ends of the interval go through the selector, so a
+  // segment terminating on an anchored step aims at the pixel that step will expose.
+  const loopAStep = loopRegion?.aStep ?? null;
+  const currPx = motionPxLeft(cursorSteps, targetStep, startAnchorStep, loopAStep) ?? 0;
+  // The interval that ends the loop aims at the loop's own right edge, not at the next
+  // step's notehead. bPx is where the bracket is drawn and where the clamp below bites,
+  // so aiming past it makes the playhead arrive early and park there until the transport
+  // wraps. bStep also indexes snapGrid rather than cursorSteps, so where B is the
+  // terminal target the selector would miss entirely and the last interval would freeze.
+  // Past the final onset the next point is the terminal — the closing barline — for
+  // exactly the reason B is used above: it is the last position the playhead arrives
+  // at, and it is not in cursorSteps. Without it the final interval would have nothing
+  // to aim at and the playhead would freeze on the last notehead while its note was
+  // still sounding, which is the one measure in the piece it did not cross.
+  const terminal = snapGrid[snapGrid.length - 1];
+  const nextPx =
+    loopRegion !== null && targetStep + 1 >= loopRegion.bStep
+      ? loopRegion.bPx
+      : (motionPxLeft(cursorSteps, targetStep + 1, startAnchorStep, loopAStep) ??
+        terminal?.pxLeft ??
+        currPx);
   const currQ = cursorSteps[targetStep]?.quarters ?? 0;
-  const nextQ = cursorSteps[targetStep + 1]?.quarters ?? (currQ + 1);
+  const nextQ =
+    loopRegion !== null && targetStep + 1 >= loopRegion.bStep
+      ? loopRegion.bTicks / TONE_PPQ
+      : (cursorSteps[targetStep + 1]?.quarters ?? terminal?.quarters ?? currQ + 1);
   const fraction = nextQ > currQ ? Math.min(1, (effectiveQE - currQ) / (nextQ - currQ)) : 0;
   const rawInterpolatedPx = currPx + fraction * (nextPx - currPx);
   // Clamp to the loop's right boundary so the cursor never wanders into handle B.
+  // bPx stays the anchored pixel deliberately: a loop ends at the bar, and the sweep
+  // should terminate where the bracket is drawn rather than overshoot it.
   const interpolatedPx = loopRegion !== null ? Math.min(rawInterpolatedPx, loopRegion.bPx) : rawInterpolatedPx;
 
   // Move OSMD cursor element to interpolated position so it stays on the center line.
@@ -1290,6 +1465,9 @@ function _stopInternal(): void {
     osmdActualIdx = -1;
   }
   currentCursorStep = 0;
+  startAnchorStep = null;
+  // Step 0 is the opening measure, which anchorToBarlines never anchors, so its two
+  // pixels coincide and the rewind needs no selector.
   const px0 = cursorSteps[0]?.pxLeft ?? 0;
   const el = cursorEl();
   if (el) el.style.left = `${px0}px`;
@@ -1321,7 +1499,10 @@ function settleToNearestStep(animate: boolean): void {
   if (!target) return;
 
   currentCursorStep = step;
-  Tone.Transport.ticks = Math.round(target.quarters * TONE_PPQ);
+  // The transport's tick for this onset, not its musical one: a pan is followed by a
+  // play, and the musical tick leaves the note the user stopped on unplayable. See
+  // gridTransportTicks.
+  Tone.Transport.ticks = transportTicksAt(step);
   const el = cursorEl();
   if (el) el.style.left = `${target.pxLeft}px`;
   // The frame loop is not running while paused, so a manual pan is the other way
@@ -1781,8 +1962,7 @@ function initLoopHandles(): void {
       // never disagree with the line the user is looking at.
       if (desired.aIndex !== loopRegion.aStep || desired.bIndex !== loopRegion.bStep) {
         loopRegion = loopFromSteps(desired.aIndex, desired.bIndex);
-        Tone.Transport.loopStart = `${loopRegion.aTicks}i`;
-        Tone.Transport.loopEnd = `${loopRegion.bTicks}i`;
+        applyTransportLoop();
       }
 
       // The dragged side follows the finger; the other is painted from the snapped
@@ -1929,9 +2109,7 @@ function createLoop(): void {
     moved: 'b',
   });
   loopRegion = loopFromSteps(aIndex, bIndex);
-  Tone.Transport.loop = true;
-  Tone.Transport.loopStart = `${loopRegion.aTicks}i`;
-  Tone.Transport.loopEnd = `${loopRegion.bTicks}i`;
+  applyTransportLoop();
   setHandlesInert(false);
   if (handleAEl) handleAEl.style.display = 'flex';
   if (handleBEl) handleBEl.style.display = 'flex';
@@ -2090,9 +2268,7 @@ function armBit(bit: ResolvedBit): void {
 
   activeBitId = bit.id;
   loopRegion = loopFromSteps(bit.aStep, bit.bStep);
-  Tone.Transport.loop = true;
-  Tone.Transport.loopStart = `${loopRegion.aTicks}i`;
-  Tone.Transport.loopEnd = `${loopRegion.bTicks}i`;
+  applyTransportLoop();
   setHandlesInert(true);
   if (handleAEl) handleAEl.style.display = 'flex';
   if (handleBEl) handleBEl.style.display = 'flex';
@@ -2124,6 +2300,8 @@ function armBit(bit: ResolvedBit): void {
  * moves with a resize. Repainting alone would leave that marker at a pixel resolved
  * against the previous grid.
  */
+// Resolves against pxLeft, like the loop handles a bit was saved from. Bit markers are
+// overlay geometry and must stay on the resting grid, not the playhead's motion track.
 function reresolveBits(): void {
   resolvedBits = resolveBits(bitsInput, cursorSteps, snapGrid);
   // A bit that is no longer in the list — or that this grid cannot place — cannot stay
@@ -2260,12 +2438,27 @@ function startMetronome(): void {
     // Round to nearest integer tick rather than nearest quarter so sub-quarter
     // downbeats (e.g. after an eighth-note pickup) are matched correctly.
     const ticks = Math.round(Tone.Transport.getTicksAtTime(time));
-    playClick(ctx, time, downbeatTicks.has(ticks));
+
+    // This repeat has no end bound, and a click is a raw Web Audio node started at a
+    // *future* time, so `Transport.stop()` at the end of the piece cannot take it back:
+    // the click on the closing barline is already in the audio graph by the time the RAF
+    // loop notices the end. It has to be refused while it is still only scheduled — see
+    // metronomeClickSounds, which also covers the transport running on past the end when
+    // the RAF loop is throttled.
+    if (!metronomeClickSounds({ clickTicks: ticks, pieceEndTicks: totalQuarters * TONE_PPQ })) {
+      return;
+    }
+
+    // downbeatTicks is musical and the transport can sit one tick behind it, so a
+    // downbeat would lose its accent for a whole playthrough — the same off-by-one the
+    // RAF absorbs above. See gridTransportTicks.
+    const onDownbeat = downbeatTicks.has(ticks) || downbeatTicks.has(ticks + SEAM_EPSILON_TICKS);
+    playClick(ctx, time, onDownbeat);
   }, '4n', pickupOffsetTicks > 0 ? `${pickupOffsetTicks}i` : 0);
 }
 
-export function toggleMetronome(): void {
-  metronomeEnabled = !metronomeEnabled;
+export function setMetronome(enabled: boolean): void {
+  metronomeEnabled = enabled;
   if (metronomeEnabled) {
     startMetronome();
   } else {
@@ -2274,6 +2467,10 @@ export function toggleMetronome(): void {
       metronomeEventId = null;
     }
   }
+}
+
+export function toggleMetronome(): void {
+  setMetronome(!metronomeEnabled);
 }
 
 // ─── Count-in ─────────────────────────────────────────────────────────────────
@@ -2416,6 +2613,8 @@ function emitSectionIfChanged(ticks: number): void {
 }
 
 /** Score-pixel position of a tick, via the cursor step that owns it. */
+// pxLeft, never notePxLeft: a junction divides two measures, so it belongs on the
+// barline. The notehead track exists for the moving playhead alone.
 function pxAtTicks(ticks: number): number {
   return cursorSteps[ticksToStep(ticks)]?.pxLeft ?? 0;
 }
@@ -2454,6 +2653,7 @@ function markDiv(left: number, width: number, background: string, opacity: numbe
  * The elements live inside #osmd, so they translate with the score for free and
  * need no per-frame work; they are rebuilt only when the section list changes.
  */
+// Draws from pxLeft throughout — see pxAtTicks. Section marks are measure geometry.
 function renderSectionMarks(): void {
   if (!sectionMarksEl) return;
   sectionMarksEl.textContent = '';
@@ -2558,11 +2758,9 @@ export function initPlayback(
   sectionMarksEl = document.getElementById('section-marks');
   previewEl = document.getElementById('snap-preview');
   bitPunchesEl = document.getElementById('bit-punches');
+  // scoreWidth has to land before recomputeViewportMetrics below, which rebuilds the
+  // snap grid: until this line it still held the previous score's value.
   scoreWidth = osmdEl?.scrollWidth ?? 0;
-  viewportWidth = window.innerWidth;
-  // Needs both buildTimelines (cursorSteps, totalQuarters) and scoreWidth, which
-  // until the line above still held the previous score's value.
-  rebuildSnapGrid();
 
   // Re-center on orientation/viewport changes (autoResize is off). Attached once.
   if (!resizeListenerAttached) {
@@ -2650,6 +2848,9 @@ export function initPlayback(
     }).toDestination();
   }
 
+  // Immediately before the Part, and at the BPM it is about to be filed at: this table
+  // is only meaningful paired with the Part it was captured for. See gridTransportTicks.
+  captureTransportTicks();
   part = makeNotePart(noteEvents);
   part.start(0);
 
@@ -2684,8 +2885,20 @@ function soundNotesInProgress(startAtTime: number, atTicks: number): void {
   // Inside a loop the note must stop at B. Left to run its own length it would still
   // be sounding when the wrap sounds the same pitch again, and every pass would stack
   // another voice on the one before it.
-  const until = Tone.Transport.loop && loopRegion ? loopRegion.bTicks : undefined;
-  for (const note of notesSoundingAt(activeNoteEvents, atTicks, TONE_PPQ, until)) {
+  const until = Tone.Transport.loop && loopRegion ? loopRegion.bTransportTicks : undefined;
+  // Both sides in the transport's tick space, asked of Tone rather than recomputed —
+  // the same rule captureTransportTicks follows for the grid. `atTicks` came off the
+  // transport, and a musical event tick is filed up to a whole tick below it, so
+  // comparing the two spaces would call a note that has just ended still sounding.
+  const filed = activeNoteEvents.map((event) => ({
+    ticks: Math.floor(Tone.Transport.toTicks(`${event.ticks}i`)),
+    midi: event.midi,
+    durQ: event.durQ,
+  }));
+  for (const note of notesSoundingAt(filed, atTicks, TONE_PPQ, {
+    untilTicks: until,
+    endToleranceTicks: SEAM_EPSILON_TICKS,
+  })) {
     try {
       const noteName = Tone.Frequency(note.midi + soundingOffsetSemitones, 'midi').toNote();
       // One tempo for both: a tempo change can only land on a routine block boundary,
@@ -2710,10 +2923,13 @@ function soundNotesInProgress(startAtTime: number, atTicks: number): void {
  * The `loop` event carries the audio time of the wrap, which is what the resumed note
  * has to be scheduled at. Transport.ticks is not read here: the rewind is applied at
  * that future time, so reading it now can still return the pre-wrap value.
+ *
+ * A's *transport* tick, because that is where the clock is put and which events the
+ * timeline then fires — see gridTransportTicks.
  */
 function handleTransportLoop(time: number): void {
   if (!loopRegion) return;
-  soundNotesInProgress(time, loopRegion.aTicks);
+  soundNotesInProgress(time, loopRegion.aTransportTicks);
 }
 
 export async function startPlayback(): Promise<void> {
@@ -2766,12 +2982,19 @@ export async function startPlayback(): Promise<void> {
   // outside [aTicks, bTicks], seek to A before starting.
   let didLoopSeek = false;
   if (loopRegion) {
-    if (loopModified || posTicks < loopRegion.aTicks || posTicks >= loopRegion.bTicks) {
+    // In the transport's tick space, since posTicks was read from the transport: the
+    // musical bounds can sit a tick to either side of the fence, which would read a
+    // playhead parked exactly on A as being outside the loop. See gridTransportTicks.
+    if (
+      loopModified ||
+      posTicks < loopRegion.aTransportTicks ||
+      posTicks >= loopRegion.bTransportTicks
+    ) {
       loopModified = false;
       didLoopSeek = true;
-      // By step, not by ticks: the tick round-trip floors and would start the loop
-      // one note early wherever A's position is not an exact tick multiple.
-      seekToStep(loopRegion.aStep, loopRegion.aTicks);
+      // By step, not by ticks: only the index can resolve both the tuplet round-trip
+      // and the tick Tone actually filed A's notes at.
+      seekToStep(loopRegion.aStep);
     }
   }
 
@@ -2786,6 +3009,12 @@ export async function startPlayback(): Promise<void> {
   // transport is at its final position and an abort can put it back.
   countInOriginTicks = Tone.Transport.ticks;
   countInArmed = countIn !== null;
+
+  // Hold the starting step on its barline while the RAF is on it. Without this the
+  // cursor sits parked on the barline through the whole count-in and then jumps right
+  // the moment the first note sounds — the very lurch the notehead track removes.
+  // countInOriginTicks is the authority: the loop seek above has already run.
+  startAnchorStep = startAnchorFor(countInOriginTicks);
 
   try {
     await Tone.start();
@@ -2844,7 +3073,8 @@ function resolveCountIn(
       didLoopSeek,
       resumingAbortedCountIn: countInReArmed && posTicks === countInOriginTicks,
       posTicks,
-      firstStepTicks: Math.round((cursorSteps[0]?.quarters ?? 0) * TONE_PPQ),
+      // Transport space: posTicks came off the transport. See gridTransportTicks.
+      firstStepTicks: transportTicksAt(0),
     })
   ) {
     return null;
@@ -2936,6 +3166,8 @@ export function disposePlayback(): void {
   userBpmOverride = null;
   part?.dispose();
   part = null;
+  // Only meaningful paired with the Part just disposed — see gridTransportTicks.
+  gridTransportTicks = [];
   sampler?.dispose();
   sampler = null;
   // `loopingPlayer` is the same object as `resumePlayer` on a sustained set, so it is
@@ -2992,6 +3224,7 @@ export function disposePlayback(): void {
   cursorSteps = [];
   snapGrid = [];
   currentCursorStep = -1;
+  startAnchorStep = null;
   osmdActualIdx = -1;
   totalQuarters = 0;
   finalBarlinePx = 0;
@@ -3039,8 +3272,12 @@ export function setActiveHand(hand: ActiveHand): void {
   // so the grid comes back identical and the loop's indices stay valid. Rebuilt
   // anyway so the loop's dependence on the grid is explicit rather than accidental.
   rebuildSnapGrid();
+  // Before the loop and the bits are re-derived below, because loopFromSteps reads it,
+  // and at the BPM the Part further down is about to be filed at. See gridTransportTicks.
+  captureTransportTicks();
   if (loopRegion) {
     loopRegion = loopFromSteps(loopRegion.aStep, loopRegion.bStep);
+    applyTransportLoop();
     updateLoopOverlay();
   }
   // The grid comes back identical, so the bits resolve to where they already were —

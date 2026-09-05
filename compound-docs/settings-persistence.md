@@ -78,3 +78,27 @@ affects which notes exist, which is the whole reason `ScoreParams` omits it.
 The existing contract test does not catch this. `warmupRegistry.test.ts` sweeps key × hand ×
 octaves, and none of those affect a long note, so it passed throughout. A memo over a persisted
 parameter set needs its own regression test asserting that each field actually varies the result.
+## Practice settings that live on the piece: coerce on read, never write from inside a bit
+
+`Piece.tempoMultiplier` and `Piece.metronome` are the speed and click the piece was last
+practised at, restored when it opens. Three things about them are not visible in the types.
+
+- **The column is looser than the union.** `tempo_multiplier` is a bare SQLite `REAL`, so
+  `rowToPiece` puts it through `coerceTempoMultiplier`: a value the selector no longer offers —
+  an old ×0.6, a rounding artefact — reads as ×1.0 instead of stranding the piece at a tempo
+  the UI cannot get back from. The same trade as a corrupt sections blob: degrade the field,
+  keep the piece.
+- **A bit's settings must not leak onto the piece.** Inside an armed bit the multiplier and the
+  metronome belong to the bit (`writeBackToActiveBit` stores them), and leaving it restores the
+  piece's own values from `preBitSettings`. The piece write is therefore guarded on
+  `activeBitIdRef.current === null`. Without the guard, visiting one slow bit would silently
+  save the whole piece slow.
+- **The hand is deliberately not persisted.** It returns to both hands on every open. A piece
+  reopened in one hand gives no clue on screen why the other has gone silent, and restoring it
+  is one tap.
+
+Restore runs **once per piece id**, behind a ref guard, and fires as soon as the piece arrives
+from the store — before `SCORE_BPM` lands, so the message handler's `reference × multiplier`
+already carries the restored value and the piece opens at the right tempo with nothing extra
+injected. Re-running it whenever the piece object changes would fight the user instead: every
+persist replaces that object in `piecesStore`.

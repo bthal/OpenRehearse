@@ -49,23 +49,36 @@ export interface SoundingNote {
  * sounds the same pitch again, and every pass would stack one more voice. Ignored
  * unless it is a usable bound ahead of the resume position — a slightly long note is
  * a better answer to a caller's bad input than silence.
+ *
+ * `endToleranceTicks` is the slack at the far end. Ticks reaching this function have
+ * been through Tone's tick space, where a position is filed up to a whole tick early
+ * (`domain/transportTicks.ts`), so a note ending exactly where playback resumes can
+ * still look like it has a tick left. Sounding that is a blip of the previous note
+ * underneath the right one; a note with a tick to live is not worth hearing anyway.
  */
+export interface SoundingOptions {
+  readonly untilTicks?: number;
+  readonly endToleranceTicks?: number;
+}
+
 export function notesSoundingAt(
   events: readonly ResumeCandidate[],
   resumeTicks: number,
   ppq: number,
-  untilTicks?: number,
+  options: SoundingOptions = {},
 ): SoundingNote[] {
   if (!Number.isFinite(resumeTicks) || resumeTicks <= 0) return [];
   if (!Number.isFinite(ppq) || ppq <= 0) return [];
 
+  const { untilTicks, endToleranceTicks = 0 } = options;
+  const slack = Number.isFinite(endToleranceTicks) ? Math.max(0, endToleranceTicks) : 0;
   const sounding: SoundingNote[] = [];
   for (const event of events) {
     if (!Number.isFinite(event.ticks) || !Number.isFinite(event.durQ)) continue;
     if (event.durQ <= 0) continue;
     if (event.ticks >= resumeTicks) continue;
     const endTicks = event.ticks + event.durQ * ppq;
-    if (endTicks <= resumeTicks) continue;
+    if (endTicks <= resumeTicks + slack) continue;
     const elapsedQ = (resumeTicks - event.ticks) / ppq;
     const bounded =
       untilTicks !== undefined && Number.isFinite(untilTicks) && untilTicks > resumeTicks
