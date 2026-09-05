@@ -51,33 +51,42 @@ Run `npm run ci` before every commit that touches `client/`.
 
 ## Releasing
 
-Releases are **deliberate**: merging a PR to `main` never ships anything on its own.
+Releases are **deliberate**: merging a PR to `main` never ships anything on its own, and no
+bot opens a release PR. You pick the commit.
 
 1. **Land work on `main`** as usual. PRs are squash-merged, so the PR title becomes the commit
-   message and the changelog entry — give it a real `feat:`/`fix:` title. Only `feat`, `fix` and
-   `perf` cause a release.
-2. **release-please keeps a standing PR** titled `chore(main): release X.Y.Z`, accumulating the
-   changelog and the version bump. It sits there until you want to ship. A companion workflow
-   writes `client/app.json`'s `version` and `android.versionCode` into that same PR.
-3. **Merge the release PR** when you decide to release. That tags `vX.Y.Z`, creates a **draft**
-   GitHub Release, triggers an EAS cloud build of the `preview` profile (APK), and attaches
-   `openrehearse-X.Y.Z.apk` plus `SHA256SUMS.txt` to the draft.
+   message and the changelog entry — give it a real `feat:`/`fix:` title.
+2. **Run the `release` skill** in Claude Code, optionally naming a commit: `/release`, or
+   `/release <sha>`. It defaults to the tip of `main`. The skill refuses any commit that is not
+   an ancestor of `main` or whose CI run is not green.
+3. **Confirm the version.** The skill reads the conventional commits since the last tag and
+   proposes a bump (`feat` → minor, `fix`/`perf` → patch, `!` → major). Override it if you
+   disagree. It then tags `vX.Y.Z`, creates a **draft** GitHub Release, rewrites the notes for
+   a non-technical reader, and dispatches the **Release** workflow — an EAS cloud build of the
+   `preview` profile (APK) that attaches `openrehearse-X.Y.Z.apk` plus `SHA256SUMS.txt` to the
+   draft.
 4. **Smoke-test the APK on a real device** — install it, import
    `client/assets/demo/bach-prelude-c-major-bwv846.mxl`, confirm the score renders and the cursor
    tracks playback. Nothing in CI covers OSMD + Tone in a real WebView.
-5. **Publish the draft release.**
+5. **Publish the draft release.** The skill never does this for you.
 
-If the EAS build fails after the tag already exists, re-run the **Release** workflow via
-`workflow_dispatch` with that tag — it re-attaches assets without cutting a new version.
+If the EAS build fails after the tag already exists, `/release <tag>` re-attaches assets without
+cutting a new version (or run the **Release** workflow via `workflow_dispatch` by hand).
 
 ### Versioning
 
-`client/package.json` `version` is the single source of truth. `scripts/sync-app-version.mjs`
-derives `client/app.json`'s `expo.version` and the integer `expo.android.versionCode`
-(`major*10000 + minor*100 + patch`, so `1.1.0` → `10100`). Never hand-edit those two fields; run
-`npm run sync-version` at the repo root instead. CI enforces this.
+**The git tag is the source of truth.** `client/package.json` and `client/app.json` carry `0.0.0`
+placeholders and are never bumped — nothing is committed at release time, which is what lets any
+commit be released. The **Release** workflow derives `expo.version` and the integer
+`expo.android.versionCode` (`major*10000 + minor*100 + patch`, so `1.1.0` → `10100`) from the tag
+and writes them into the CI workspace only. That encoding caps minor and patch at 99; the
+workflow fails loudly rather than producing a colliding number.
 
-The changelog lives at `client/CHANGELOG.md` (release-please owns it).
+Android refuses to install an APK whose `versionCode` is not greater than the installed one, so
+tags must only ever go up.
+
+The changelog is the [Releases page](https://github.com/bthal/OpenRehearse/releases); there is no
+`CHANGELOG.md`.
 
 ### One-time setup
 
@@ -87,7 +96,6 @@ These are the manual steps a maintainer must do; the pipeline cannot do them for
 |---|---|
 | `cd client && npx eas-cli login`, then `npx eas-cli credentials` → Android → export the keystore, store it offline | The signing key is the app's permanent identity. Lose it and existing installs can never be upgraded, only uninstalled and replaced. `eas-cli` is not a project dependency and is not installed globally — always invoke it with `npx`. |
 | Repo secret `EXPO_TOKEN` (expo.dev → Account → Access tokens) | Lets the workflow trigger EAS builds. |
-| Repo secret `RELEASE_PLEASE_TOKEN` — fine-grained PAT with `contents: write` + `pull-requests: write` | **Not optional.** PRs opened with the default `GITHUB_TOKEN` do not trigger workflow runs, so the release PR would get no CI and no version sync. |
 | Settings → allow **squash merge only** | The whole changelog model assumes one commit per PR. |
 | Branch protection on `main` → require the CI checks | The hooks are bypassable; this is the real gate. |
 

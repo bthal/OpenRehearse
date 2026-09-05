@@ -1,7 +1,13 @@
 # CI and release pipeline landmines
 
-Traps hit while building `.github/workflows/`. Check here before touching CI, release-please,
-versioning, or the score-web build. Human-facing instructions live in [`README.md`](../README.md#releasing).
+Traps hit while building `.github/workflows/`. Check here before touching CI, the `release`
+skill, versioning, or the score-web build. Human-facing instructions live in
+[`README.md`](../README.md#releasing).
+
+The pipeline used to be driven by release-please, which maintained a standing release PR and
+owned the version and the changelog. That is gone: `release.yml` is `workflow_dispatch`-only, the
+git tag is the version, and a human points `.claude/skills/release/` at a commit. Landmines that
+existed only to serve the bot PR have been deleted from this file along with it.
 
 ## score-web/html.ts is generated at install time, never committed
 
@@ -35,16 +41,6 @@ still puts the blob in git, requires auto-staging files the developer did not st
 bypassable with `--no-verify`. Because three screens import the module, `typecheck` and `test` in
 CI already fail loudly if generation did not happen. Drift is structurally impossible, not detected.
 
-## Prettier must not police the generated CHANGELOG
-
-**LANDMINE:** release-please writes `client/CHANGELOG.md`, and `client/package.json`'s
-`format:check` runs `prettier --check .` across `client/`. release-please's markdown uses `*`
-bullets and double blank lines; Prettier wants `-` and single. The result is that **every release
-PR fails CI**, forever, on a file no human wrote and release-please rewrites on its next run.
-
-**Fix:** `CHANGELOG.md` is listed in `client/.prettierignore`. Do not "fix" it by formatting the
-file — release-please regenerates it from scratch each release and the fix would not survive.
-
 ## A PR-title check must trigger on `edited`
 
 **LANDMINE:** a bare `on: pull_request` defaults to `[opened, synchronize, reopened]`. `edited` is
@@ -59,77 +55,45 @@ reopened]`. Keeping it out of `ci.yml` also stops a description edit from re-run
 heavy jobs with `if:`. A required status check that is *skipped* never reports a conclusion, so
 branch protection blocks the merge forever.
 
-## Pull requests opened with GITHUB_TOKEN do not trigger workflows
-
-**LANDMINE:** GitHub deliberately suppresses workflow runs for events caused by the built-in
-`GITHUB_TOKEN`, to prevent recursive triggering. release-please opens its release PR with whatever
-token you give it, so with the default token that PR gets **no CI and no version sync** — it just
-sits there looking green because nothing ran.
-
-**Fix:** `secrets.RELEASE_PLEASE_TOKEN`, a fine-grained PAT scoped to this repo with
-`contents: write` + `pull-requests: write`. The same reasoning applies in `release-pr-sync.yml`,
-which pushes with the PAT so the resulting `synchronize` event re-runs CI on the fixed commit.
-
-Fine-grained PATs expire, and when this one does the failure is silent: no release PR appears and
-nothing errors. That is the standing cost of this approach.
-
-## Tags pushed by release-please do not start a tag-triggered workflow
-
-**LANDMINE:** same suppression rule. An `on: push: tags:` workflow will never fire for a tag
-release-please created, so the obvious design — release-please tags, a separate workflow builds the
-tag — silently never builds anything.
-
-**Fix:** chain the build as a second job in the *same* workflow with
-`needs: release-please` and `if: needs.release-please.outputs.release_created == 'true'`.
-
-## Draft releases do not create a git tag
-
-**LANDMINE:** GitHub materialises the tag ref only when a release is **published**. A draft
-release carries a `tag_name` but no `refs/tags/<tag>`. This bit twice on the 1.1.0 release:
-
-- `build-apk` uses `actions/checkout` with `ref: <tag>`; it retried the fetch three times and
-  failed with `The process '/usr/bin/git' failed with exit code 1`. No EAS build ran at all.
-- release-please anchors "commits since the last release" on the tag. With no `v1.1.0` tag it
-  walked back to the root commit and opened a **1.2.0** PR whose changelog was the entire project
-  history. That PR must be closed, never merged.
-
-**Fix:** `release.yml` creates the tag itself, immediately after release-please, at `GITHUB_SHA`.
-Publishing the draft later reuses the existing tag. The step is idempotent so re-runs are safe.
-
-Do not "fix" this by dropping `draft: true` — the draft is the human smoke-test gate, and nothing
-in CI exercises OSMD and Tone.js in a real WebView.
-
-## release-please manifest mode prefixes its outputs with the package path
-
-**LANDMINE:** with a `packages` entry at path `client`, the outputs are `client--tag_name`,
-`client--release_created`, … not `tag_name`. Reading `steps.release.outputs.tag_name` yields an
-empty string, so the build job's `if` is false and the release ships with no APK.
-
-**Fix:** `${{ steps.release.outputs['client--tag_name'] }}`. Only `releases_created` (plural) is
-un-prefixed and global.
-
-## android.versionCode is monotonic, irreversible, and cannot be derived by release-please
+## android.versionCode is monotonic and irreversible
 
 Android refuses to install an APK whose `versionCode` is not greater than the installed one, and
 there is no way to walk the number back once a build is public.
 
-release-please only writes semver strings, so it cannot produce this integer. `scripts/sync-app-version.mjs`
-derives it as `major*10000 + minor*100 + patch` (`1.0.0` → `10000`), which keeps it reconstructible
-from any git tag rather than living in a counter outside the repo.
+`release.yml` derives it from the tag as `major*10000 + minor*100 + patch` (`1.0.0` → `10000`),
+which keeps it reconstructible from any tag rather than living in a counter outside the repo.
 
-**LANDMINE:** that encoding caps minor and patch at **99**. The script fails loudly rather than
-emitting a colliding number — widening it is a one-way door, because every already-published
-versionCode has to stay below whatever comes next.
+**LANDMINE:** that encoding caps minor and patch at **99**. The workflow fails loudly rather than
+emitting a colliding number, and the `release` skill refuses such a version before tagging.
+Widening it is a one-way door: every already-published versionCode has to stay below whatever
+comes next.
 
-## Edit app.json by text replacement, not JSON.stringify
+## The version lives in the tag, so `build-apk` must not trust the tree
 
-**LANDMINE:** `JSON.stringify(obj, null, 2)` expands `"assetBundlePatterns": ["assets/**/*"]` onto
-multiple lines. Prettier collapses it back, so `npm run format:check` fails on a file the release
-automation just wrote — a loop no human is in a position to break during a release.
+`client/package.json` and `client/app.json` carry `0.0.0` placeholders. Nothing is committed at
+release time — that is precisely what lets an *already-existing* commit be released, since a bump
+committed after the fact could never be inside the commit being tagged.
 
-**Fix:** `sync-app-version.mjs` replaces the two scalars in the raw text and re-parses to verify.
-It refuses to run if either key does not appear exactly once, so a silent no-op cannot ship a wrong
-version.
+**LANDMINE:** `build-apk` checks out `ref: <tag>`, so every script in the workspace is the version
+*that tag* contains. Calling `scripts/sync-app-version.mjs` there would run whatever the tag
+happened to ship — and rebuilding a tag cut before this change would run a script that does not
+take the flag at all. The derivation is therefore **inlined in the workflow**, where it is always
+the current one.
+
+That also removed the reason `sync-app-version.mjs` existed. It edited `app.json` by targeted text
+replacement rather than `JSON.stringify` because `JSON.stringify(obj, null, 2)` expands
+`"assetBundlePatterns": ["assets/**/*"]` onto multiple lines, Prettier collapses it back, and
+`format:check` then fails on a file the automation just wrote. Nothing is committed now, no
+Prettier run ever sees the edited file, and plain `jq` is fine.
+
+## The CI-green check is a hard refusal, not a warning
+
+The `release` skill refuses to tag a commit that is not an ancestor of `origin/main` or whose
+`ci.yml` run is not `success`.
+
+**Why it cannot be a prompt:** a tag is permanent, and each release spends one of 15 monthly EAS
+build slots. `main` also has no branch protection, so nothing else stands between a local commit
+and a tag. Downgrading either check to a confirmation removes the only gate.
 
 ## Build provenance would be a lie here
 

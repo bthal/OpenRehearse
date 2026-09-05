@@ -1,18 +1,17 @@
 name: Release
 
-# Two jobs, one workflow, on purpose: a tag pushed by release-please does NOT start a
-# separate `on: push: tags` workflow run, so the build has to be chained with `needs:`
-# rather than triggered by the tag.
+# Dispatch-only, on purpose. Nothing about landing a commit on `main` ships anything:
+# a human picks the commit with the `/release` skill, which creates the tag and the
+# draft release and then fires this workflow to build and attach the APK.
 #
-# `workflow_dispatch` exists to re-attach an APK to an EXISTING tag when an EAS build
-# fails — recovery, not a way to mint extra builds against the 15/month free-tier cap.
+# This is also the recovery path when an EAS build fails after the tag already exists —
+# re-running it re-attaches assets without cutting a new version. It is not a way to
+# mint extra builds against the 15/month free-tier cap.
 on:
-  push:
-    branches: [main]
   workflow_dispatch:
     inputs:
       tag:
-        description: 'Existing tag to (re)build and attach an APK to, e.g. v1.1.0'
+        description: 'Existing tag to (re)build and attach an APK to, e.g. v1.2.0'
         required: true
         type: string
 
@@ -28,68 +27,17 @@ env:
   NODE_VERSION: '24'
 
 jobs:
-  release-please:
-    name: Maintain release PR
-    if: github.event_name == 'push'
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-      pull-requests: write
-      issues: write
-    outputs:
-      # Manifest mode prefixes per-package outputs with the package path.
-      release_created: ${{ steps.release.outputs['client--release_created'] }}
-      tag_name: ${{ steps.release.outputs['client--tag_name'] }}
-    steps:
-      - uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0
-        id: release
-        with:
-          # A PAT, not GITHUB_TOKEN: pull requests opened with GITHUB_TOKEN do not
-          # trigger workflow runs, which would leave the release PR with no CI and
-          # no version sync.
-          token: ${{ secrets.RELEASE_PLEASE_TOKEN }}
-          config-file: release-please-config.json
-          manifest-file: .release-please-manifest.json
-
-      # GitHub does NOT create a git tag for a draft release — the ref only appears when
-      # a human publishes it. Without the tag two things break: build-apk cannot check
-      # out `ref: <tag>`, and release-please loses the anchor it uses to find "commits
-      # since the last release", so its next run proposes a version with the entire
-      # project history as the changelog. Create the tag ourselves, at the commit the
-      # release targets. Publishing the draft later just reuses this tag.
-      - name: Create the release tag
-        if: steps.release.outputs['client--release_created'] == 'true'
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAG: ${{ steps.release.outputs['client--tag_name'] }}
-        run: |
-          set -euo pipefail
-          if gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/${TAG}" >/dev/null 2>&1; then
-            echo "Tag ${TAG} already exists; nothing to do."
-          else
-            gh api "repos/${GITHUB_REPOSITORY}/git/refs" \
-              -f "ref=refs/tags/${TAG}" -f "sha=${GITHUB_SHA}"
-            echo "Created ${TAG} at ${GITHUB_SHA}"
-          fi
-
   build-apk:
     name: Build APK and attach to draft release
-    needs: release-please
-    # `always()` is required so this still runs on workflow_dispatch, where the
-    # release-please job is skipped rather than successful.
-    if: >-
-      always() &&
-      (needs.release-please.outputs.release_created == 'true' ||
-       github.event_name == 'workflow_dispatch')
     runs-on: ubuntu-latest
     permissions:
       contents: write # uploading assets to the release
     env:
-      TAG: ${{ github.event.inputs.tag || needs.release-please.outputs.tag_name }}
+      TAG: ${{ inputs.tag }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ github.event.inputs.tag || needs.release-please.outputs.tag_name }}
+          ref: ${{ inputs.tag }}
 
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
@@ -107,6 +55,38 @@ jobs:
 
       - run: npm ci
         working-directory: client
+
+      # The tag is the version. `client/app.json` is committed with 0.0.0 placeholders,
+      # so the real values are written here, into this workspace only — nothing is ever
+      # committed back.
+      #
+      # Derived inline rather than by calling a script from the tree: `checkout` above
+      # uses `ref: <tag>`, so any script it finds is whatever *that tag* happens to
+      # contain. Inline keeps re-builds of old tags working.
+      #
+      # versionCode is a monotonically increasing integer Android refuses to go
+      # backwards on. major*10000 + minor*100 + patch keeps it reconstructible from any
+      # tag, at the cost of capping minor and patch at 99 — fail loudly rather than
+      # silently producing a colliding number.
+      - name: Derive the app version from the tag
+        run: |
+          set -euo pipefail
+          version="${TAG#v}"
+          if ! [[ "$version" =~ ^([0-9]+)\.([0-9]+)\.([0-9]+)$ ]]; then
+            echo "::error::tag '$TAG' is not a plain vX.Y.Z semver tag"
+            exit 1
+          fi
+          major="${BASH_REMATCH[1]}" minor="${BASH_REMATCH[2]}" patch="${BASH_REMATCH[3]}"
+          if (( minor > 99 || patch > 99 )); then
+            echo "::error::version $version overflows the versionCode encoding (minor and patch must be <= 99)"
+            exit 1
+          fi
+          code=$(( major * 10000 + minor * 100 + patch ))
+          jq --arg v "$version" --argjson c "$code" \
+            '.expo.version = $v | .expo.android.versionCode = $c' \
+            client/app.json > "$RUNNER_TEMP/app.json"
+          mv "$RUNNER_TEMP/app.json" client/app.json
+          echo "version $version, versionCode $code"
 
       - name: Build on EAS and wait
         working-directory: client
@@ -127,6 +107,6 @@ jobs:
       - name: Attach assets to the draft release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        # The release is a draft (see release-please-config.json). A human sideloads the
-        # APK, confirms a score imports and plays, and only then publishes it.
+        # The release is a draft. A human sideloads the APK, confirms a score imports and
+        # plays, and only then publishes it.
         run: gh release upload "$TAG" openrehearse-*.apk SHA256SUMS.txt --clobber
