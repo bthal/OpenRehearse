@@ -4,9 +4,7 @@
   "private": true,
   "description": "Repo-root tooling only. The app lives in client/ — see README.md.",
   "scripts": {
-    "prepare": "husky",
-    "sync-version": "node scripts/sync-app-version.mjs",
-    "sync-version:check": "node scripts/sync-app-version.mjs --check"
+    "prepare": "husky"
   },
   "devDependencies": {
     "@commitlint/cli": "^21.2.2",

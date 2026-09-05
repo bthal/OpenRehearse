@@ -22,10 +22,12 @@
   signed with the same key.
 - **Builds**: run on **EAS cloud** (`preview` profile → APK). CI never holds signing material. The
   free tier allows 15 Android builds per month, so builds are spent on releases only.
-- **Version source of truth**: `client/package.json` `version`. `app.json`'s `expo.version` and the
-  integer `android.versionCode` are **derived** from it, never hand-edited.
-- **Release gate**: releases are cut by merging a release-please pull request, and published by a
-  human after sideloading and smoke-testing the APK. Merging a feature PR ships nothing on its own.
+- **Version source of truth**: the **git tag**. `client/package.json` and `client/app.json` hold
+  `0.0.0` placeholders; `app.json`'s `expo.version` and the integer `android.versionCode` are
+  **derived from the tag** during the release build, never committed or hand-edited.
+- **Release gate**: a human points the `release` skill at a chosen commit, which tags it and opens
+  a draft release; the same human publishes it after sideloading and smoke-testing the APK.
+  Merging a feature PR ships nothing on its own, and no bot opens a release PR.
 - **Generated code**: `client/src/score-web/html.ts` (the bundled OSMD + Tone.js surface) is built
   at install time and is **not** in version control.
 

@@ -22,9 +22,10 @@ jobs:
   pr-title:
     name: PR title is a Conventional Commit
     runs-on: ubuntu-latest
-    # The repo squash-merges, so the PR title becomes the commit message on main and is
-    # what release-please reads to build the changelog. Linting it with the repo's own
-    # commitlint config keeps one list of allowed types instead of two.
+    # The repo squash-merges, so the PR title becomes the commit message on main — which
+    # is what the `release` skill reads to infer the next version and write the changelog.
+    # Linting it with the repo's own commitlint config keeps one list of allowed types
+    # instead of two.
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
