@@ -41,6 +41,21 @@ and the seam swells or combs by a couple of dB (worst case around 7 dB on one no
 set) over its 0.2 s. This is not tunable away with a single set of bounds — see
 `compound-docs/tone-playback.md`.
 
+### Starting inside a held note
+
+Playback can begin at a position part-way through a note — a tied chain gives the playhead somewhere
+to park that is not the note's own onset, and a two-measure long tone makes that ordinary rather
+than exotic.
+
+The note **rejoins itself**: only the remaining length sounds, and the sample starts as far into
+itself as the note has already been held, so there is no second attack in the middle of one
+continuous tone. On a looping instrument the resume point is usually past the end of the recording
+altogether, so it is folded back into the loop region. A one-shot sample that has already run out
+sounds nothing, because it has genuinely stopped.
+
+This applies to every instrument and to both ways of arriving there — moving the playhead and
+pressing play, or resuming a pause taken mid-note.
+
 ## Loop interaction
 
 - Transport respects **active bit** boundaries: when playback position reaches **end of bit**, **seek immediately** to **start of bit** (see `playview.md`).
@@ -67,6 +82,8 @@ set) over its 0.2 s. This is not tunable away with a single set of bounds — se
 - [ ] A clarinet note longer than 3.13 s keeps sounding for its full written length, with no click
       at the loop wrap and no re-attack.
 - [ ] Piano playback is unchanged: notes decay and stop as before, and no piano sample loops.
+- [ ] Starting or resuming playback inside a held note sounds the rest of that note, with no
+      re-attack — on the clarinet and the piano alike.
 - [x] Repeat barlines are honored: playback cycles through the repeated section.
 - [x] Fermata notes sound longer; subsequent notes are delayed so the hold is audible.
 - [x] Arpeggiated chords roll from low to high (or high to low per marking).

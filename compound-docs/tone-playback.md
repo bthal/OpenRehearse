@@ -1313,3 +1313,46 @@ a different amount of music in different parts of the same score.
 Gradients ramp to `transparent` rather than to an explicit zero-alpha color. CSS interpolates gradient
 stops with premultiplied alpha, so `transparent` does not drag the ramp through grey; writing
 `rgba(r,g,b,0)` instead would require parsing the palette string web-side for no gain.
+
+## LANDMINE: a Tone.Part never starts an event that began before the resume position
+
+`Part._startNote` (tone 14.9.17), non-looping branch:
+
+```javascript
+else if (event.startOffset >= offset) {
+    event.start(new TicksClass(this.context, ticks));
+}
+```
+
+`offset` is where the transport starts. An event whose onset is *strictly before* it is silently
+dropped — not delayed, not clipped, never started. So resuming at tick T sounds nothing for any
+note that began before T, and the remainder of that note is silence.
+
+This sat unnoticed for the whole life of the app because **every position the playhead can park on
+is normally a note onset**: `nearestGridIndex` snaps to the closest one, so the worst case was a
+gap of less than one note. Ties break the assumption. The cursor visits every continuation of a
+chain (`steps.push` in `buildTimelines` runs for each iterator position, before note extraction),
+but the chain contributes a single event at its start, because continuations are skipped so the
+note sounds once for its combined length. A two-measure long tone therefore has a barline in the
+middle of it with nothing scheduled anywhere near.
+
+**Fix:** before `Transport.start`, sound the notes that are already under way —
+`notesSoundingAt(events, ticks, PPQ)` in `src/score-web/resumeNotes.ts`. The exclusion at its
+boundary is exact and load-bearing: it takes `ticks < resumeTicks`, the precise complement of
+Tone's `startOffset >= offset`, so a note whose onset *is* the resume position is left to the Part.
+Return it here as well and it attacks twice at the same instant.
+
+Three things that are easy to get wrong in the resume itself:
+
+- **The buffer offset is not the elapsed time.** `loopStart`/`loopEnd` are buffer seconds and
+  ignore `playbackRate`, so a pitch-shifted note has travelled further through its buffer than the
+  clock says. Convert first, then fold — `resumeBufferOffsetSec` in `src/score-web/sustainLoop.ts`.
+- **`Tone.Sampler` cannot do this at all.** `Sampler.js:130` is `source.start(time, 0, ...)` — the
+  offset is hardcoded. The piano therefore borrows `LoopingSamplePlayer` for resumed notes only,
+  which also means the piano now needs `releaseAll` on stop and pause, where before it never did.
+- **Pass the transport's start *time*, not `now`.** A count-in defers the start by seconds; a
+  resumed note scheduled at `now` would sound during the click track.
+
+**Still open:** a transport *loop* that wraps back to an A handle sitting inside a held note has the
+same gap, because the looping branch above drops `event.startOffset < this._loopStart` too. The
+first pass is fine — it goes through `startPlayback` — but later wraps are not.

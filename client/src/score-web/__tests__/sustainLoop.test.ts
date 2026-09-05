@@ -3,6 +3,7 @@ import {
   nearestSampleMidi,
   prepareSustainLoop,
   resolveSustainLoop,
+  resumeBufferOffsetSec,
   type SustainLoopFrames,
 } from '../sustainLoop';
 
@@ -216,5 +217,51 @@ describe('nearestSampleMidi', () => {
 
   it('returns null for an empty set', () => {
     expect(nearestSampleMidi(60, [])).toBeNull();
+  });
+});
+
+describe('resumeBufferOffsetSec', () => {
+  // The clarinet set: 3.13 s of tone, looped between 0.5 s and 2.9 s.
+  const LOOP = { startFrame: 22050, endFrame: 127890, crossfadeFrames: 8820 }; // 44.1 kHz
+  const RATE = 44100;
+  const DURATION = 3.128889;
+
+  it('passes an offset through while it is still inside the recording', () => {
+    expect(resumeBufferOffsetSec(1.5, 1, DURATION, LOOP, RATE)).toBeCloseTo(1.5, 6);
+  });
+
+  it('folds an offset past the loop end back into the loop region', () => {
+    // 5 s into a held note is past the whole 3.13 s buffer. The sound at that moment
+    // is somewhere inside the loop, not silence and not the end of the recording.
+    const loopStart = 0.5;
+    const loopEnd = 2.9;
+    const folded = resumeBufferOffsetSec(5, 1, DURATION, LOOP, RATE)!;
+    expect(folded).toBeGreaterThanOrEqual(loopStart);
+    expect(folded).toBeLessThan(loopEnd);
+    expect(folded).toBeCloseTo(loopStart + ((5 - loopEnd) % (loopEnd - loopStart)), 6);
+  });
+
+  it('wraps to the loop start exactly at the loop end', () => {
+    expect(resumeBufferOffsetSec(2.9, 1, DURATION, LOOP, RATE)).toBeCloseTo(0.5, 6);
+  });
+
+  it('advances the buffer faster for a pitched-up note', () => {
+    // loopStart/loopEnd are buffer seconds and ignore playbackRate, so elapsed real
+    // time has to be converted before it is folded.
+    expect(resumeBufferOffsetSec(1, 2, DURATION, LOOP, RATE)).toBeCloseTo(2, 6);
+  });
+
+  it('gives a one-shot sample nothing to resume once it has finished', () => {
+    // A decayed piano note has genuinely stopped; there is no sound to rejoin.
+    expect(resumeBufferOffsetSec(5, 1, DURATION, null, RATE)).toBeNull();
+  });
+
+  it('still resumes a one-shot sample that is mid-decay', () => {
+    expect(resumeBufferOffsetSec(1.2, 1, DURATION, null, RATE)).toBeCloseTo(1.2, 6);
+  });
+
+  it('treats a non-finite or negative elapsed time as the start of the buffer', () => {
+    expect(resumeBufferOffsetSec(-1, 1, DURATION, LOOP, RATE)).toBe(0);
+    expect(resumeBufferOffsetSec(Number.NaN, 1, DURATION, LOOP, RATE)).toBe(0);
   });
 });

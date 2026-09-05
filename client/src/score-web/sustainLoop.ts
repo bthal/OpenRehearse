@@ -145,3 +145,43 @@ export function nearestSampleMidi(midi: number, available: readonly number[]): n
   }
   return best;
 }
+
+/**
+ * Where in a buffer a note that started `elapsedSec` ago is sounding right now.
+ *
+ * Needed when playback resumes inside a held note: the note has to rejoin partway
+ * through its sample rather than re-attack, or a two-measure tone acquires a reed
+ * attack in the middle of itself.
+ *
+ * Two conversions, both easy to get wrong. `loopStart`/`loopEnd` are **buffer**
+ * seconds and are unaffected by `playbackRate`, while `elapsedSec` is real time, so
+ * a pitched-up note has travelled further through its buffer than the clock says.
+ * And once the elapsed position passes the loop end it must be folded back into the
+ * loop region — five seconds into a held clarinet note is well past the whole 3.13 s
+ * recording, but the sound at that moment is somewhere inside the loop.
+ *
+ * Returns `null` when there is nothing left to rejoin: a one-shot sample that has
+ * already finished has genuinely stopped, and silence is the honest answer.
+ */
+export function resumeBufferOffsetSec(
+  elapsedSec: number,
+  playbackRate: number,
+  bufferDurationSec: number,
+  loop: SustainLoopFrames | null,
+  sampleRate: number,
+): number | null {
+  if (!Number.isFinite(elapsedSec) || elapsedSec <= 0) return 0;
+  const rate = Number.isFinite(playbackRate) && playbackRate > 0 ? playbackRate : 1;
+  const bufferSec = elapsedSec * rate;
+
+  if (loop === null || !Number.isFinite(sampleRate) || sampleRate <= 0) {
+    return bufferSec < bufferDurationSec ? bufferSec : null;
+  }
+
+  const loopStart = loop.startFrame / sampleRate;
+  const loopEnd = loop.endFrame / sampleRate;
+  const loopLength = loopEnd - loopStart;
+  if (!(loopLength > 0)) return bufferSec < bufferDurationSec ? bufferSec : null;
+  if (bufferSec < loopEnd) return bufferSec;
+  return loopStart + ((bufferSec - loopEnd) % loopLength);
+}

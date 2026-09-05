@@ -1,7 +1,7 @@
 import * as Tone from 'tone';
 
 import type { SustainLoopFrames } from '../../src/score-web/sustainLoop';
-import { nearestSampleMidi } from '../../src/score-web/sustainLoop';
+import { nearestSampleMidi, resumeBufferOffsetSec } from '../../src/score-web/sustainLoop';
 
 /**
  * A minimal sampler that can sustain a note past the end of its recording.
@@ -21,9 +21,10 @@ import { nearestSampleMidi } from '../../src/score-web/sustainLoop';
  * `loopStart`/`loopEnd` are in **buffer** seconds and are unaffected by
  * `playbackRate`, so a pitch-shifted note needs no scaling of them.
  *
- * Deliberately used only for instruments that declare a `sustainLoop`. A decaying set
- * (the piano) stays on `Tone.Sampler`, which is doing a good job of it — see
- * `compound-docs/tone-playback.md`.
+ * A decaying set (the piano) keeps `Tone.Sampler` for its ordinary notes, which it is
+ * doing a good job of — see `compound-docs/tone-playback.md`. It does borrow this
+ * player for one thing: resuming inside a held note needs a buffer started at an
+ * offset, and the Sampler hardcodes zero.
  */
 
 interface LoopedSample {
@@ -75,8 +76,15 @@ export class LoopingSamplePlayer {
    * Same contract as `Tone.Sampler.triggerAttackRelease`, including that the release
    * tail extends past `durSec` — the note is *released* at `time + durSec`, not
    * silenced there.
+   *
+   * `elapsedSec` is how long the note has *already* been sounding, which is non-zero
+   * only when playback resumes inside a held note. The buffer then starts partway in
+   * rather than at its attack, so a long tone rejoins itself instead of acquiring a
+   * second reed attack halfway through. `Tone.Sampler` cannot do this at all — it
+   * hardcodes a zero offset — which is why the resume path uses this player even for
+   * an instrument whose ordinary notes go through the Sampler.
    */
-  triggerAttackRelease(noteName: string, durSec: number, time: number): void {
+  triggerAttackRelease(noteName: string, durSec: number, time: number, elapsedSec = 0): void {
     const midi = Math.round(Tone.Frequency(noteName).toMidi());
     const sampleMidi = nearestSampleMidi(midi, this.midis);
     if (sampleMidi === null) return;
@@ -84,12 +92,27 @@ export class LoopingSamplePlayer {
     if (!sample) return;
 
     const { sampleRate } = sample.buffer;
+    const playbackRate = Math.pow(2, (midi - sampleMidi) / 12);
+    const offsetSec =
+      elapsedSec > 0
+        ? resumeBufferOffsetSec(
+            elapsedSec,
+            playbackRate,
+            sample.buffer.duration,
+            sample.loop,
+            sampleRate,
+          )
+        : 0;
+    // A one-shot that has already run out has genuinely stopped; there is no sound
+    // left to rejoin, and starting it over would be a re-attack.
+    if (offsetSec === null) return;
+
     const source = new Tone.ToneBufferSource({
       url: sample.buffer,
       loop: sample.loop !== null,
       loopStart: sample.loop ? sample.loop.startFrame / sampleRate : 0,
       loopEnd: sample.loop ? sample.loop.endFrame / sampleRate : 0,
-      playbackRate: Math.pow(2, (midi - sampleMidi) / 12),
+      playbackRate,
       fadeIn: ATTACK_SEC,
       fadeOut: RELEASE_SEC,
       curve: 'linear',
@@ -98,9 +121,9 @@ export class LoopingSamplePlayer {
       },
     }).connect(this.output);
     this.voices.add(source);
-    // The explicit 0 offset matters: `ToneBufferSource.start` defaults a looping
-    // source's offset to `loopStart`, which would skip the note's attack entirely.
-    source.start(time, 0, durSec);
+    // The explicit offset matters even when it is 0: `ToneBufferSource.start` defaults
+    // a looping source's offset to `loopStart`, which would skip the note's attack.
+    source.start(time, offsetSec, durSec);
   }
 
   /**
