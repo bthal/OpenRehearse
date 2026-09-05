@@ -70,8 +70,6 @@ All app scripts run from **`client/`** (see [`README.md`](README.md) for full de
 | Command | Purpose |
 |---------|---------|
 | `npm ci` (repo root) | Install commitlint + husky; activates the git hooks |
-| `npm run sync-version` (repo root) | Sync `client/app.json` version + versionCode from `client/package.json` |
-| `npm run sync-version:check` (repo root) | Fail if they have drifted (same check CI runs) |
 | `cd client && npm ci` | Install app dependencies |
 | `cd client && npm run android` | Start Metro + launch on Android device/emulator |
 | `cd client && npm run lint` | ESLint |
@@ -99,8 +97,8 @@ git commit -m "feat(playview): add BPM stepper" \
   -m "Default 80 BPM; clamp 20–240."
 ```
 
-**PRs are squash-merged**, so the PR title becomes the commit on `main`. CI lints it, and
-release-please builds the changelog from it. Only `feat`, `fix` and `perf` produce a release.
+**PRs are squash-merged**, so the PR title becomes the commit on `main`. CI lints it, and the
+`release` skill reads it when proposing the next version and writing the changelog.
 
 The `pre-commit` hook runs the full `cd client && npm run ci`, but only when the commit touches
 `client/`.
@@ -109,10 +107,9 @@ The `pre-commit` hook runs the full `cd client && npm run ci`, but only when the
 
 | Workflow | Trigger | What it does |
 |---|---|---|
-| `.github/workflows/ci.yml` | every PR + push to `main` | `client` quality gate, version sync |
+| `.github/workflows/ci.yml` | every PR + push to `main` | `client` quality gate |
 | `.github/workflows/pr-title.yml` | PR opened/**edited**/synchronised | Conventional-Commit lint on the PR title (separate so a rename re-runs it) |
-| `.github/workflows/release.yml` | push to `main`; `workflow_dispatch` for recovery | Maintains the release PR; on merge, tags, builds an APK on EAS and attaches it to a **draft** release |
-| `.github/workflows/release-pr-sync.yml` | release-please PRs | Writes `client/app.json` version + versionCode into the release PR |
+| `.github/workflows/release.yml` | `workflow_dispatch` only | Builds an APK on EAS for an existing tag and attaches it to that tag's **draft** release |
 
 Two invariants worth knowing before you touch anything here:
 
@@ -123,12 +120,15 @@ Two invariants worth knowing before you touch anything here:
   that same bundle step: `score-web/**` is outside tsc and Jest, so building it is the *only*
   check it gets, and without it a broken bundle reaches CI untouched. See
   [`compound-docs/release-pipeline.md`](compound-docs/release-pipeline.md) for why it works this way.
-- **`client/package.json` `version` is the single source of truth.** release-please edits only that
-  file; `scripts/sync-app-version.mjs` derives `app.json`'s `version` and the integer
-  `android.versionCode` (`major*10000 + minor*100 + patch`) from it. Never hand-edit `app.json`
-  version fields.
+- **The git tag is the version; nothing in the repo is.** `client/package.json` and
+  `client/app.json` hold `0.0.0` placeholders and are never bumped — that is what lets any commit
+  be released. `release.yml` derives `app.json`'s `version` and the integer `android.versionCode`
+  (`major*10000 + minor*100 + patch`) from the tag, into the CI workspace only. Never hand-edit
+  those fields and never "fix" the placeholders.
 
-Releasing is documented for humans in [`README.md`](README.md#releasing).
+Releasing is deliberate and dispatch-only: nothing ships when a PR merges. A human runs the
+`release` skill (`.claude/skills/release/`) against a chosen commit; it tags, drafts, and fires
+`release.yml`. Documented for humans in [`README.md`](README.md#releasing).
 
 ## Documentation update matrix
 
