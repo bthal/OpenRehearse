@@ -127,6 +127,14 @@ Two invariants worth knowing before you touch anything here:
   that same bundle step: `score-web/**` is outside tsc and Jest, so building it is the *only*
   check it gets, and without it a broken bundle reaches CI untouched. See
   [`compound-docs/release-pipeline.md`](compound-docs/release-pipeline.md) for why it works this way.
+  Being gitignored also means **the bundle does not follow your branch** — a `git checkout` swaps
+  `score-web/src/` and leaves the built `html.ts` behind, so the WebView can run code arbitrarily
+  older than the native side calling into it. That fails partially and quietly: globals the old
+  bundle already had still work, so the score loads and plays while the newer ones are missing,
+  and `injectJavaScript` reports it only as an opaque `SCRIPT ERR: Script error. @0:0`. Two guards
+  now exist — `prestart`/`preandroid`/`preios`/`preweb`/`preclear` rebuild before Metro starts, and
+  `injectInstrumentAudio` checks for its global and surfaces an `ERROR` naming the fix. See the
+  landmine section in [`compound-docs/osmd-webview.md`](compound-docs/osmd-webview.md).
 - **`client/package.json` `version` is the single source of truth.** release-please edits only that
   file; `scripts/sync-app-version.mjs` derives `app.json`'s `version` and the integer
   `android.versionCode` (`major*10000 + minor*100 + patch`) from it. Never hand-edit `app.json`

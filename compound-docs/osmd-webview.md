@@ -149,6 +149,53 @@ The `score-web/` project has its own `tsconfig.json` that declares `"lib": ["ES2
 
 **NOTE:** The build script (`npm run build:score-web`) uses `npm ci`, which requires `score-web/package-lock.json`. On first clone or after deleting `score-web/node_modules/`, run `cd score-web && npm install` once to generate the lock file, then commit it. Subsequent runs use `npm ci` for reproducible installs.
 
+## LANDMINE: `html.ts` is generated and gitignored, so it does not follow your branch
+
+**LANDMINE:** `src/score-web/html.ts` is the esbuild output of `score-web/src/`, and it is
+gitignored (`client/.gitignore:10`). It is therefore **whatever your last local build
+produced**, regardless of which branch is checked out. `git checkout` swaps the source and
+leaves the bundle behind, so the WebView can be running code that is arbitrarily older than
+the native side driving it.
+
+A stale bundle does **not** fail loudly. `injectJavaScript` surfaces an error in the injected
+source only as an opaque cross-origin console line:
+
+```
+LOG  [score-web] OSMD ready
+LOG  [score-web] SCRIPT ERR: Script error. @0:0
+```
+
+— no name, no line, no stack. Worse, the failure is *partial*: a global the old bundle
+already had still works, so the score loads and renders and plays. Only the newer globals
+are missing. The app then behaves plausibly but wrongly, which reads as a feature bug rather
+than a build problem.
+
+This actually happened. A bundle built before the instruments feature had no
+`__rn_set_instrument_audio`, `__rn_set_part` or `__rn_set_transpose` — three injections,
+three `SCRIPT ERR` lines — but did have `__rn_load_xml`, so every piece loaded fine and
+played on that build's hardcoded Salamander CDN piano. The symptom reported was "a clarinet
+piece plays as piano, and it used to work"; nothing in the instruments code was wrong.
+
+**Diagnosis:** count how many `SCRIPT ERR` lines appear, and grep the bundle for the global
+the native side is about to call:
+
+```bash
+grep -c __rn_set_instrument_audio client/src/score-web/html.ts   # 0 means stale
+```
+
+**Fix:** `npm run bundle:score-web` (plain esbuild), or `npm run build:score-web` (also
+reinstalls `score-web/node_modules`). Restart Metro with `npm run clear` afterwards so the
+1.5 MB module is re-read.
+
+**Guards now in place:**
+- `prestart` / `preandroid` / `preios` / `preweb` / `preclear` in `client/package.json`
+  rebuild the bundle before Metro starts, so the local dev loop cannot drift.
+- `injectInstrumentAudio` (`src/score-web/instrumentAudio.ts`) checks for its global before
+  calling it and posts an `ERROR` naming the fix, so a stale bundle shows a visible score
+  error instead of quietly playing the wrong instrument.
+- CI (`npm run ci`) ends in `bundle:score-web`, and EAS rebuilds via
+  `eas-build-post-install` — a shipped APK cannot carry a stale bundle.
+
 ## Hiding the OSMD default cursor element
 
 The OSMD cursor (`cursor.cursorElement`) is an `<img>` that renders as a green arrow at the current step. We use a custom `#cursor-line` div for the visual cursor instead.

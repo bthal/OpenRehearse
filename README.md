@@ -44,10 +44,16 @@ npm run ios
 | `npm run format` | Prettier auto-fix |
 | `npm run typecheck` | `tsc --noEmit` |
 | `npm run test` | Jest unit tests |
-| `npm run ci` | lint + format:check + typecheck + test |
+| `npm run ci` | lint + format:check + typecheck + test + score-web bundle |
 | `npm run build:score-web` | Rebuild `src/score-web/html.ts` after editing `score-web/src/` (also runs on install) |
+| `npm run bundle:score-web` | Same rebuild without reinstalling `score-web/node_modules` |
 
 Run `npm run ci` before every commit that touches `client/`.
+
+`src/score-web/html.ts` is generated and gitignored, so it does **not** change when you switch
+branches — a bundle older than the native code fails as opaque `Script error. @0:0` lines plus
+plausible-but-wrong behaviour, not as a crash. `npm run start`/`android`/`ios`/`web`/`clear` now
+rebuild it first, so the local dev loop cannot drift.
 
 ## Releasing
 

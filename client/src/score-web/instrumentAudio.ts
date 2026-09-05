@@ -15,6 +15,15 @@ import {
   type InstrumentId,
 } from '@domain/instrumentRegistry';
 
+/**
+ * Shown when the WebView bundle predates the instrument-audio bridge.
+ *
+ * Deliberately developer-facing: a shipped APK cannot hit this, because
+ * `eas-build-post-install` rebuilds the bundle on every EAS build. It is a local
+ * dev-loop failure, so it names the command that fixes it.
+ */
+const STALE_BUNDLE_MESSAGE = 'score-web bundle is stale — run: npm run bundle:score-web';
+
 export async function injectInstrumentAudio(
   inject: (js: string) => void,
   instrument: InstrumentId,
@@ -29,5 +38,23 @@ export async function injectInstrumentAudio(
   // once to JSON, once more to become a valid JS string literal in the injected source.
   const urlsArg = JSON.stringify(JSON.stringify(urls));
   const loopArg = loop === null ? 'null' : JSON.stringify(JSON.stringify(loop));
-  inject(`window.__rn_set_instrument_audio(${urlsArg}, ${offset}, ${loopArg});void 0;`);
+  // Guarded rather than called bare, because a WebView bundle older than this native
+  // code has no such global, and `injectJavaScript` reports that only as an opaque
+  // cross-origin `Script error. @0:0` console line. The score then loads anyway — the
+  // stale bundle still has `__rn_load_xml` — and plays every piece on whatever samples
+  // that build hardcoded, which reads as "the instrument setting does nothing" rather
+  // than as a broken build. `html.ts` is generated and gitignored, so it does not
+  // change when the branch does; see compound-docs/osmd-webview.md.
+  inject(
+    `(function(){` +
+      `if (typeof window.__rn_set_instrument_audio !== 'function') {` +
+        `window.ReactNativeWebView && window.ReactNativeWebView.postMessage(JSON.stringify({` +
+          `type:'ERROR',` +
+          `payload:${JSON.stringify(STALE_BUNDLE_MESSAGE)}` +
+        `}));` +
+        `return;` +
+      `}` +
+      `window.__rn_set_instrument_audio(${urlsArg}, ${offset}, ${loopArg});` +
+    `})();void 0;`,
+  );
 }
