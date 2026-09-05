@@ -15,6 +15,18 @@ import { useTranslation } from 'react-i18next';
 
 import { AppIcon } from '@components/AppIcon';
 import {
+  DEFAULT_INSTRUMENT,
+  INSTRUMENT_IDS,
+  INSTRUMENT_REGISTRY,
+  clampLongNoteOctave,
+  exercisesFor,
+  longNoteOctaves,
+  supportsExercise,
+  type InstrumentId,
+} from '@domain/instrumentRegistry';
+import { scopeInstrument } from '@domain/instrumentScope';
+import { useSettingsStore } from '@state/settingsStore';
+import {
   PAUSE_MEASURES,
   type ExerciseBlock,
   type PauseBlock,
@@ -23,13 +35,25 @@ import {
   validateRoutine,
 } from '@domain/routine';
 import {
+  DEFAULT_LONG_NOTE_MEASURES,
+  DEFAULT_LONG_NOTE_NAME,
+  DEFAULT_LONG_NOTE_OCTAVE,
+  DEFAULT_LONG_NOTE_REPEATS,
   DEFAULT_PEAK_REPEATS,
   WARMUP_BPMS,
   WARMUP_KEYS,
+  WARMUP_LONG_NOTE_MEASURES,
+  WARMUP_LONG_NOTE_NOTES,
+  WARMUP_LONG_NOTE_REPEATS,
   WARMUP_OCTAVES,
   WARMUP_PEAK_REPEATS,
+  longNoteEntry,
   type WarmUpBpm,
   type WarmUpHand,
+  type WarmUpLongNoteMeasures,
+  type WarmUpLongNoteName,
+  type WarmUpLongNoteOctave,
+  type WarmUpLongNoteRepeats,
   type WarmUpOctaves,
   type WarmUpPeakRepeats,
 } from '@domain/warmup';
@@ -37,7 +61,6 @@ import {
   DEFAULT_EXERCISE_PARAMS,
   HANON_EXERCISE_COUNT,
   WARM_UP_REGISTRY,
-  WARM_UP_TYPES,
   hasParam,
   keyLabel as keyName,
   type WarmUpType,
@@ -56,6 +79,10 @@ type PickerType =
   | 'hand'
   | 'octaves'
   | 'peakRepeats'
+  | 'noteName'
+  | 'noteOctave'
+  | 'longNoteMeasures'
+  | 'longNoteRepeats'
   | 'measures'
   | 'addType'
   | 'addMeasures';
@@ -81,8 +108,9 @@ const HAND_OPTIONS: { tKey: string; value: WarmUpHand }[] = [
   { tKey: 'routineEdit.handLeft', value: 'left' },
 ];
 
-// Exercise types offered in the "Add Exercise" picker, in registry display order.
-const EXERCISE_TYPES: WarmUpType[] = WARM_UP_TYPES;
+// Exercise types offered in the "Add Exercise" picker come from the routine's
+// instrument, in registry display order. Gating here is what makes validation
+// unnecessary later: a block the instrument cannot play can never be created.
 
 function exerciseLabelKey(type: WarmUpType): string {
   return WARM_UP_REGISTRY[type].shortLabelKey;
@@ -99,6 +127,14 @@ function defaultExerciseBlock(type: WarmUpType): ExerciseBlock {
     octaves,
     ...(hasParam(type, 'exercise') ? { exercise: DEFAULT_EXERCISE_PARAMS.exercise } : {}),
     ...(hasParam(type, 'peakRepeats') ? { peakRepeats: DEFAULT_PEAK_REPEATS } : {}),
+    ...(hasParam(type, 'noteName')
+      ? {
+          noteName: DEFAULT_EXERCISE_PARAMS.noteName,
+          noteOctave: DEFAULT_EXERCISE_PARAMS.noteOctave,
+          longNoteMeasures: DEFAULT_EXERCISE_PARAMS.longNoteMeasures,
+          longNoteRepeats: DEFAULT_EXERCISE_PARAMS.longNoteRepeats,
+        }
+      : {}),
   };
 }
 
@@ -121,6 +157,23 @@ function octavesLabel(octaves: WarmUpOctaves, t: TFn): string {
 
 function peakRepeatsLabel(peakRepeats: WarmUpPeakRepeats | undefined, t: TFn): string {
   return t('routineEdit.peakRepeats', { times: peakRepeats ?? DEFAULT_PEAK_REPEATS });
+}
+
+function longNoteNameLabel(block: ExerciseBlock): string {
+  return block.noteName ?? DEFAULT_LONG_NOTE_NAME;
+}
+
+/** The absolute written octave, e.g. `Oct 4`. Distinct from `octavesLabel`'s span. */
+function longNoteOctaveLabel(block: ExerciseBlock, t: TFn): string {
+  return t('routineEdit.noteOctave', { octave: block.noteOctave ?? DEFAULT_LONG_NOTE_OCTAVE });
+}
+
+function longNoteMeasuresLabel(measures: WarmUpLongNoteMeasures | undefined, t: TFn): string {
+  return t('routineEdit.measure', { count: measures ?? DEFAULT_LONG_NOTE_MEASURES });
+}
+
+function longNoteRepeatsLabel(repeats: WarmUpLongNoteRepeats | undefined, t: TFn): string {
+  return t('routineEdit.longNoteRepeats', { times: repeats ?? DEFAULT_LONG_NOTE_REPEATS });
 }
 
 // ─── Small presentational components (defined outside to satisfy lint) ─────────
@@ -189,6 +242,19 @@ export default function RoutineEditScreen() {
 
   // Lazy initializers so we don't need a setState-in-effect pattern
   const [title, setTitle] = useState(() => existingRoutine?.title ?? '');
+  /**
+   * Chosen while the routine is new, read-only once it exists: changing it on a saved
+   * routine would invalidate every block whose exercise the new instrument cannot do,
+   * and there is no good answer to what should happen to those.
+   *
+   * A new routine starts on whatever the dashboard is scoped to, which is almost
+   * always what the user means. Under "All" the scope names nothing, so it opens on
+   * the default instrument and the picker is right there to say otherwise.
+   */
+  const dashboardScope = useSettingsStore((s) => s.dashboardScope);
+  const [instrument, setInstrument] = useState<InstrumentId>(
+    () => existingRoutine?.instrument ?? scopeInstrument(dashboardScope) ?? DEFAULT_INSTRUMENT,
+  );
   const [blocks, setBlocks] = useState<BlockWithKey[]>(
     () => existingRoutine?.blocks.map((b) => ({ ...b, _key: Crypto.randomUUID() })) ?? [],
   );
@@ -197,6 +263,19 @@ export default function RoutineEditScreen() {
   const [picker, setPicker] = useState<PickerState | null>(null);
 
   const isEditing = Boolean(id && existingRoutine);
+
+  /**
+   * Switching instrument before the routine is saved drops the blocks the new one
+   * cannot play, rather than refusing the switch or keeping a block that would fail at
+   * playback. It is the same invariant the Add Exercise picker enforces — a routine
+   * never holds a block its instrument cannot do — applied to the other edge.
+   */
+  function chooseInstrument(next: InstrumentId) {
+    if (next === instrument) return;
+    setInstrument(next);
+    setBlocks((prev) => prev.filter((b) => b.type === 'pause' || supportsExercise(next, b.type)));
+    setIsDirty(true);
+  }
   const validationError = validateRoutine(blocks);
   const canSave = title.trim().length > 0 && validationError === null;
 
@@ -225,6 +304,7 @@ export default function RoutineEditScreen() {
     await saveRoutine({
       id: existingRoutine?.id ?? Crypto.randomUUID(),
       title: title.trim(),
+      instrument,
       blocks: cleanBlocks,
       metronome,
       createdAt: existingRoutine?.createdAt ?? new Date().toISOString(),
@@ -283,12 +363,19 @@ export default function RoutineEditScreen() {
 
   // ─── "Add Exercise" picker ─────────────────────────────────────────────────
 
+  // Declaring `hand` is not enough: a single-staff instrument has no hand to choose,
+  // and `instrumentBlockParams` already forces the one-part case when the score is
+  // built, so the pill would open a picker that changes nothing.
+  function showHand(type: WarmUpType): boolean {
+    return hasParam(type, 'hand') && INSTRUMENT_REGISTRY[instrument].staffLayout !== 'single';
+  }
+
   function openAddPicker(atIndex: number) {
     setPicker({
       atIndex,
       type: 'addType',
       options: [
-        ...EXERCISE_TYPES.map((exType) => ({
+        ...exercisesFor(instrument).map((exType) => ({
           label: t(exerciseLabelKey(exType)),
           value: exType,
         })),
@@ -325,6 +412,30 @@ export default function RoutineEditScreen() {
     } else if (type === 'peakRepeats' && block.type !== 'pause') {
       options = WARMUP_PEAK_REPEATS.map((p) => ({ label: peakRepeatsLabel(p, t), value: p }));
       currentValue = block.peakRepeats ?? DEFAULT_PEAK_REPEATS;
+    } else if (type === 'noteName' && block.type !== 'pause') {
+      options = WARMUP_LONG_NOTE_NOTES.map((n) => ({ label: n.label, value: n.label }));
+      currentValue = block.noteName ?? DEFAULT_LONG_NOTE_NAME;
+    } else if (type === 'noteOctave' && block.type !== 'pause') {
+      // Only the octaves this routine's instrument can actually reach for that note.
+      const pc = longNoteEntry(block.noteName ?? DEFAULT_LONG_NOTE_NAME).pitchClass;
+      options = longNoteOctaves(instrument, pc).map((o) => ({ label: String(o), value: o }));
+      currentValue = clampLongNoteOctave(
+        instrument,
+        pc,
+        block.noteOctave ?? DEFAULT_LONG_NOTE_OCTAVE,
+      );
+    } else if (type === 'longNoteMeasures' && block.type !== 'pause') {
+      options = WARMUP_LONG_NOTE_MEASURES.map((m) => ({
+        label: longNoteMeasuresLabel(m, t),
+        value: m,
+      }));
+      currentValue = block.longNoteMeasures ?? DEFAULT_LONG_NOTE_MEASURES;
+    } else if (type === 'longNoteRepeats' && block.type !== 'pause') {
+      options = WARMUP_LONG_NOTE_REPEATS.map((r) => ({
+        label: longNoteRepeatsLabel(r, t),
+        value: r,
+      }));
+      currentValue = block.longNoteRepeats ?? DEFAULT_LONG_NOTE_REPEATS;
     }
 
     setPicker({ blockKey, type, options, currentValue });
@@ -378,6 +489,29 @@ export default function RoutineEditScreen() {
       patchBlock(blockKey!, { octaves: value as WarmUpOctaves });
     } else if (type === 'peakRepeats') {
       patchBlock(blockKey!, { peakRepeats: value as WarmUpPeakRepeats });
+    } else if (type === 'noteName') {
+      // The octave moves with the note in the same write: changing the note can put
+      // the stored octave outside what this instrument can play.
+      const name = value as WarmUpLongNoteName;
+      const block = blocks.find((b) => b._key === blockKey);
+      const current =
+        block && block.type !== 'pause'
+          ? (block.noteOctave ?? DEFAULT_LONG_NOTE_OCTAVE)
+          : DEFAULT_LONG_NOTE_OCTAVE;
+      patchBlock(blockKey!, {
+        noteName: name,
+        noteOctave: clampLongNoteOctave(
+          instrument,
+          longNoteEntry(name).pitchClass,
+          current,
+        ) as WarmUpLongNoteOctave,
+      });
+    } else if (type === 'noteOctave') {
+      patchBlock(blockKey!, { noteOctave: value as WarmUpLongNoteOctave });
+    } else if (type === 'longNoteMeasures') {
+      patchBlock(blockKey!, { longNoteMeasures: value as WarmUpLongNoteMeasures });
+    } else if (type === 'longNoteRepeats') {
+      patchBlock(blockKey!, { longNoteRepeats: value as WarmUpLongNoteRepeats });
     }
     setPicker(null);
   }
@@ -470,13 +604,15 @@ export default function RoutineEditScreen() {
                           label={`${block.bpm} BPM`}
                           onPress={() => openPicker(block._key, 'bpm', block)}
                         />
-                        <Pill
-                          label={t(
-                            HAND_OPTIONS.find((h) => h.value === block.hand)?.tKey ??
-                              'routineEdit.handBoth',
-                          )}
-                          onPress={() => openPicker(block._key, 'hand', block)}
-                        />
+                        {showHand(block.type) && (
+                          <Pill
+                            label={t(
+                              HAND_OPTIONS.find((h) => h.value === block.hand)?.tKey ??
+                                'routineEdit.handBoth',
+                            )}
+                            onPress={() => openPicker(block._key, 'hand', block)}
+                          />
+                        )}
                         {hasParam(block.type, 'octaves') && (
                           <Pill
                             label={octavesLabel(block.octaves, t)}
@@ -487,6 +623,30 @@ export default function RoutineEditScreen() {
                           <Pill
                             label={peakRepeatsLabel(block.peakRepeats, t)}
                             onPress={() => openPicker(block._key, 'peakRepeats', block)}
+                          />
+                        )}
+                        {hasParam(block.type, 'noteName') && (
+                          <Pill
+                            label={longNoteNameLabel(block)}
+                            onPress={() => openPicker(block._key, 'noteName', block)}
+                          />
+                        )}
+                        {hasParam(block.type, 'noteOctave') && (
+                          <Pill
+                            label={longNoteOctaveLabel(block, t)}
+                            onPress={() => openPicker(block._key, 'noteOctave', block)}
+                          />
+                        )}
+                        {hasParam(block.type, 'longNoteMeasures') && (
+                          <Pill
+                            label={longNoteMeasuresLabel(block.longNoteMeasures, t)}
+                            onPress={() => openPicker(block._key, 'longNoteMeasures', block)}
+                          />
+                        )}
+                        {hasParam(block.type, 'longNoteRepeats') && (
+                          <Pill
+                            label={longNoteRepeatsLabel(block.longNoteRepeats, t)}
+                            onPress={() => openPicker(block._key, 'longNoteRepeats', block)}
                           />
                         )}
                       </View>
@@ -505,45 +665,80 @@ export default function RoutineEditScreen() {
           )}
           ListHeaderComponent={
             <View className="pb-2 pt-4">
-              <View className="mx-6 mb-4 flex-row items-center gap-3">
-                {/* The name field keeps its own stacking context so the centred
-                    placeholder overlays the input alone, not the toggle beside it. */}
-                <View className="flex-1">
-                  <TextInput
-                    value={title}
-                    onChangeText={(v) => {
-                      setTitle(v);
-                      setIsDirty(true);
-                    }}
-                    placeholder=""
-                    className="rounded-lg border border-slate-500/35 bg-slate-50 px-4 py-3 text-xl text-slate-950"
-                    style={{ textAlign: 'center' }}
-                  />
-                  {!title && (
-                    <View
-                      pointerEvents="none"
-                      className="absolute inset-0 items-center justify-center"
-                    >
-                      <Text className="text-xl text-slate-400">
-                        {t('routineEdit.namePlaceholder')}
-                      </Text>
-                    </View>
-                  )}
+              <View className="mx-6 mb-4">
+                <View className="flex-row items-center gap-3">
+                  {/* The name field keeps its own stacking context so the centred
+                      placeholder overlays the input alone, not the toggle beside it. */}
+                  <View className="flex-1">
+                    <TextInput
+                      value={title}
+                      onChangeText={(v) => {
+                        setTitle(v);
+                        setIsDirty(true);
+                      }}
+                      placeholder=""
+                      className="rounded-lg border border-slate-500/35 bg-slate-50 px-4 py-3 text-xl text-slate-950"
+                      style={{ textAlign: 'center' }}
+                    />
+                    {!title && (
+                      <View
+                        pointerEvents="none"
+                        className="absolute inset-0 items-center justify-center"
+                      >
+                        <Text className="text-xl text-slate-400">
+                          {t('routineEdit.namePlaceholder')}
+                        </Text>
+                      </View>
+                    )}
+                  </View>
+                  <Pressable
+                    onPress={toggleMetronome}
+                    hitSlop={8}
+                    className="p-1.5"
+                    accessibilityRole="button"
+                    accessibilityLabel={t('routineEdit.metronome')}
+                    accessibilityState={{ selected: metronome }}
+                  >
+                    <AppIcon
+                      path={metronome ? mdiMetronome : mdiMetronomeTick}
+                      size={26}
+                      color={metronome ? Colors.primary : Colors.icon}
+                    />
+                  </Pressable>
                 </View>
-                <Pressable
-                  onPress={toggleMetronome}
-                  hitSlop={8}
-                  className="p-1.5"
-                  accessibilityRole="button"
-                  accessibilityLabel={t('routineEdit.metronome')}
-                  accessibilityState={{ selected: metronome }}
-                >
-                  <AppIcon
-                    path={metronome ? mdiMetronome : mdiMetronomeTick}
-                    size={26}
-                    color={metronome ? Colors.primary : Colors.icon}
-                  />
-                </Pressable>
+                {/* Editable while the routine is new, read-only once it exists —
+                  changing it later would invalidate blocks the new instrument cannot
+                  play. Blocks the new instrument cannot do are dropped on the switch. */}
+                {isEditing ? (
+                  <Text className="mt-2 text-center text-[13px] text-slate-500">
+                    {t('routineEdit.instrumentFixed', {
+                      instrument: t(INSTRUMENT_REGISTRY[instrument].labelKey),
+                    })}
+                  </Text>
+                ) : (
+                  <View className="mt-2 flex-row justify-center gap-2">
+                    {INSTRUMENT_IDS.map((option) => {
+                      const selected = instrument === option;
+                      return (
+                        <Pressable
+                          key={option}
+                          className={`rounded-lg border px-3 py-1.5 ${
+                            selected
+                              ? 'border-slate-950 bg-slate-950'
+                              : 'border-slate-500/35 bg-slate-50'
+                          }`}
+                          onPress={() => chooseInstrument(option)}
+                        >
+                          <Text
+                            className={`text-[13px] ${selected ? 'text-white' : 'text-slate-950'}`}
+                          >
+                            {t(INSTRUMENT_REGISTRY[option].labelKey)}
+                          </Text>
+                        </Pressable>
+                      );
+                    })}
+                  </View>
+                )}
               </View>
             </View>
           }

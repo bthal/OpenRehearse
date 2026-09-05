@@ -1,8 +1,12 @@
 import * as Tone from 'tone';
-import type { OpenSheetMusicDisplay } from 'opensheetmusicdisplay';
+import type { Instrument, OpenSheetMusicDisplay } from 'opensheetmusicdisplay';
 import { ArpeggioType, ArticulationEnum } from 'opensheetmusicdisplay';
 import type { OutboundMessage } from './types';
+import { LoopingSamplePlayer } from './loopingSampler';
 import { resolveSections } from '../../src/score-web/sectionResolve';
+import { prepareSustainLoop, type SustainLoopFrames } from '../../src/score-web/sustainLoop';
+import { notesSoundingAt } from '../../src/score-web/resumeNotes';
+import type { SustainLoop } from '../../src/domain/instrument';
 import {
   findBitByPixelSpan,
   resolveBits,
@@ -19,6 +23,7 @@ import {
 // Pure count-in and loop-geometry math live in the domain layer (screens/score-web → domain).
 import { computeCountIn, isFreshStart, loopLeadInBeats } from '../../src/domain/countIn';
 import { placeLoopAtCursor } from '../../src/domain/loop';
+import { soundingLengthWholes } from '../../src/domain/ties';
 import { loopFence, metronomeClickSounds } from '../../src/domain/transportTicks';
 import {
   anchorToBarlines,
@@ -47,40 +52,182 @@ const TONE_PPQ = 192;
 // barline is a point already; giving it the cursor's offset renders it 15 px early.
 const OSMD_UNIT_PX = 10;
 
-const PIANO_URLS: Record<string, string> = {
-  A0: 'A0.mp3',
-  C1: 'C1.mp3',
-  'D#1': 'Ds1.mp3',
-  'F#1': 'Fs1.mp3',
-  A1: 'A1.mp3',
-  C2: 'C2.mp3',
-  'D#2': 'Ds2.mp3',
-  'F#2': 'Fs2.mp3',
-  A2: 'A2.mp3',
-  C3: 'C3.mp3',
-  'D#3': 'Ds3.mp3',
-  'F#3': 'Fs3.mp3',
-  A3: 'A3.mp3',
-  C4: 'C4.mp3',
-  'D#4': 'Ds4.mp3',
-  'F#4': 'Fs4.mp3',
-  A4: 'A4.mp3',
-  C5: 'C5.mp3',
-  'D#5': 'Ds5.mp3',
-  'F#5': 'Fs5.mp3',
-  A5: 'A5.mp3',
-  C6: 'C6.mp3',
-  'D#6': 'Ds6.mp3',
-  'F#6': 'Fs6.mp3',
-  A6: 'A6.mp3',
-  C7: 'C7.mp3',
-  'D#7': 'Ds7.mp3',
-  'F#7': 'Fs7.mp3',
-  A7: 'A7.mp3',
-  C8: 'C8.mp3',
-};
+/**
+ * Sample URIs for the instrument being practised, note name → URI, pushed in from
+ * native before the score loads (`setSampleUrls`).
+ *
+ * These used to be a hardcoded CDN base URL plus filenames. They are now bundled
+ * assets resolved through expo-asset, because a WebView HTTP cache was the only thing
+ * standing between the app and silence in airplane mode — see
+ * `specs/features/offline-storage.md` and `compound-docs/tone-playback.md`.
+ *
+ * Empty until native sends them; `initPlayback` creating a Sampler with no urls
+ * would simply never load, so the load path checks.
+ */
+let sampleUrls: Record<string, string> = {};
 
-const SALAMANDER_BASE_URL = 'https://tonejs.github.io/audio/salamander/';
+/**
+ * Semitones added to every written pitch before it is sounded — the practised
+ * instrument's own interval (0 for piano, -2 for a Bb clarinet). Set alongside the
+ * samples, because the two always change together: a sample set is recorded at
+ * sounding pitch, so the offset is what maps a read note onto it.
+ */
+let soundingOffsetSemitones = 0;
+
+/**
+ * Where this sample set may be looped, or null when its samples are one-shots.
+ *
+ * Declared per instrument in `INSTRUMENT_REGISTRY` and sent alongside the samples,
+ * because it describes the recordings rather than the player: the clarinet's flat,
+ * decay-less tone is loopable anywhere in its steady state, and the piano's is not.
+ * Its presence is also what chooses the player — see `loopingPlayer`.
+ */
+let sustainLoopSpec: SustainLoop | null = null;
+
+/**
+ * The part being practised, when the score has more than one.
+ *
+ * OSMD's `NotesUnderCursor(instrument)` filters by `Voice.Parent.IdString`, so this is
+ * an explicit filter rather than a side effect of hiding — hiding is what the *render*
+ * needs, and the two are set together in the load path. Null means the whole score,
+ * which is every single-part piece and everything imported before part selection.
+ *
+ * Note for a future accompaniment mode: `Instrument.Visible = false` cascades to every
+ * Voice, and OSMD's visible-entry collection gates on `Voice.Visible`, so hiding a part
+ * silences it. Sounding a hidden part needs the independent `Audible` flag instead.
+ */
+let practisedInstrument: Instrument | null = null;
+
+export function setPractisedInstrument(instrument: Instrument | null): void {
+  practisedInstrument = instrument;
+}
+
+/**
+ * Decoded sample buffers for the current instrument, note name → AudioBuffer.
+ *
+ * Decoded here rather than handed to `Tone.Sampler` as URLs, because Tone loads
+ * buffers with `fetch()` (`ToneAudioBuffer.load`) and **Chromium's Fetch API does not
+ * support the `file:` scheme**. Bundled samples resolve to `file://` URIs, so every
+ * load failed with `TypeError: Failed to fetch` while the Sampler itself reported no
+ * error — and `startPlayback`'s 8-second `Tone.loaded()` race then let playback run on
+ * in silence. XHR carries no such scheme restriction and reads the very same URI.
+ *
+ * This is not a file-permission problem and `allowFileAccess` does not fix it: XHR and
+ * fetch differ on which schemes they will touch, and only fetch refuses `file:`.
+ *
+ * `Sampler` accepts `AudioBuffer` values alongside URL strings, so nothing else about
+ * it changes.
+ */
+let sampleBuffers: Record<string, AudioBuffer> = {};
+
+/** Resolves once the current instrument's samples have decoded (or failed to). */
+let sampleLoadPromise: Promise<void> = Promise.resolve();
+
+/** XHR rather than fetch — see `sampleBuffers`. */
+function readArrayBuffer(url: string): Promise<ArrayBuffer> {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open('GET', url, true);
+    xhr.responseType = 'arraybuffer';
+    xhr.onload = () => {
+      const body = xhr.response as ArrayBuffer | null;
+      // A successful file:// read reports status 0, not 200, so gate on there being a
+      // body rather than on an HTTP status this scheme never sets.
+      if (body && body.byteLength > 0) resolve(body);
+      else reject(new Error(`empty response (status ${xhr.status})`));
+    };
+    xhr.onerror = () => reject(new Error(`XHR failed (status ${xhr.status})`));
+    xhr.send();
+  });
+}
+
+/**
+ * Frame bounds for each decoded buffer's sustain loop, note name → bounds.
+ *
+ * Resolved per buffer rather than once for the set: the bounds are declared in seconds
+ * and a decoder is free to disagree by a few frames about where an mp3 ends, so the
+ * clamping in `resolveSustainLoop` has to see the buffer it will actually be applied
+ * to. Empty for a one-shot set.
+ */
+let sampleLoopBounds: Record<string, SustainLoopFrames> = {};
+
+/**
+ * Blends the buffer's loop seam in place, and reports where the loop is.
+ *
+ * The blend happens here, once per buffer at load, precisely so that nothing has to
+ * happen per note at runtime: after it, Web Audio's own `loop`/`loopStart`/`loopEnd`
+ * wrap seamlessly on their own. `getChannelData` hands back the buffer's live storage,
+ * so writing through it edits the decoded audio directly.
+ */
+function applySustainLoop(buffer: AudioBuffer, spec: SustainLoop): SustainLoopFrames | null {
+  const channels: Float32Array[] = [];
+  for (let c = 0; c < buffer.numberOfChannels; c++) channels.push(buffer.getChannelData(c));
+  return prepareSustainLoop(channels, spec, buffer.length, buffer.sampleRate);
+}
+
+async function decodeSamples(
+  urls: Record<string, string>,
+  loopSpec: SustainLoop | null,
+): Promise<{ buffers: Record<string, AudioBuffer>; bounds: Record<string, SustainLoopFrames> }> {
+  const ctx = Tone.getContext().rawContext as unknown as BaseAudioContext;
+  const entries = await Promise.all(
+    Object.entries(urls).map(async ([note, url]) => {
+      try {
+        const bytes = await readArrayBuffer(url);
+        const buffer = await ctx.decodeAudioData(bytes);
+        const bounds = loopSpec ? applySustainLoop(buffer, loopSpec) : null;
+        return [note, buffer, bounds] as const;
+      } catch {
+        // One unreadable sample costs its own pitch region, not the whole instrument —
+        // both players interpolate from whichever neighbours did load.
+        return null;
+      }
+    }),
+  );
+  const buffers: Record<string, AudioBuffer> = {};
+  const bounds: Record<string, SustainLoopFrames> = {};
+  for (const entry of entries) {
+    if (!entry) continue;
+    buffers[entry[0]] = entry[1];
+    if (entry[2]) bounds[entry[0]] = entry[2];
+  }
+  return { buffers, bounds };
+}
+
+/**
+ * Native → web: the practised instrument's samples, sounding offset and loop bounds.
+ *
+ * The loop spec arrives with the samples because the two always change together — it
+ * describes those particular recordings — and because it decides which player the
+ * score load will build.
+ */
+export function setInstrumentAudio(
+  urls: Record<string, string>,
+  offsetSemitones: number,
+  loopSpec: SustainLoop | null,
+): void {
+  sampleUrls = urls;
+  soundingOffsetSemitones = offsetSemitones;
+  sustainLoopSpec = loopSpec;
+  sampleBuffers = {};
+  sampleLoopBounds = {};
+  sampleLoadPromise = decodeSamples(urls, loopSpec).then(({ buffers, bounds }) => {
+    sampleBuffers = buffers;
+    sampleLoopBounds = bounds;
+    // The player is built during the score load, which can win the race against
+    // decoding. Adding late arrivals is what makes that ordering non-critical.
+    for (const [note, buffer] of Object.entries(buffers)) {
+      // Both players, not one: on a one-shot set the Sampler sounds the note and the
+      // resume player has to know the same buffer to rejoin it.
+      resumePlayer?.add(note, buffer, bounds[note] ?? null);
+      if (!loopingPlayer && sampler) sampler.add(note as Parameters<typeof sampler.add>[0], buffer);
+    }
+    if (Object.keys(buffers).length === 0) {
+      postToNative({ type: 'ERROR', payload: 'No instrument samples could be loaded' });
+    }
+  });
+}
+
 
 const HANDLE_WIDTH = 28;
 const EDGE_ZONE = 60;
@@ -143,6 +290,8 @@ const SECTION_FADE_MAX_PX = 130;
 
 interface NoteEvent {
   time: string;
+  /** The same onset as `time`, as a number — `notesSoundingAt` needs to compare it. */
+  ticks: number;
   midi: number;
   durQ: number;
 }
@@ -196,8 +345,64 @@ let activeHand: ActiveHand = 'both';
 const HAND_GREY = '#B0B0B0';
 const NOTE_BLACK = '#000000';
 
+/**
+ * The two note players, exactly one of which is non-null while a score is loaded.
+ *
+ * `Tone.Sampler` stays the path for one-shot sets — it is doing a good job of the
+ * piano and there is nothing to gain by rewriting its attack, release and voice
+ * handling. `LoopingSamplePlayer` exists only because the Sampler has no loop option
+ * at all, so a sustained instrument's note cannot outlast its buffer under it. Which
+ * one is built is decided by whether the instrument declares a `sustainLoop`.
+ */
 let sampler: Tone.Sampler | null = null;
+let loopingPlayer: LoopingSamplePlayer | null = null;
+/**
+ * The player the resume path uses, which is the looping one for both instrument kinds.
+ *
+ * When the set is sustained this *is* `loopingPlayer`. When it is one-shot the Sampler
+ * still sounds every ordinary note and this exists only to rejoin a note already under
+ * way, because `Tone.Sampler` starts every buffer at offset zero and so cannot. It
+ * costs nothing to keep: the buffers are shared references, not copies.
+ */
+let resumePlayer: LoopingSamplePlayer | null = null;
 let part: Tone.Part<NoteEvent> | null = null;
+/**
+ * The events currently on the Part, for the resume path to search.
+ *
+ * Captured in `makeNotePart` rather than at either call site so the hand-filter
+ * rebuild cannot leave this describing the previous filter.
+ */
+let activeNoteEvents: NoteEvent[] = [];
+
+/** Whether a player exists to sound anything at all. */
+function hasNotePlayer(): boolean {
+  return sampler !== null || loopingPlayer !== null;
+}
+
+/**
+ * The one place a note is turned into sound.
+ *
+ * There are two `Tone.Part` construction sites — the score load and the hand-filter
+ * rebuild — and they had a copy each of this callback. Anything about how a note
+ * sounds (the sounding-pitch offset, the duration, which player) therefore had to be
+ * changed twice or silently diverge on one hand filter.
+ */
+function makeNotePart(noteEvents: NoteEvent[]): Tone.Part<NoteEvent> {
+  activeNoteEvents = noteEvents;
+  return new Tone.Part<NoteEvent>((time, event) => {
+    try {
+      // Sounding pitch, not written: a Bb clarinet sounds a major 2nd below what
+      // it reads, and the app has to be playable *along with*. See
+      // specs/features/instruments.md § Transposition.
+      const noteName = Tone.Frequency(event.midi + soundingOffsetSemitones, 'midi').toNote();
+      const durSec = Math.max(0.05, (event.durQ * 60) / Tone.Transport.bpm.value);
+      if (loopingPlayer) loopingPlayer.triggerAttackRelease(noteName, durSec, time);
+      else sampler?.triggerAttackRelease(noteName, durSec, time);
+    } catch {
+      // ignore individual-note scheduling failures
+    }
+  }, noteEvents);
+}
 let metronomeEventId: number | null = null;
 let metronomeEnabled = false;
 let downbeatTicks: Set<number> = new Set();
@@ -538,7 +743,11 @@ function buildTimelines(osmd: OpenSheetMusicDisplay): {
     let fermataExtraTicks = 0;
 
     try {
-      const notes = osmd.cursor.NotesUnderCursor();
+      // Scoped to the practised part when there is one: a multi-part score would
+      // otherwise sound every line through the one sampler.
+      const notes = practisedInstrument
+        ? osmd.cursor.NotesUnderCursor(practisedInstrument)
+        : osmd.cursor.NotesUnderCursor();
       const baseTicks = Math.round(expandedQuarters * TONE_PPQ);
 
       // Separate notes into plain vs. arpeggio groups (keyed by the shared Arpeggio object).
@@ -573,10 +782,16 @@ function buildTimelines(osmd: OpenSheetMusicDisplay): {
             a.articulationEnum === ArticulationEnum.fermata ||
             a.articulationEnum === ArticulationEnum.invertedfermata,
         );
-        const normalDurQ = note.Length.RealValue * WHOLE_TO_QUARTER;
+        // The whole tied chain, not this note alone — see domain/ties.
+        const normalDurQ = soundingLengthWholes(note) * WHOLE_TO_QUARTER;
         const durQ = normalDurQ * (hasFermata ? FERMATA_DURATION_MULTIPLIER : 1);
         if (durQ <= 0) continue;
-        noteEvents.push({ time: `${baseTicks}i`, midi: note.halfTone + 12, durQ });
+        noteEvents.push({
+          time: `${baseTicks}i`,
+          ticks: baseTicks,
+          midi: note.halfTone + 12,
+          durQ,
+        });
         if (hasFermata) {
           const extra = Math.round(normalDurQ * (FERMATA_DURATION_MULTIPLIER - 1) * TONE_PPQ);
           if (extra > fermataExtraTicks) {
@@ -600,11 +815,13 @@ function buildTimelines(osmd: OpenSheetMusicDisplay): {
               a.articulationEnum === ArticulationEnum.fermata ||
               a.articulationEnum === ArticulationEnum.invertedfermata,
           );
-          const normalDurQ = note.Length.RealValue * WHOLE_TO_QUARTER;
+          // The whole tied chain, not this note alone — see domain/ties.
+          const normalDurQ = soundingLengthWholes(note) * WHOLE_TO_QUARTER;
           const durQ = normalDurQ * (hasFermata ? FERMATA_DURATION_MULTIPLIER : 1);
           if (durQ <= 0) return;
           noteEvents.push({
             time: `${baseTicks + i * ARPEGGIO_STEP_TICKS}i`,
+            ticks: baseTicks + i * ARPEGGIO_STEP_TICKS,
             midi: note.halfTone,
             durQ,
           });
@@ -1213,6 +1430,12 @@ function animateCursorLoop(): void {
 // ─── Internal stop ────────────────────────────────────────────────────────────
 
 function _stopInternal(): void {
+  // A looping voice does not end by itself. Its stop is scheduled for the end of the
+  // note, which on a long tone is seconds away, so without this the clarinet goes on
+  // sounding after the transport has stopped. This covers the piano as well now: its
+  // ordinary notes are the Sampler's and end by themselves, but a note resumed
+  // mid-way was sounded through this player and needs the same release.
+  resumePlayer?.releaseAll();
   // Abort any pending count-in so its clicks and scheduled start don't outlive
   // the stop, and disown a start still waiting on the sample load so it cannot
   // resume into a score that has been stopped out from under it.
@@ -2610,29 +2833,31 @@ export function initPlayback(
   }
   postToNative({ type: 'SCORE_BPM', payload: initialBpm });
 
-  sampler = new Tone.Sampler({
-    urls: PIANO_URLS,
-    release: 1,
-    baseUrl: SALAMANDER_BASE_URL,
-  }).toDestination();
+  resumePlayer = new LoopingSamplePlayer();
+  for (const [note, buffer] of Object.entries(sampleBuffers)) {
+    resumePlayer.add(note, buffer, sampleLoopBounds[note] ?? null);
+  }
+  if (sustainLoopSpec) {
+    // One object serves both roles for a sustained set; the resume path needs exactly
+    // the looping behaviour the ordinary path already uses.
+    loopingPlayer = resumePlayer;
+  } else {
+    sampler = new Tone.Sampler({
+      urls: sampleBuffers,
+      release: 1,
+    }).toDestination();
+  }
 
   // Immediately before the Part, and at the BPM it is about to be filed at: this table
   // is only meaningful paired with the Part it was captured for. See gridTransportTicks.
   captureTransportTicks();
-  const samplerRef = sampler;
-  part = new Tone.Part<NoteEvent>(
-    (time, event) => {
-      try {
-        const noteName = Tone.Frequency(event.midi, 'midi').toNote();
-        const durSec = Math.max(0.05, (event.durQ * 60) / Tone.Transport.bpm.value);
-        samplerRef.triggerAttackRelease(noteName, durSec, time);
-      } catch {
-        // ignore individual-note scheduling failures
-      }
-    },
-    noteEvents,
-  );
+  part = makeNotePart(noteEvents);
   part.start(0);
+
+  // Off first: initPlayback runs again on every score load, and Tone would otherwise
+  // keep the previous score's handler as well and sound each held note twice.
+  Tone.Transport.off('loop', handleTransportLoop);
+  Tone.Transport.on('loop', handleTransportLoop);
 
   initTouchHandlers();
   initLoopHandles();
@@ -2640,8 +2865,75 @@ export function initPlayback(
   applyHandColors(osmd);
 }
 
+/**
+ * Sounds the notes that are already under way at the transport's position.
+ *
+ * A `Tone.Part` starts only the events at or after where the transport begins, so a
+ * note whose onset is behind the playhead is never triggered and the rest of it comes
+ * out silent. Every parkable position is normally a note onset, which is why that went
+ * unnoticed; a tied chain is the exception, because the cursor visits each continuation
+ * while the chain contributes one event at its start. A two-measure long tone therefore
+ * had a barline in the middle of it that played nothing.
+ *
+ * Called with the audio time the transport will start at, not `now`: a count-in defers
+ * that by seconds, and a resumed note has to arrive with the rest of the music.
+ */
+function soundNotesInProgress(startAtTime: number, atTicks: number): void {
+  if (!resumePlayer) return;
+  const bpm = Tone.Transport.bpm.value;
+  if (!(bpm > 0)) return;
+  // Inside a loop the note must stop at B. Left to run its own length it would still
+  // be sounding when the wrap sounds the same pitch again, and every pass would stack
+  // another voice on the one before it.
+  const until = Tone.Transport.loop && loopRegion ? loopRegion.bTransportTicks : undefined;
+  // Both sides in the transport's tick space, asked of Tone rather than recomputed —
+  // the same rule captureTransportTicks follows for the grid. `atTicks` came off the
+  // transport, and a musical event tick is filed up to a whole tick below it, so
+  // comparing the two spaces would call a note that has just ended still sounding.
+  const filed = activeNoteEvents.map((event) => ({
+    ticks: Math.floor(Tone.Transport.toTicks(`${event.ticks}i`)),
+    midi: event.midi,
+    durQ: event.durQ,
+  }));
+  for (const note of notesSoundingAt(filed, atTicks, TONE_PPQ, {
+    untilTicks: until,
+    endToleranceTicks: SEAM_EPSILON_TICKS,
+  })) {
+    try {
+      const noteName = Tone.Frequency(note.midi + soundingOffsetSemitones, 'midi').toNote();
+      // One tempo for both: a tempo change can only land on a routine block boundary,
+      // which is never inside a note.
+      const durSec = Math.max(0.05, (note.remainingQ * 60) / bpm);
+      const elapsedSec = (note.elapsedQ * 60) / bpm;
+      resumePlayer.triggerAttackRelease(noteName, durSec, startAtTime, elapsedSec);
+    } catch {
+      // ignore individual-note scheduling failures, as the Part callback does
+    }
+  }
+}
+
+/**
+ * Re-sounds a held note each time the transport loops back into the middle of it.
+ *
+ * `Transport._processTick` rewinds ticks to `loopStart` and then invokes only the
+ * timeline events *at* that tick, so a note whose onset is behind A is dropped on
+ * every wrap exactly as it is on a manual start. The first pass is fine because it
+ * goes through `startPlayback`; without this, every pass after it is silent.
+ *
+ * The `loop` event carries the audio time of the wrap, which is what the resumed note
+ * has to be scheduled at. Transport.ticks is not read here: the rewind is applied at
+ * that future time, so reading it now can still return the pre-wrap value.
+ *
+ * A's *transport* tick, because that is where the clock is put and which events the
+ * timeline then fires — see gridTransportTicks.
+ */
+function handleTransportLoop(time: number): void {
+  if (!loopRegion) return;
+  soundNotesInProgress(time, loopRegion.aTransportTicks);
+}
+
 export async function startPlayback(): Promise<void> {
-  if (!sampler || !part) return;
+  if (!hasNotePlayer() || !part) return;
   // From here until the transport is scheduled, `isPlaybackActive()` has to answer
   // true on this flag alone — see its docblock. The token is this attempt's claim on
   // the transport: any cancel bumps the module counter, and the check after the await
@@ -2726,7 +3018,13 @@ export async function startPlayback(): Promise<void> {
 
   try {
     await Tone.start();
-    await Promise.race([Tone.loaded(), new Promise<void>((r) => setTimeout(r, 8000))]);
+    // Our own decode, not Tone.loaded() alone — the buffers never go through Tone's
+    // loader. The timeout stays: a slow decode should delay the first note rather than
+    // wedge playback entirely.
+    await Promise.race([
+      Promise.all([sampleLoadPromise, Tone.loaded()]),
+      new Promise<void>((r) => setTimeout(r, 8000)),
+    ]);
   } catch {
     // non-fatal
   }
@@ -2744,9 +3042,15 @@ export async function startPlayback(): Promise<void> {
     const startAt = ctx.currentTime + 0.12; // small lead so the first click isn't clipped
     countInNodes = countIn.clicks.map((c) => playClick(ctx, startAt + c.offsetSec, c.accented));
     countingIn = true;
-    Tone.Transport.start(startAt + countIn.delaySec);
+    const transportStart = startAt + countIn.delaySec;
+    soundNotesInProgress(transportStart, Tone.Transport.ticks);
+    Tone.Transport.start(transportStart);
   } else {
-    Tone.Transport.start();
+    // An explicit time rather than the implicit "now", so the resumed notes and the
+    // transport agree on when the music restarts.
+    const transportStart = Tone.now();
+    soundNotesInProgress(transportStart, Tone.Transport.ticks);
+    Tone.Transport.start(transportStart);
   }
   animFrameId = requestAnimationFrame(animateCursorLoop);
 }
@@ -2824,6 +3128,9 @@ export function pausePlayback(): void {
     postPlaybackState('paused');
     return;
   }
+  // Same reason as in `_stopInternal`: a looping note would keep sounding through the
+  // pause until its own scheduled release, which can be several seconds.
+  resumePlayer?.releaseAll();
   Tone.Transport.pause();
   if (animFrameId !== null) {
     cancelAnimationFrame(animFrameId);
@@ -2863,6 +3170,12 @@ export function disposePlayback(): void {
   gridTransportTicks = [];
   sampler?.dispose();
   sampler = null;
+  // `loopingPlayer` is the same object as `resumePlayer` on a sustained set, so it is
+  // dropped rather than disposed a second time.
+  loopingPlayer = null;
+  Tone.Transport.off('loop', handleTransportLoop);
+  resumePlayer?.dispose();
+  resumePlayer = null;
   if (metronomeEventId !== null) {
     Tone.Transport.clear(metronomeEventId);
     metronomeEventId = null;
@@ -2934,7 +3247,7 @@ export function disposePlayback(): void {
 
 export function setActiveHand(hand: ActiveHand): void {
   activeHand = hand;
-  if (!osmdRef || !sampler) return;
+  if (!osmdRef || !hasNotePlayer()) return;
 
   // Land any coast or settle before capturing the scroll offset below, or the
   // position restored at the end of this function is one the score was still moving
@@ -2972,21 +3285,9 @@ export function setActiveHand(hand: ActiveHand): void {
   // like the loop above.
   reresolveBits();
 
-  // Replace Part only — keep sampler and tempo schedule intact.
+  // Replace Part only — keep the note player and tempo schedule intact.
   part?.dispose();
-  const samplerRef = sampler;
-  part = new Tone.Part<NoteEvent>(
-    (time, event) => {
-      try {
-        const noteName = Tone.Frequency(event.midi, 'midi').toNote();
-        const durSec = Math.max(0.05, (event.durQ * 60) / Tone.Transport.bpm.value);
-        samplerRef.triggerAttackRelease(noteName, durSec, time);
-      } catch {
-        // ignore individual-note scheduling failures
-      }
-    },
-    noteEvents,
-  );
+  part = makeNotePart(noteEvents);
   part.start(0);
 
   applyHandColors(osmdRef);

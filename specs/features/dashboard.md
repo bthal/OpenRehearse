@@ -9,6 +9,22 @@ Home surface listing the user's **pieces** and entry points to **import** and **
 - **Brand header**: "OpenRehearse" in italic serif at the top of the screen.
 - **Settings**: a **cog icon** (MDI) just below the brand title, on the right, opens the Settings
   modal (see `settings.md`).
+- **Instrument scope**: a control in that same row, beside the info and cog icons, opening a modal
+  with **All / Piano / Clarinet in B♭**. Unlike its icon-only neighbours it shows an **icon plus
+  the current scope's label** — a filter that persists across launches has to advertise its state,
+  or a filtered library is indistinguishable from an empty one.
+  - It filters the **warm-ups, routines and pieces this screen lists, and nothing else**: no effect
+    on the PlayView, on the practice heatmap, or on what a new import may become. A pure view
+    filter with no side effects, which is what makes it safe to leave on.
+  - **Persisted across launches**, in `settings.json` beside the other app settings. A fresh
+    install defaults to **All**.
+  - Changing it **clears any active row selection**, so a bulk Remove can never act on rows that
+    have just left the screen.
+  - Every piece, routine and warm-up row carries a small **text chip** naming its instrument —
+    text rather than an icon, and shown under a filtered scope too, so a row says what it is
+    without the reader having to remember what is selected.
+  - A section whose filtered list is empty **keeps its heading** and shows one quiet line ("No
+    clarinet pieces yet") rather than collapsing.
 - **Warm-ups** section: Hanon I and Scales quick-launch rows.
 - **Pieces** section:
   - **Privacy note** always visible above the list: "Your files stay on this device — nothing is uploaded."
@@ -46,7 +62,7 @@ Home surface listing the user's **pieces** and entry points to **import** and **
 
 ## Edit / Delete
 
-- **Edit**: enter selection mode with one piece → tap Edit → modal to change **title**, **composer**, and **target speed** (BPM). The modal shows the tempo read from the file on import for reference. Title, composer, and target speed are all **required** — missing fields are marked and Save stays disabled until each is valid.
+- **Edit**: enter selection mode with one piece → tap Edit → modal to change **title**, **composer**, and **target speed** (BPM). The **instrument** and, for a multi-part score, the **part** appear as a read-only line: both are settled at import and never change afterwards (see `instruments.md`). The modal shows the tempo read from the file on import for reference. Title, composer, and target speed are all **required** — missing fields are marked and Save stays disabled until each is valid.
 - **Input needed** (import): when an imported file lacks a required field, the same modal opens automatically in a non-dismissable "Input needed" state (no close button; **Import** button gated on completeness). A **Cancel** button discards the in-progress piece and returns to the dashboard.
 - **Sections**: the edit modal carries a **Sections** block listing one row per section as a table — swatch, name, and the measures it covers — above a **Reset to detected** button. The score is read when the modal opens, to map printed measure numbers. A row rests in display mode and opens into an editor on tap; the editor carries the name, the "from"/"to" measures, an always-visible hue picker, and Split / Delete / Cancel / Done. Sections tile the piece, so a row's "to" field and the next row's "from" field are the same junction — editing either moves both, and **Cancel restores the whole list**, since one junction move changes two sections. **Done** only closes the row editor; the modal's Save is the only thing that persists. Splitting takes the section's last measure as a new section and drops the caret into its cleared "from" field. Deleting asks which neighbour absorbs the measures, except at the ends of the piece where only one answer exists. Measure fields commit on blur, and Save stays disabled while any of them holds text that does not resolve. See `specs/features/section-detection.md`.
 - **Delete**: enter selection mode → tap Remove → native confirm dialog → piece(s) removed from library.
@@ -85,6 +101,12 @@ Home surface listing the user's **pieces** and entry points to **import** and **
 - [x] The edit modal has a Sections block that edits section names, colors and bounds.
 - [ ] Section edits made in the modal survive an app restart.
 - [x] Privacy note and brand header visible at all times on the dashboard.
+- [ ] The instrument scope filters warm-ups, routines and pieces; its trigger names the current
+      scope; it survives a restart and defaults to All on a fresh install.
+- [ ] Changing the scope clears any piece or routine selection.
+- [ ] An empty filtered section keeps its heading and explains itself instead of disappearing.
+- [ ] Every piece, routine and warm-up row shows its instrument badge, under All and under a
+      named scope alike.
 - [x] Practice heatmap sits at the very bottom of the Stats section, populated from tracked
       practice time and coloured from the app palette.
 - [x] Current and longest streaks head the Stats section, each shown with its unit ("3 days"); an

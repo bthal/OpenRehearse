@@ -99,35 +99,69 @@ samplerRef.triggerAttackRelease(noteName, durSec, time);
 
 Piano range after the offset: A0 = 21, C8 = 108 (standard MIDI).
 
-## Tone.Sampler with Salamander piano samples (CDN, WebView cache)
+## Tone.Sampler with bundled samples (expo-asset, not a CDN)
 
-**PATTERN:** `Tone.Sampler` pitch-shifts between recorded samples to cover the full piano range.
-The Salamander Grand Piano sample set hosted by the Tone.js team CDN provides 30 samples (A0–C8)
-at adequate quality. On first play, the WebView fetches and caches them; subsequent offline plays
-use the HTTP cache.
-
-Sharp notes use filename conventions: `D#1 → Ds1.mp3`, `F#1 → Fs1.mp3` (no `#`, use `s`).
+**PATTERN:** `Tone.Sampler` pitch-shifts between recorded samples to cover a full range, so a set
+spaced about a minor third apart is enough. Both sets ship **inside the APK** under
+`client/assets/samples/`, are resolved to `file://` URIs by `expo-asset`, and are pushed into the
+WebView by `injectInstrumentAudio` *before* `__rn_load_xml` — the Sampler is constructed during the
+load, so samples cannot arrive after it. `injectJavaScript` delivers in order, which is what makes
+the two back-to-back calls safe.
 
 ```typescript
-const PIANO_URLS: Record<string, string> = {
-  A0: 'A0.mp3', C1: 'C1.mp3', 'D#1': 'Ds1.mp3', 'F#1': 'Fs1.mp3',
-  // ... through A7, C8
-};
-const sampler = new Tone.Sampler({
-  urls: PIANO_URLS,
-  release: 1,
-  baseUrl: 'https://tonejs.github.io/audio/salamander/',
-}).toDestination();
-await Tone.loaded(); // wait before starting transport or audio is silent
+// native: src/score-web/instrumentAudio.ts
+await injectInstrumentAudio((js) => webViewRef.current?.injectJavaScript(js), instrument);
+webViewRef.current?.injectJavaScript(`window.__rn_load_xml(${JSON.stringify(xml)});void 0;`);
+
+// web: playback.ts — bytes read by XHR, decoded by hand, handed over as AudioBuffers
+const bytes = await readArrayBuffer(url); // XMLHttpRequest, NOT fetch
+sampleBuffers[note] = await ctx.decodeAudioData(bytes);
+sampler = new Tone.Sampler({ urls: sampleBuffers, release: 1 }).toDestination();
 ```
 
-**LANDMINE:** On Android, the WebView `baseUrl` is usually `'file:///android_asset/'` (needed for
-large inline HTML). A `file://` origin cannot make HTTPS cross-origin requests under Android's
-same-origin policy. This blocks the Sampler from fetching audio samples.
+**HISTORY — why this changed.** Samples used to be fetched from `https://tonejs.github.io/audio/
+salamander/` and kept only in the WebView's HTTP cache. That made "offline after import"
+(`specs/features/offline-storage.md`) true by accident: a cache eviction, or a first play in
+airplane mode, meant silence. Bundling costs ~2.4 MB of APK on a sideloaded release with no update
+channel, and buys an offline story that is actually true.
 
-**Fix:** Set `allowUniversalAccessFromFileURLs={true}` on the `<WebView>` prop. This allows the
-`file://` WebView origin to load HTTPS audio resources. Keep it scoped to internal WebView content;
-never use it if the WebView can load untrusted third-party URLs.
+**LANDMINE — the expensive one: `fetch()` cannot read `file:` URLs, and Tone.js loads with
+`fetch()`.** `ToneAudioBuffer.load` calls `fetch(url)`, and Chromium's Fetch API refuses the `file:`
+scheme outright, with a bare `TypeError: Failed to fetch`. Bundled samples resolve to `file://`
+URIs, so **every** sample failed to load while `Tone.Sampler` reported no error of its own. Verified
+on device: XHR against the exact same URI succeeds where `fetch` fails, so this is a Fetch scheme
+restriction and **not** a file-permission problem — no WebView flag fixes it.
+
+The fix is to bypass Tone's loader: read the bytes with `XMLHttpRequest`, decode them with
+`decodeAudioData`, and hand `Tone.Sampler` the resulting `AudioBuffer`s. Its `urls` map accepts
+`ToneAudioBuffer | AudioBuffer | string` per note, so nothing else changes.
+
+Two things made this hard to see, and both are worth remembering:
+- `startPlayback` races `Tone.loaded()` against an 8-second timeout, so a total load failure
+  degrades to *silent playback* rather than an error. The transport still runs and the cursor still
+  advances.
+- The metronome is an oscillator and needs no buffers, so it keeps working. "Metronome yes, notes
+  no" is the signature of a sample-loading failure, not a playback failure.
+
+A successful `file://` XHR reports **`status 0`**, not 200 — gate on the response having a body.
+
+**LANDMINE:** `allowFileAccess` defaults to **`false`** in react-native-webview and is still
+required on every WebView that plays audio, alongside `allowUniversalAccessFromFileURLs`: the
+WebView's `baseUrl` is `file:///android_asset/`, and a `file://` origin needs universal access to
+read a `file://` URI from another directory. These are necessary for the XHR to succeed — they were
+simply never sufficient, because of the Fetch restriction above.
+
+**LANDMINE:** filename spelling is a per-set convention, not a global one. Salamander writes sharps
+with `s` (`D#1` → `Ds1.mp3`); the FluidR3 clarinet uses flats (`Eb3.mp3`). The Sampler key must be
+the note name Tone.js understands, so the mapping is written out explicitly in
+`src/data/instrumentSamples.ts` — and Metro requires those `require()` paths to be literals anyway,
+so the table cannot be generated. `missingSampleNotes` is tested against the registry so a note
+declared but not bundled fails CI rather than going silent at runtime.
+
+**Sounding vs written pitch.** The Part callback adds the instrument's `transposeSemitones` before
+naming the note, so a Bb clarinet sounds a major 2nd below what is engraved. This is deliberate: the
+app is something you play *along with*, and sounding written pitch would put it a whole tone above
+the person reading the same notes. See `specs/features/instruments.md`.
 
 ## BPM from score: `cursor.Iterator.CurrentBpm`
 
@@ -283,6 +317,125 @@ if (note.NoteTie && note.NoteTie.StartNote !== note) continue;
 `Tie.StartNote` is a public getter on OSMD's `Tie` class. `note.NoteTie` is falsy (null/undefined)
 for non-tied notes despite being typed as `Tie` (not `Tie | undefined`), so the `&&` guard is
 required.
+
+**Second half of the same rule — the half that was missing until `feat/instruments`:** skipping the
+continuations is only correct if the start note is then held for the *whole chain*. `Note.Length`
+is that note's OWN length, never the group's; the combined value lives on the tie as
+`Tie.Duration`. Both are `Fraction`s in whole notes.
+
+Verified against OSMD 1.9.9 by loading a score headlessly and reading both fields: two tied whole
+notes give `Note.Length.RealValue` 1 and `Tie.Duration.RealValue` 2. `Tie.Duration` sums unequal
+chains correctly (quarter + eighth = 0.375) and spans barlines.
+
+Sounding `Note.Length` therefore cut every tied note to a *fraction* of its notated value — a half
+for a two-note tie, a third for three, a quarter for four. It went unnoticed because a piano sample
+has decayed to inaudibility long before the shortfall matters. The rule now lives in
+`client/src/domain/ties.ts` (`soundingLengthWholes`) with unit tests, because `score-web/` is
+outside tsc and Jest.
+
+**Third part, from the Long Note exercise — writing a tie is not symmetric with reading one.**
+Until that exercise nothing in the app *emitted* a tie; the rules above are all about parsing
+imported MusicXML. Two things bite when generating one.
+
+`<tie>` and `<tied>` are different elements and both are required. `<tie>` (a direct child of
+`<note>`) is the sound; `<tied>` (inside `<notations>`) is the printed slur. **OSMD builds
+`Note.NoteTie` from `<tied>` only** — its reader walks `notations.elements("tied")` and never looks
+at `<tie>`. A chain written with `<tie>` alone therefore leaves `NoteTie` null on every note, the
+skip rule above never fires, and the pitch re-attacks at every barline while looking perfectly tied
+on screen. Emitting `<tied>` alone happens to work in this app but is wrong for anything else
+reading the file. Write both.
+
+Element order inside `<note>` is fixed by the schema: pitch, duration, tie, type, notations. That is
+why `tiedWholeNote` in `warmupMusicXml.ts` is a separate builder rather than an append to
+`wholeNote()` — appending would put `<tie>` after `<type>`. On a middle note the stop precedes the
+start, in both elements.
+
+Together with the sustain loop below, this is what makes a long tone work: a two-bar tie at 60 BPM
+is eight seconds, and the raw clarinet sample is 3.13.
+
+## LANDMINE: a sustained-instrument note cannot outlast its sample — `Tone.Sampler` never loops
+
+`Tone.Sampler` has no loop option (`SamplerOptions` is `attack | release | onload | onerror |
+baseUrl | curve | urls`). It plays a one-shot `ToneBufferSource`; when the buffer ends, the sound
+ends, whatever duration `triggerAttackRelease` was given. `release` only shortens — it can never
+extend past the buffer.
+
+Measured lengths of the bundled sets (`afinfo`/`ffprobe`, not header arithmetic — the clarinet
+files all report a misleading 128 kbps and are actually ~65 kbps):
+
+| set | length | envelope |
+|---|---|---|
+| `fluidr3-clarinet` | **3.13 s**, every file identical | flat ~−28 dBFS throughout, then a hard cut — no decay |
+| `salamander-piano` | 4–25 s | natural decay; −24 dBFS at onset, −55 dBFS by 1.25 s |
+
+So a clarinet note stops sounding after 3.13 s no matter what the score says. At 60 BPM that is
+just over three beats, which is what long-tone drills expose. **This is not specific to tied
+notes**: any single clarinet note longer than 3.13 s truncates — a whole note below ~77 BPM, a
+dotted half below ~58 BPM, a half note below ~39 BPM.
+
+Piano is not immune in principle, only in practice: its samples decay to inaudibility well before
+they run out, so the truncation is never heard.
+
+**Do not "fix" it by re-triggering the sample.** That is audible as a re-attack, which is exactly
+what the tie rule above exists to avoid. Longer samples were also rejected: the current sets
+exactly meet the ~2.4 MB bundled-audio budget. The fix that shipped is the next entry.
+
+## PATTERN: crossfade-loop a sample by pre-blending it once at load
+
+`Tone.Sampler` cannot loop, but the node underneath it can. `AudioBufferSourceNode` has `loop`,
+`loopStart` and `loopEnd` built in, and `Tone.ToneBufferSource` exposes all three. So the shape of
+the fix is: **do the looping natively, and make the wrap seamless by editing the buffer, not by
+juggling voices.**
+
+Per channel, with loop start `S`, loop end `E` and crossfade `F`, all in frames:
+
+```
+for i in [0, F):
+  buf[E - F + i] = orig[E - F + i] * cos(i/F * π/2) + orig[S - F + i] * sin(i/F * π/2)
+```
+
+The material immediately before `E` has then already been blended toward the material immediately
+before `S`, so the frame the loop plays last leads into `S` exactly as `S`'s own predecessor does.
+This runs **once per buffer at decode time**, so there is nothing per-note at runtime and still
+exactly one voice per note. `src/score-web/sustainLoop.ts` (pure, unit-tested — `score-web/` is
+outside tsc and Jest) does the maths; `score-web/src/loopingSampler.ts` plays it.
+
+Four things that are easy to get wrong:
+
+- **`loopStart`/`loopEnd` are in *buffer* seconds and are unaffected by `playbackRate`.** A
+  pitch-shifted note needs no scaling of them.
+- **`ToneBufferSource.start` defaults a *looping* source's offset to `loopStart`.** Pass an
+  explicit `0` or every note skips its own attack.
+- **Blend before the buffer is ever played.** Assigning an `AudioBuffer` to a source node's
+  `buffer` "acquires the contents" and detaches its `ArrayBuffer`s, after which `getChannelData`
+  hands back an empty array. Decode → blend → hand to the player is the only safe order.
+- **A looping voice does not end by itself.** Its stop is scheduled at the note's end, which on a
+  long tone is seconds away, so `_stopInternal` and `pausePlayback` must release the player's
+  voices or the clarinet sounds on after the transport has stopped. One-shots never needed this,
+  which is why the Sampler path has no equivalent.
+
+**Equal-power (`cos`/`sin`) fades, not linear — and the seam is still not perfectly flat.** One set
+of bounds is declared per *sample set* and applies to all of its pitches, so the loop length is not
+a whole number of periods for any particular note and the two blended copies meet at an effectively
+arbitrary phase. Equal power keeps the expected energy flat across that; linear would dip wherever
+they are out of phase. What remains is a level modulation over the 0.2 s seam — measured on the
+clarinet set, offline, against the shipped code: **typically 2–3 dB, worst case −7.4 dB on A4**
+(comb cancellation) **and +2.9 dB on C6**. The discontinuity at the wrap itself is always *smaller*
+than a typical inter-frame step inside the loop, i.e. there is no click.
+
+**Do not try to tune the bounds against that modulation.** It was swept: moving `endSec` by 5 ms
+moves the worst case anywhere between 4.7 dB and 12.6 dB with no pattern, because the phase
+relationship at the seam is chaotic in the bounds. It also reshuffles under a different mp3
+decoder, so any value found this way is fitted to the measuring tool. The only real cure would be
+snapping the loop length **per buffer** to a whole number of that sample's own fundamental period
+(pitch detection at load), which was not done. Choose the bounds on the stable criteria instead —
+clear of the onset, clear of the end, as long as possible — and take the modulation.
+
+**Why the piano keeps `Tone.Sampler`.** A Salamander sample decays from about −24 dBFS at the onset
+to −55 dBFS by 1.25 s; looping any part of it would hold a dead tail open. A piano note is supposed
+to stop. Routing it through the new player would also have meant re-deriving its attack, release
+and voice handling for no gain, so the registry's `sustainLoop` being absent is what selects the
+Sampler, and the piano path is byte-for-byte what it was.
 
 ## OSMD repeats: use `CurrentEnrolledTimestamp`, not `currentTimeStamp`
 
@@ -1407,3 +1560,94 @@ a different amount of music in different parts of the same score.
 Gradients ramp to `transparent` rather than to an explicit zero-alpha color. CSS interpolates gradient
 stops with premultiplied alpha, so `transparent` does not drag the ramp through grey; writing
 `rgba(r,g,b,0)` instead would require parsing the palette string web-side for no gain.
+
+## LANDMINE: a Tone.Part never starts an event that began before the resume position
+
+`Part._startNote` (tone 14.9.17), non-looping branch:
+
+```javascript
+else if (event.startOffset >= offset) {
+    event.start(new TicksClass(this.context, ticks));
+}
+```
+
+`offset` is where the transport starts. An event whose onset is *strictly before* it is silently
+dropped — not delayed, not clipped, never started. So resuming at tick T sounds nothing for any
+note that began before T, and the remainder of that note is silence.
+
+This sat unnoticed for the whole life of the app because **every position the playhead can park on
+is normally a note onset**: `nearestGridIndex` snaps to the closest one, so the worst case was a
+gap of less than one note. Ties break the assumption. The cursor visits every continuation of a
+chain (`steps.push` in `buildTimelines` runs for each iterator position, before note extraction),
+but the chain contributes a single event at its start, because continuations are skipped so the
+note sounds once for its combined length. A two-measure long tone therefore has a barline in the
+middle of it with nothing scheduled anywhere near.
+
+**Fix:** before `Transport.start`, sound the notes that are already under way —
+`notesSoundingAt(events, ticks, PPQ)` in `src/score-web/resumeNotes.ts`. The exclusion at its
+boundary is exact and load-bearing: it takes `ticks < resumeTicks`, the precise complement of
+Tone's `startOffset >= offset`, so a note whose onset *is* the resume position is left to the Part.
+Return it here as well and it attacks twice at the same instant.
+
+Three things that are easy to get wrong in the resume itself:
+
+- **The buffer offset is not the elapsed time.** `loopStart`/`loopEnd` are buffer seconds and
+  ignore `playbackRate`, so a pitch-shifted note has travelled further through its buffer than the
+  clock says. Convert first, then fold — `resumeBufferOffsetSec` in `src/score-web/sustainLoop.ts`.
+- **`Tone.Sampler` cannot do this at all.** `Sampler.js:130` is `source.start(time, 0, ...)` — the
+  offset is hardcoded. The piano therefore borrows `LoopingSamplePlayer` for resumed notes only,
+  which also means the piano now needs `releaseAll` on stop and pause, where before it never did.
+- **Pass the transport's start *time*, not `now`.** A count-in defers the start by seconds; a
+  resumed note scheduled at `now` would sound during the click track.
+
+### The same gap on a loop wrap
+
+A bit whose A handle sits inside a held note hits this twice over. The first pass is fine, because
+it goes through `startPlayback`. Every wrap after it was silent, for a related but *different*
+reason — note the mechanism, because the obvious guess is wrong. The app loops the **Transport**,
+not the Part, so `Part._loop` is false and the branch above never runs at all. What happens is in
+`Transport._processTick`:
+
+```javascript
+if (ticks >= this._loopEnd) {
+    this.emit("loopEnd", tickTime);
+    this._clock.setTicksAtTime(this._loopStart, tickTime);
+    ticks = this._loopStart;
+    this.emit("loopStart", tickTime, ...);
+    this.emit("loop", tickTime);
+}
+// ...
+this._timeline.forEachAtTime(ticks, (event) => event.invoke(tickTime));
+```
+
+Ticks rewind to `loopStart` and only the events **at** that tick are invoked. A `Tone.Part` puts
+each note on that timeline as a one-shot `transport.schedule` at its absolute onset
+(`ToneEvent._rescheduleEvents`), so anything scheduled earlier is never reached again.
+
+**Fix:** the `loop` emit is the hook — `Tone.Transport.on('loop', ...)`, sounding the in-progress
+notes at A. Three traps in it:
+
+- **Do not read `Tone.Transport.ticks` in that handler.** The rewind is applied *at* `tickTime`,
+  which is ahead of now by the lookahead, so the read can still return the pre-wrap value. Use the
+  loop region's own `aTicks`.
+- **The handler's argument is the audio time of the wrap**, and that is what the resumed note must
+  be scheduled at.
+- **Bound the note at B.** This is the one that bites: left to run its natural length, a resumed
+  note outlives the wrap, and the next wrap sounds the same pitch again while the first is still
+  going. Voices stack one per pass until the loop is stopped. Hence `untilTicks` on
+  `notesSoundingAt`.
+
+`initPlayback` runs again on every score load, so the handler is removed before it is added —
+otherwise the previous score's closure stays subscribed and every held note sounds twice.
+
+**Both resume paths work in the transport's tick space, not the musical one.** This is the trap
+the two fixes set for each other. `notesSoundingAt` compares an onset against the position
+playback resumes at, and after the filed-tick work above those are different spaces: the position
+read off the transport is filed, a note event's tick is musical, and they differ by up to a whole
+tick. Mixed, a note ending exactly where you resume looks like it has a tick left, and the 50 ms
+floor on the note duration turns that into an audible stub of the previous note under the right
+one. So the events are put through `Transport.toTicks` and floored, the same way
+`captureTransportTicks` does for the grid — asked of Tone rather than recomputed — the wrap passes
+`aTransportTicks` rather than `aTicks`, and the loop bound is `bTransportTicks`. A one-tick end
+tolerance (`SEAM_EPSILON_TICKS`) absorbs what is left, since a note with a tick to live is not
+worth sounding anyway.

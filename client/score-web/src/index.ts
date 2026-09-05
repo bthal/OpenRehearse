@@ -1,4 +1,4 @@
-import { OpenSheetMusicDisplay, PageFormat } from 'opensheetmusicdisplay';
+import { OpenSheetMusicDisplay, PageFormat, TransposeCalculator } from 'opensheetmusicdisplay';
 import {
   initPlayback,
   startPlayback,
@@ -16,8 +16,11 @@ import {
   setBits,
   createBit,
   leaveBit,
+  setInstrumentAudio,
+  setPractisedInstrument,
 } from './playback';
 import type { OutboundMessage } from './types';
+import type { SustainLoop } from '../../src/domain/instrument';
 
 function postToNative(msg: OutboundMessage): void {
   const rn = (window as unknown as { ReactNativeWebView?: { postMessage: (s: string) => void } })
@@ -31,6 +34,60 @@ let osmd: OpenSheetMusicDisplay | null = null;
 // If the OSMD constructor throws it aborts the IIFE; anything assigned after the throw
 // is never set. See compound-docs/osmd-webview.md.
 const w = window as unknown as Record<string, unknown>;
+
+/**
+ * The practised instrument's bundled samples, sounding offset and sustain-loop bounds.
+ *
+ * Must arrive before __rn_load_xml, because the note player is built during the load —
+ * and the loop bounds decide *which* player, since Tone.Sampler cannot loop at all.
+ * injectJavaScript delivers in order, so native sends the two back to back.
+ */
+w.__rn_set_instrument_audio = (
+  urlsJson: string,
+  offsetSemitones: number,
+  loopJson?: string | null,
+) => {
+  try {
+    setInstrumentAudio(
+      JSON.parse(urlsJson) as Record<string, string>,
+      offsetSemitones,
+      loopJson ? (JSON.parse(loopJson) as SustainLoop) : null,
+    );
+  } catch (err) {
+    postToNative({
+      type: 'ERROR',
+      payload: `instrument audio: ${err instanceof Error ? err.message : String(err)}`,
+    });
+  }
+};
+
+/**
+ * Semitones the engraved score is shifted by — the piece's base plus its practice
+ * offset, already summed on the native side.
+ *
+ * Applied between `load()` and `render()`, which is the only window that works: the
+ * note grid, the cursor steps and every barline pixel are derived from the *rendered*
+ * layout in `initPlayback`, and transposing changes accidentals and key signatures and
+ * therefore measure widths. Transposing after the grid is built would leave the two
+ * describing different scores. Bits are stored as ticks, so they survive it untouched.
+ */
+let engravedTransposeSemitones = 0;
+
+/**
+ * The MusicXML part id being practised, or '' for the whole score.
+ *
+ * Resolved against the loaded sheet rather than stored as an index, because a part's
+ * position shifts between exports of the same score while its id does not.
+ */
+let practisedPartId = '';
+
+w.__rn_set_part = (partId: string) => {
+  practisedPartId = typeof partId === 'string' ? partId : '';
+};
+
+w.__rn_set_transpose = (semitones: number) => {
+  engravedTransposeSemitones = Number.isFinite(semitones) ? Math.round(semitones) : 0;
+};
 
 w.__rn_load_xml = async (xml: string, scheduleJson?: string) => {
   if (!osmd) {
@@ -63,13 +120,35 @@ w.__rn_load_xml = async (xml: string, scheduleJson?: string) => {
     const container = document.getElementById('osmd')!;
     container.style.width = '10000px';
     await osmd.load(xml);
+    // Show and sound one part only. Hiding is what the render needs; the extraction
+    // pass gets the same instrument passed explicitly (setPractisedInstrument), so the
+    // two never disagree about which line is being practised.
+    const instruments = osmd.Sheet.Instruments;
+    const practised = practisedPartId
+      ? (instruments.find((i) => i.IdString === practisedPartId) ?? null)
+      : null;
+    if (practised) {
+      for (const instrument of instruments) instrument.Visible = instrument === practised;
+    }
+    setPractisedInstrument(practised);
+    if (engravedTransposeSemitones !== 0) {
+      // OSMD ships TransposeCalculator in the free build but leaves it unset; without
+      // it, Sheet.Transpose is silently ignored (OSMD logs a hint and moves on).
+      if (!osmd.TransposeCalculator) osmd.TransposeCalculator = new TransposeCalculator();
+      osmd.Sheet.Transpose = engravedTransposeSemitones;
+      osmd.updateGraphic();
+    }
     osmd.render();
     // Trim container to the SVG's actual rendered width (container.scrollWidth would
     // still be 10000px since we set it before render; query the SVG directly).
     const svgEl = container.querySelector('svg');
     container.style.width = `${svgEl ? svgEl.scrollWidth : container.scrollWidth}px`;
     initPlayback(osmd, externalTempoSchedule);
-    postToNative({ type: 'LOADED' });
+    // Staff count of the part being practised. The hand filter means nothing on one
+    // staff, and applyHandColors assumes staff indices 0 and 1 exist — so the native
+    // side hides the control rather than showing an inert one.
+    const staves = (practised ?? instruments[0])?.Staves.length ?? 2;
+    postToNative({ type: 'LOADED', payload: { staffCount: staves } });
   } catch (err) {
     postToNative({ type: 'ERROR', payload: err instanceof Error ? err.message : String(err) });
   }

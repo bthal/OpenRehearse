@@ -1,7 +1,20 @@
-import { WARMUP_PEAK_REPEATS, type WarmUpHand, type WarmUpScaleMode } from './warmup';
+import {
+  WARMUP_LONG_NOTE_MEASURES,
+  WARMUP_LONG_NOTE_REPEATS,
+  WARMUP_PEAK_REPEATS,
+  longNoteEntry,
+  type WarmUpHand,
+  type WarmUpScaleMode,
+} from './warmup';
 
 /** MusicXML divisions per quarter note. Shared with routineMusicXml. */
 export const DIVISIONS = 2;
+
+/**
+ * A full-measure rest. Shared with routineMusicXml, which fills the unused hand of a
+ * single-hand exercise with it and had grown two copies of the same string.
+ */
+export const WHOLE_REST = `<note><rest measure="yes"/><duration>${DIVISIONS * 4}</duration><type>whole</type></note>`;
 
 type PitchClass = 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11;
 
@@ -379,10 +392,15 @@ function twoHandMeasures(
   pitchClass: number,
   hand: WarmUpHand,
   build: MeasureBuilder,
+  rootMidi?: number,
 ): { rh: string[][] | null; lh: string[][] | null } {
+  // The piano's C4/C3 anchor stays the default. A single-staff instrument passes its
+  // own root so the exercise sits where that instrument actually plays; the left-hand
+  // octave below is kept relative to it, which is a no-op for the piano.
+  const rhRoot = rootMidi ?? 60 + pitchClass;
   return {
-    rh: hand === 'left' ? null : build(60 + pitchClass),
-    lh: hand === 'right' ? null : build(48 + pitchClass),
+    rh: hand === 'left' ? null : build(rhRoot),
+    lh: hand === 'right' ? null : build(rhRoot - 12),
   };
 }
 
@@ -412,11 +430,15 @@ export function getScaleMeasureNotes(
   mode: WarmUpScaleMode,
   hand: WarmUpHand,
   octaves: number,
+  rootMidi?: number,
 ): { rh: string[][] | null; lh: string[][] | null } {
   const { names } = getKeyInfo(pitchClass, mode);
   const intervals = mode === 'major' ? MAJOR_INTERVALS : MINOR_INTERVALS;
-  return twoHandMeasures(pitchClass, hand, (root) =>
-    buildScaleMeasuresInternal(root, names, intervals, octaves),
+  return twoHandMeasures(
+    pitchClass,
+    hand,
+    (root) => buildScaleMeasuresInternal(root, names, intervals, octaves),
+    rootMidi,
   );
 }
 
@@ -425,9 +447,10 @@ export function generateScaleXml(
   mode: WarmUpScaleMode,
   hand: WarmUpHand,
   octaves = 1,
+  rootMidi?: number,
 ): string {
   const { fifths } = getKeyInfo(pitchClass, mode);
-  const { rh, lh } = getScaleMeasureNotes(pitchClass, mode, hand, octaves);
+  const { rh, lh } = getScaleMeasureNotes(pitchClass, mode, hand, octaves, rootMidi);
   return buildTwoHandXml(fifths, mode, hand, rh, lh);
 }
 
@@ -460,10 +483,14 @@ export function getChromaticMeasureNotes(
   mode: WarmUpScaleMode,
   hand: WarmUpHand,
   octaves: number,
+  rootMidi?: number,
 ): { rh: string[][] | null; lh: string[][] | null } {
   const { names } = getKeyInfo(pitchClass, mode);
-  return twoHandMeasures(pitchClass, hand, (root) =>
-    buildChromaticMeasuresInternal(root, names, octaves),
+  return twoHandMeasures(
+    pitchClass,
+    hand,
+    (root) => buildChromaticMeasuresInternal(root, names, octaves),
+    rootMidi,
   );
 }
 
@@ -472,9 +499,10 @@ export function generateChromaticXml(
   mode: WarmUpScaleMode,
   hand: WarmUpHand,
   octaves = 1,
+  rootMidi?: number,
 ): string {
   const { fifths } = getKeyInfo(pitchClass, mode);
-  const { rh, lh } = getChromaticMeasureNotes(pitchClass, mode, hand, octaves);
+  const { rh, lh } = getChromaticMeasureNotes(pitchClass, mode, hand, octaves, rootMidi);
   return buildTwoHandXml(fifths, mode, hand, rh, lh);
 }
 
@@ -1037,4 +1065,93 @@ export function generateHanonXml(
   const { fifths } = getKeyInfo(pitchClass, mode);
   const { rh, lh } = getHanonMeasureNotes(pitchClass, mode, hand, octaves, true, exercise);
   return buildTwoHandXml(fifths, mode, hand, rh, lh);
+}
+
+// ─── Long note ────────────────────────────────────────────────────────────────
+
+/**
+ * A whole note carrying the tie markup for its place in a held chain.
+ *
+ * Both elements are required and they are not interchangeable. `<tie>` is the sound
+ * and `<tied>` is the printed slur, and OSMD builds `Note.NoteTie` from `<tied>`
+ * inside `<notations>` only — playback then skips continuations by asking
+ * `NoteTie.StartNote !== note`. A chain written with `<tie>` alone looks right and
+ * re-attacks the pitch at every barline.
+ *
+ * Element order inside `<note>` is fixed by the schema as pitch, duration, tie, type,
+ * notations, which is why this cannot append to `wholeNote()`. On a middle note the
+ * stop precedes the start.
+ */
+function tiedWholeNote(
+  pitch: { step: string; alter: number; octave: number },
+  tie: { start: boolean; stop: boolean },
+): string {
+  const tieXml = `${tie.stop ? '<tie type="stop"/>' : ''}${tie.start ? '<tie type="start"/>' : ''}`;
+  const tiedXml =
+    tie.start || tie.stop
+      ? `<notations>${tie.stop ? '<tied type="stop"/>' : ''}${tie.start ? '<tied type="start"/>' : ''}</notations>`
+      : '';
+  return `<note>${pitchXml(pitch)}<duration>${DIVISIONS * 4}</duration>${tieXml}<type>whole</type>${tiedXml}</note>`;
+}
+
+/**
+ * (N held measures + one whole-rest measure) × R, written out literally.
+ *
+ * The rest after the *last* repetition is intentional: every hold-then-breathe block
+ * is then the same shape, so the exercise can be spliced anywhere in a routine and
+ * `measureCount` is simply `(measures + 1) * repeats`.
+ *
+ * Clamped rather than validated. Settings and routine blocks are read off disk with a
+ * blind cast, so an out-of-range number is reachable and must render something.
+ */
+function buildLongNoteMeasures(
+  noteName: string,
+  noteOctave: number,
+  measures: number,
+  repeats: number,
+): string[][] {
+  const held = clampToOption(measures, WARMUP_LONG_NOTE_MEASURES);
+  const reps = clampToOption(repeats, WARMUP_LONG_NOTE_REPEATS);
+  const { step, alter } = longNoteEntry(noteName);
+  const octave = Math.trunc(noteOctave);
+
+  const bars: string[][] = [];
+  for (let r = 0; r < reps; r++) {
+    for (let m = 0; m < held; m++) {
+      // A single-measure hold gets neither flag, i.e. a plain whole note.
+      bars.push([tiedWholeNote({ step, alter, octave }, { start: m < held - 1, stop: m > 0 })]);
+    }
+    bars.push([WHOLE_REST]);
+  }
+  return bars;
+}
+
+/** Clamps to the span of an option list, never to a literal. */
+function clampToOption(value: number, options: readonly number[]): number {
+  const lo = Math.min(...options);
+  const hi = Math.max(...options);
+  return Math.min(Math.max(Math.round(value || lo), lo), hi);
+}
+
+export function getLongNoteMeasureNotes(
+  noteName: string,
+  noteOctave: number,
+  measures = 2,
+  repeats = 4,
+): { rh: string[][] | null; lh: string[][] | null } {
+  // Always the right hand, whatever `hand` says: a long tone is a one-part score, and
+  // routine assembly reads `rh` into P1 while `buildTwoHandXml` only gives P1 a treble
+  // clef when the notes arrive on `rh`.
+  return { rh: buildLongNoteMeasures(noteName, noteOctave, measures, repeats), lh: null };
+}
+
+export function generateLongNoteXml(
+  noteName: string,
+  noteOctave: number,
+  measures = 2,
+  repeats = 4,
+): string {
+  const { rh } = getLongNoteMeasureNotes(noteName, noteOctave, measures, repeats);
+  // No key signature: the accidental comes from the chosen spelling, not from a key.
+  return buildTwoHandXml(0, 'major', 'right', rh, null);
 }

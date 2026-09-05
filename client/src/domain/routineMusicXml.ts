@@ -1,13 +1,21 @@
+import { INSTRUMENT_REGISTRY, exerciseRootMidi, type InstrumentId } from './instrumentRegistry';
 import type { ExerciseBlock, Routine, RoutineBlock } from './routine';
-import { DEFAULT_PEAK_REPEATS } from './warmup';
+import {
+  DEFAULT_LONG_NOTE_MEASURES,
+  DEFAULT_LONG_NOTE_NAME,
+  DEFAULT_LONG_NOTE_OCTAVE,
+  DEFAULT_LONG_NOTE_REPEATS,
+  DEFAULT_PEAK_REPEATS,
+} from './warmup';
 import {
   keyLabel,
   measureCount as exerciseMeasureCount,
   warmUpDescriptor,
   type ExerciseParams,
   type MeasureNotes,
+  type WarmUpParam,
 } from './warmupRegistry';
-import { DIVISIONS, getKeyFifths } from './warmupMusicXml';
+import { DIVISIONS, WHOLE_REST, getKeyFifths } from './warmupMusicXml';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -53,9 +61,6 @@ function wrapMeasure(
   return `<measure number="${measureNumber}">${prefix}${notes.join('')}</measure>`;
 }
 
-// Full-measure rest note string (for the unused hand in single-hand exercises).
-const WHOLE_REST = `<note><rest measure="yes"/><duration>${DIVISIONS * 4}</duration><type>whole</type></note>`;
-
 // ─── Rehearsal label ──────────────────────────────────────────────────────────
 
 // A saved block carries every parameter; absent ones fall back to their default so a
@@ -69,7 +74,19 @@ function blockParams(block: ExerciseBlock): ExerciseParams {
     bpm: block.bpm,
     octaves: block.octaves,
     peakRepeats: block.peakRepeats ?? DEFAULT_PEAK_REPEATS,
+    noteName: block.noteName ?? DEFAULT_LONG_NOTE_NAME,
+    noteOctave: block.noteOctave ?? DEFAULT_LONG_NOTE_OCTAVE,
+    longNoteMeasures: block.longNoteMeasures ?? DEFAULT_LONG_NOTE_MEASURES,
+    longNoteRepeats: block.longNoteRepeats ?? DEFAULT_LONG_NOTE_REPEATS,
   };
+}
+
+// Tolerant of a type this build doesn't know, for the same reason
+// `measureNotesForBlock` is: routines.json is loaded with a blind cast, so an
+// unrecognised type is reachable and `hasParam` would throw on it.
+function blockHasParam(block: ExerciseBlock, param: WarmUpParam): boolean {
+  const d = warmUpDescriptor(block.type);
+  return d ? (d.params as readonly WarmUpParam[]).includes(param) : false;
 }
 
 function exerciseRehearsalLabel(block: ExerciseBlock): string {
@@ -81,18 +98,37 @@ function exerciseRehearsalLabel(block: ExerciseBlock): string {
 // Right-/left-hand measures for any exercise block. Routines never render fingering.
 // Returns empty measures for a type this build doesn't know, rather than throwing:
 // routines.json is loaded with a blind cast, so an unrecognised type is reachable.
-function measureNotesForBlock(block: ExerciseBlock): MeasureNotes {
+function measureNotesForBlock(block: ExerciseBlock, instrument: InstrumentId): MeasureNotes {
   const d = warmUpDescriptor(block.type);
   if (!d) return { rh: null, lh: null };
-  return d.measureNotes(blockParams(block), false);
+  return d.measureNotes(instrumentBlockParams(block, instrument), false);
+}
+
+/**
+ * A block's score parameters as this instrument plays them.
+ *
+ * A single-staff instrument has no hand control, so its exercises are the one-part
+ * case — which `hand: 'right'` already produces — and they anchor in that
+ * instrument's own register rather than the piano's C4. Neither value is persisted on
+ * the block: both follow from the routine's instrument, and storing them would let
+ * them go stale the moment the registry's range changed.
+ */
+function instrumentBlockParams(block: ExerciseBlock, instrument: InstrumentId) {
+  const base = blockParams(block);
+  if (INSTRUMENT_REGISTRY[instrument].staffLayout === 'grand') return base;
+  return {
+    ...base,
+    hand: 'right' as const,
+    rootMidi: exerciseRootMidi(instrument, block.pitchClass),
+  };
 }
 
 // Measure count for an exercise block, memoised in the registry so a routine's blocks
 // are generated once rather than once per consumer (estimate, schedule, assembly).
-function blockMeasureCount(block: ExerciseBlock): number {
+function blockMeasureCount(block: ExerciseBlock, instrument: InstrumentId): number {
   const d = warmUpDescriptor(block.type);
   if (!d) return 0;
-  return exerciseMeasureCount(block.type, blockParams(block));
+  return exerciseMeasureCount(block.type, instrumentBlockParams(block, instrument));
 }
 
 // Estimate total duration in seconds for a routine (used for UI display only).
@@ -105,7 +141,7 @@ export function estimateRoutineSeconds(routine: Routine): number {
       totalSeconds += (block.measures * 4 * 60) / lastBpm;
     } else {
       lastBpm = block.bpm;
-      totalSeconds += (blockMeasureCount(block) * 4 * 60) / block.bpm;
+      totalSeconds += (blockMeasureCount(block, routine.instrument) * 4 * 60) / block.bpm;
     }
   }
 
@@ -149,7 +185,7 @@ export function computeRoutineTempoSchedule(routine: Routine): RoutineTempoChang
         schedule.push({ quarterBeat: cumulativeQuarters, bpm });
         lastEmittedBpm = bpm;
       }
-      cumulativeQuarters += blockMeasureCount(block) * 4;
+      cumulativeQuarters += blockMeasureCount(block, routine.instrument) * 4;
     }
   }
 
@@ -157,6 +193,10 @@ export function computeRoutineTempoSchedule(routine: Routine): RoutineTempoChang
 }
 
 export function generateRoutineXml(routine: Routine): string {
+  const instrument = routine.instrument;
+  // A single-staff instrument gets one part. The bass staff is not filled with rests
+  // and hidden — it is simply not emitted, so the score is what the player reads.
+  const singleStaff = INSTRUMENT_REGISTRY[instrument].staffLayout === 'single';
   let measureNumber = 1;
   const p1Measures: string[] = []; // treble
   const p2Measures: string[] = []; // bass
@@ -173,7 +213,6 @@ export function generateRoutineXml(routine: Routine): string {
       const bpm = nextExerciseBpm(routine.blocks, i + 1);
       const includePauseTempo = lastEmittedBpm === null || bpm !== lastEmittedBpm;
       const measureCount = block.measures;
-      const wholeRest = `<note><rest measure="yes"/><duration>${DIVISIONS * 4}</duration><type>whole</type></note>`;
 
       for (let m = 0; m < measureCount; m++) {
         if (m === 0) {
@@ -181,12 +220,12 @@ export function generateRoutineXml(routine: Routine): string {
           const attrXml = `<attributes><divisions>${DIVISIONS}</divisions><time><beats>4</beats><beat-type>4</beat-type></time></attributes>`;
           const prefix =
             attrXml + rehearsalDirection('Pause') + (includePauseTempo ? tempoDirection(bpm) : '');
-          const mXml = `<measure number="${measureNumber}">${prefix}${wholeRest}</measure>`;
+          const mXml = `<measure number="${measureNumber}">${prefix}${WHOLE_REST}</measure>`;
           p1Measures.push(mXml);
           p2Measures.push(mXml);
         } else {
           // Subsequent pause measures — plain whole rest, no attr repeat.
-          const mXml = `<measure number="${measureNumber}">${wholeRest}</measure>`;
+          const mXml = `<measure number="${measureNumber}">${WHOLE_REST}</measure>`;
           p1Measures.push(mXml);
           p2Measures.push(mXml);
         }
@@ -198,11 +237,17 @@ export function generateRoutineXml(routine: Routine): string {
 
     // Exercise block
     const { pitchClass, mode, bpm } = block;
-    const fifths = getKeyFifths(pitchClass, mode);
+    // An exercise that declares no key has no key to print: drill45 is fixed C major
+    // and a long tone has none at all. Reading the block's stored pitchClass here
+    // would let a stale value print a key signature the standalone generator — which
+    // hardcodes 0 — never would.
+    const keyed = blockHasParam(block, 'key');
+    const fifths = keyed ? getKeyFifths(pitchClass, mode) : 0;
+    const keyMode = keyed ? mode : ('major' as const);
     const label = exerciseRehearsalLabel(block);
     const includeTempo = lastEmittedBpm === null || bpm !== lastEmittedBpm;
 
-    const { rh, lh } = measureNotesForBlock(block);
+    const { rh, lh } = measureNotesForBlock(block, instrument);
     const measureCount = (rh ?? lh)?.length ?? 0;
 
     for (let m = 0; m < measureCount; m++) {
@@ -213,7 +258,7 @@ export function generateRoutineXml(routine: Routine): string {
         const needClef = !clefEmitted;
         const commonOpts = {
           fifths,
-          mode,
+          mode: keyMode,
           includeClef: needClef,
           rehearsalLabel: label,
           bpm,
@@ -247,9 +292,10 @@ export function generateRoutineXml(routine: Routine): string {
     );
   }
 
-  const partList =
-    `<score-part id="P1"><part-name>Right Hand</part-name></score-part>` +
-    `<score-part id="P2"><part-name>Left Hand</part-name></score-part>`;
+  const partList = singleStaff
+    ? `<score-part id="P1"><part-name>Part</part-name></score-part>`
+    : `<score-part id="P1"><part-name>Right Hand</part-name></score-part>` +
+      `<score-part id="P2"><part-name>Left Hand</part-name></score-part>`;
 
   return (
     `<?xml version="1.0" encoding="UTF-8"?>` +
@@ -257,7 +303,7 @@ export function generateRoutineXml(routine: Routine): string {
     `<score-partwise version="3.1">` +
     `<part-list>${partList}</part-list>` +
     `<part id="P1">${p1Measures.join('')}</part>` +
-    `<part id="P2">${p2Measures.join('')}</part>` +
+    (singleStaff ? '' : `<part id="P2">${p2Measures.join('')}</part>`) +
     `</score-partwise>`
   );
 }

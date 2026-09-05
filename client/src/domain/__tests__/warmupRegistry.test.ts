@@ -47,7 +47,18 @@ describe('warm-up registry', () => {
   });
 
   it('declares at least one parameter per exercise, and only known ones', () => {
-    const known = ['exercise', 'key', 'bpm', 'hand', 'octaves', 'peakRepeats'];
+    const known = [
+      'exercise',
+      'key',
+      'bpm',
+      'hand',
+      'octaves',
+      'peakRepeats',
+      'noteName',
+      'noteOctave',
+      'longNoteMeasures',
+      'longNoteRepeats',
+    ];
     for (const t of WARM_UP_TYPES) {
       const { params } = WARM_UP_REGISTRY[t];
       expect(params.length).toBeGreaterThan(0);
@@ -93,6 +104,57 @@ describe('warm-up registry', () => {
     }
   });
 
+  it('varies the memoised count by long-note length and repeats', () => {
+    // The memo key used to enumerate parameters by hand, so a newly added one did not
+    // miss the cache — it *collided* with a different exercise of the same shape, and
+    // a routine's tempo schedule silently drifted away from its own score.
+    const short = measureCount('longNote', {
+      ...DEFAULT_EXERCISE_PARAMS,
+      longNoteMeasures: 1,
+      longNoteRepeats: 1,
+    });
+    const longer = measureCount('longNote', {
+      ...DEFAULT_EXERCISE_PARAMS,
+      longNoteMeasures: 8,
+      longNoteRepeats: 1,
+    });
+    const repeated = measureCount('longNote', {
+      ...DEFAULT_EXERCISE_PARAMS,
+      longNoteMeasures: 1,
+      longNoteRepeats: 8,
+    });
+    expect(short).toBe(2);
+    expect(longer).toBe(9);
+    expect(repeated).toBe(16);
+  });
+
+  it('counts a long note as (hold + one rest) per repetition', () => {
+    for (const m of [1, 3, 8] as const) {
+      for (const r of [1, 2, 4, 8] as const) {
+        const p = { ...DEFAULT_EXERCISE_PARAMS, longNoteMeasures: m, longNoteRepeats: r };
+        expect(measureCount('longNote', p)).toBe((m + 1) * r);
+      }
+    }
+  });
+
+  it('names the long note in its rehearsal mark, ignoring the key label', () => {
+    // Through the descriptor type, which is how routine assembly calls it — with a
+    // key label the long note has no use for.
+    const label = warmUpDescriptor('longNote')!.rehearsalLabel(
+      { ...DEFAULT_EXERCISE_PARAMS, noteName: 'Bb', noteOctave: 3 },
+      'F#',
+    );
+    expect(label).toBe('Long Note Bb3');
+  });
+
+  it('gives the long note its own parameters and none of the keyed ones', () => {
+    for (const p of ['key', 'hand', 'octaves', 'exercise', 'peakRepeats'] as const) {
+      expect(hasParam('longNote', p)).toBe(false);
+    }
+    expect(hasParam('longNote', 'noteName')).toBe(true);
+    expect(hasParam('longNote', 'bpm')).toBe(true);
+  });
+
   it('varies the memoised count by peak repeats', () => {
     const one = measureCount('drill45', { ...DEFAULT_EXERCISE_PARAMS, peakRepeats: 1 });
     const eight = measureCount('drill45', { ...DEFAULT_EXERCISE_PARAMS, peakRepeats: 8 });
@@ -114,6 +176,7 @@ describe('routines containing an unrecognised exercise', () => {
   // threw, taking the whole routine down rather than the one block.
   const routine: Routine = {
     id: 'r',
+    instrument: 'piano' as const,
     title: 'r',
     blocks: [
       {

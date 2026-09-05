@@ -2,6 +2,15 @@ import type { Bit } from '@domain/bits';
 
 export type NativeToWebMessage =
   | { type: 'LOAD_XML'; payload: string }
+  /**
+   * The practised instrument's bundled sample URIs (note name → URI) and the
+   * semitone offset from written to sounding pitch. Must be sent before LOAD_XML:
+   * the Sampler is constructed during the load.
+   */
+  | {
+      type: 'SET_INSTRUMENT_AUDIO';
+      payload: { urls: Record<string, string>; soundingOffsetSemitones: number };
+    }
   | { type: 'PLAY' }
   | { type: 'PAUSE' }
   | { type: 'STOP' }
@@ -47,7 +56,12 @@ export type NativeToWebMessage =
   | { type: 'LEAVE_BIT' };
 
 export type WebToNativeMessage =
-  | { type: 'LOADED' }
+  /**
+   * `staffCount` is of the practised part as rendered, not of the instrument: a
+   * single-line melody imported as a piano piece has one staff too, and the hand
+   * filter is meaningless on either.
+   */
+  | { type: 'LOADED'; payload?: { staffCount: number } }
   | { type: 'ERROR'; payload: string }
   | { type: 'DEBUG'; payload: string }
   | { type: 'SCORE_BPM'; payload: number }

@@ -49,6 +49,35 @@ Two rules that follow:
 Keep the option list (`WARMUP_PEAK_REPEATS`) the single source of the clamp ceiling, so widening
 the choices in the UI cannot silently disagree with what the generator will accept.
 
+## A memo key hand-enumerating a persisted parameter set collides silently
+
+`measureCount` in `warmupRegistry.ts` memoises "how many measures does this exercise produce",
+because routine playback asks three times over (duration estimate, tempo schedule, score
+assembly). Its cache key was a template string listing the parameters by hand:
+
+```typescript
+const cacheKey = `${type}|${p.exercise}|${p.pitchClass}|${p.mode}|${p.hand}|${p.octaves}|${p.peakRepeats}`;
+```
+
+Adding a parameter to `ExerciseParams` does not make this miss the cache. It makes it **collide**:
+two blocks differing only in the new field hash identically, and the second silently gets the
+first's length. Nothing throws. The failure surfaces a layer away, as a routine whose tempo
+schedule drifts against its own score from that block onward — the cursor running a bar ahead.
+
+This is the same class of bug as the wholesale slice merge above: a hand-maintained mirror of a
+shape that grows. The fix makes the compiler maintain it instead:
+
+```typescript
+const CACHE_KEY_FIELDS: Record<keyof Omit<ExerciseParams, 'bpm'>, true> = { ... };
+const CACHE_KEY_ORDER = Object.keys(CACHE_KEY_FIELDS) as (keyof ScoreParams)[];
+```
+
+A new field now fails to compile until it is listed. `bpm` is excluded deliberately — tempo never
+affects which notes exist, which is the whole reason `ScoreParams` omits it.
+
+The existing contract test does not catch this. `warmupRegistry.test.ts` sweeps key × hand ×
+octaves, and none of those affect a long note, so it passed throughout. A memo over a persisted
+parameter set needs its own regression test asserting that each field actually varies the result.
 ## Practice settings that live on the piece: coerce on read, never write from inside a bit
 
 `Piece.tempoMultiplier` and `Piece.metronome` are the speed and click the piece was last

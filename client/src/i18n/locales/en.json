@@ -13,6 +13,12 @@
     "couldNotRender": "Could not render score",
     "done": "Done"
   },
+  "instruments": {
+    "piano": "Piano",
+    "pianoShort": "Piano",
+    "clarinetBb": "Clarinet in B♭",
+    "clarinetBbShort": "Clarinet"
+  },
   "dashboard": {
     "title": "OpenRehearse",
     "warmUps": "Warm-ups",
@@ -22,6 +28,7 @@
     "chromatic": "Chromatic Scale",
     "fiveScale": "5-Finger Scale",
     "drill45": "4-5 Drill",
+    "longNote": "Long Note",
     "routines": "Routines",
     "newRoutine": "New Routine",
     "removeRoutineTitle": "Remove routine?",
@@ -47,7 +54,14 @@
     "practiceDayHours": "{{date}} · {{hours}} h {{minutes}} min",
     "practiceDayHoursOnly": "{{date}} · {{hours}} h",
     "practiceLess": "Less",
-    "practiceMore": "More"
+    "practiceMore": "More",
+    "scopeLabel": "Instrument",
+    "scopeAll": "All",
+    "scopeHeading": "Show practice material for",
+    "scopeHint": "Filters warm-ups, routines and pieces on this screen only.",
+    "emptyTitleScoped": "No {{instrument}} pieces yet",
+    "emptyRoutines": "No routines yet",
+    "emptyRoutinesScoped": "No {{instrument}} routines yet"
   },
   "playView": {
     "pieceNotFound": "Piece not found.",
@@ -73,6 +87,9 @@
     "octave_one": "Octave",
     "octave_other": "Octaves",
     "peak": "Peak",
+    "note": "Note",
+    "hold": "Bars",
+    "repeats": "Reps",
     "exercise": "No.",
     "failedToGenerate": "Failed to generate score."
   },
@@ -139,7 +156,29 @@
       "editSection": "Edit {{name}}",
       "splitAction": "Split section",
       "deleteAction": "Delete section"
-    }
+    },
+    "transposeLabel": "Transposition",
+    "transposeNone": "As written",
+    "transposeSemitones_one": "{{signed}} semitone",
+    "transposeSemitones_other": "{{signed}} semitones",
+    "transposeReading": "Includes {{value}} so it reads on your instrument",
+    "transposeReset": "Reset",
+    "transposeUp": "Transpose up a semitone",
+    "transposeDown": "Transpose down a semitone",
+    "instrumentLabel": "Instrument",
+    "instrumentUnknown": "The file does not say — pick the one you play this on.",
+    "partLabel": "Part to practise",
+    "partRequired": "Choose the part you play",
+    "partHint": "Only this part is shown and heard, and it is fixed once imported.",
+    "partFallback": "Part {{number}}",
+    "instrumentFixed": "For {{instrument}}",
+    "instrumentFixedWithPart": "For {{instrument}} · {{part}}",
+    "instrumentFixedNote": "Chosen at import and kept for the life of the piece.",
+    "instrumentOnlyOption": "The only instrument this part can be practised on ({{reason}}).",
+    "refusalStaves": "two staves",
+    "refusalChords": "contains chords",
+    "refusalVoices": "two voices",
+    "refusalPolyphonic": "more than one line"
   },
   "warmUpRow": {
     "description": "Exercise"
@@ -155,6 +194,7 @@
     "addExerciseChromatic": "Chromatic",
     "addExerciseFiveScale": "5-Finger",
     "addExerciseDrill45": "4-5 Drill",
+    "addExerciseLongNote": "Long Note",
     "addExercisePause": "Pause",
     "removeBlockTitle": "Remove block?",
     "removeBlockConfirm": "Remove this block from the routine?",
@@ -173,8 +213,11 @@
     "measure_one": "{{count}} Measure",
     "measure_other": "{{count}} Measures",
     "peakRepeats": "Peak ×{{times}}",
+    "noteOctave": "Oct {{octave}}",
+    "longNoteRepeats": "×{{times}}",
     "exerciseNo": "No. {{number}}",
     "swapExercises": "Swap Exercises",
+    "instrumentFixed": "For {{instrument}}",
     "metronome": "Metronome"
   },
   "routineRow": {

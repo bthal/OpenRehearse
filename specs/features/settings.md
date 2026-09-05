@@ -46,6 +46,10 @@ player time to find the pulse.
 ## Behavior
 
 - Persisted on-device as `settings.json` (same store pattern as routines); never uploaded.
+- `settings.json` also carries the dashboard's **instrument scope**, which is set from the
+  dashboard header rather than from this modal (see `dashboard.md`). It lives here because it is an
+  app-wide persisted preference; it is deliberately not shown in the Settings modal, since a view
+  filter belongs beside the view it filters.
 - Applies across pieces, routines, and warm-ups (they share one playback engine).
 
 ## Acceptance criteria

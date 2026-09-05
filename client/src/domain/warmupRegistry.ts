@@ -14,11 +14,19 @@
  * doesn't declare `key` or `octaves`, and does declare `peakRepeats`.
  */
 import {
+  DEFAULT_LONG_NOTE_MEASURES,
+  DEFAULT_LONG_NOTE_NAME,
+  DEFAULT_LONG_NOTE_OCTAVE,
+  DEFAULT_LONG_NOTE_REPEATS,
   DEFAULT_PEAK_REPEATS,
   DEFAULT_WARMUP_BPM,
   WARMUP_KEYS,
   type WarmUpBpm,
   type WarmUpHand,
+  type WarmUpLongNoteMeasures,
+  type WarmUpLongNoteName,
+  type WarmUpLongNoteOctave,
+  type WarmUpLongNoteRepeats,
   type WarmUpOctaves,
   type WarmUpPeakRepeats,
   type WarmUpScaleMode,
@@ -30,17 +38,32 @@ import {
   generateDrill45Xml,
   generateFiveScaleXml,
   generateHanonXml,
+  generateLongNoteXml,
   generateScaleXml,
   getArpeggioMeasureNotes,
   getChromaticMeasureNotes,
   getDrill45MeasureNotes,
   getFiveScaleMeasureNotes,
   getHanonMeasureNotes,
+  getLongNoteMeasureNotes,
   getScaleMeasureNotes,
 } from './warmupMusicXml';
 
 /** A parameter an exercise can declare. `key` covers pitchClass + mode together. */
-export type WarmUpParam = 'exercise' | 'key' | 'bpm' | 'hand' | 'octaves' | 'peakRepeats';
+export type WarmUpParam =
+  | 'exercise'
+  | 'key'
+  | 'bpm'
+  | 'hand'
+  | 'octaves'
+  | 'peakRepeats'
+  // Long note only. `noteOctave` is one absolute written octave and `octaves` is a
+  // span in octaves; the names are kept far apart on purpose, because `'octave'` for
+  // `'octaves'` is a one-character mistake the compiler would happily accept.
+  | 'noteName'
+  | 'noteOctave'
+  | 'longNoteMeasures'
+  | 'longNoteRepeats';
 
 /**
  * The union of every exercise parameter. Exercises carry all fields regardless of
@@ -57,6 +80,14 @@ export interface ExerciseParams {
   bpm: WarmUpBpm;
   octaves: WarmUpOctaves;
   peakRepeats: WarmUpPeakRepeats;
+  /** Long note only: the written pitch, spelled — a token from WARMUP_LONG_NOTE_NOTES. */
+  noteName: WarmUpLongNoteName;
+  /** Long note only: absolute written octave, scientific pitch (C4 = middle C). */
+  noteOctave: WarmUpLongNoteOctave;
+  /** Long note only: how many measures the note is held for. */
+  longNoteMeasures: WarmUpLongNoteMeasures;
+  /** Long note only: how many hold-then-breathe blocks the exercise contains. */
+  longNoteRepeats: WarmUpLongNoteRepeats;
 }
 
 /**
@@ -67,7 +98,18 @@ export interface ExerciseParams {
  * invalidate a generated score. Keeping it out of this type is what stops a caller
  * from re-generating — or a generator from depending on — something purely playback.
  */
-export type ScoreParams = Omit<ExerciseParams, 'bpm'>;
+export type ScoreParams = Omit<ExerciseParams, 'bpm'> & {
+  /**
+   * Where the exercise is anchored, when the instrument is not a piano.
+   *
+   * Derived from the instrument at render time (`exerciseRootMidi`) and deliberately
+   * *not* part of `ExerciseParams`: routine blocks persist those, and an anchor that
+   * follows from the routine's instrument has no business being stored per block —
+   * it would go stale the moment the registry's range changed. Omitted means the
+   * piano's long-standing C4/C3 anchor.
+   */
+  rootMidi?: number;
+};
 
 export interface MeasureNotes {
   rh: string[][] | null;
@@ -125,8 +167,8 @@ export const WARM_UP_REGISTRY = {
     labelKey: 'dashboard.scales',
     shortLabelKey: 'routineEdit.addExerciseScales',
     rehearsalLabel: (_p, k) => `${k} Scale`,
-    generateXml: (p) => generateScaleXml(p.pitchClass, p.mode, p.hand, p.octaves),
-    measureNotes: (p) => getScaleMeasureNotes(p.pitchClass, p.mode, p.hand, p.octaves),
+    generateXml: (p) => generateScaleXml(p.pitchClass, p.mode, p.hand, p.octaves, p.rootMidi),
+    measureNotes: (p) => getScaleMeasureNotes(p.pitchClass, p.mode, p.hand, p.octaves, p.rootMidi),
   },
   arpeggio: {
     params: KEYED_PARAMS,
@@ -141,8 +183,9 @@ export const WARM_UP_REGISTRY = {
     labelKey: 'dashboard.chromatic',
     shortLabelKey: 'routineEdit.addExerciseChromatic',
     rehearsalLabel: (_p, k) => `${k} Chromatic`,
-    generateXml: (p) => generateChromaticXml(p.pitchClass, p.mode, p.hand, p.octaves),
-    measureNotes: (p) => getChromaticMeasureNotes(p.pitchClass, p.mode, p.hand, p.octaves),
+    generateXml: (p) => generateChromaticXml(p.pitchClass, p.mode, p.hand, p.octaves, p.rootMidi),
+    measureNotes: (p) =>
+      getChromaticMeasureNotes(p.pitchClass, p.mode, p.hand, p.octaves, p.rootMidi),
   },
   fiveScale: {
     params: KEYED_PARAMS,
@@ -160,6 +203,24 @@ export const WARM_UP_REGISTRY = {
     rehearsalLabel: () => '4-5 Drill',
     generateXml: (p) => generateDrill45Xml(p.hand, p.peakRepeats),
     measureNotes: (p, fingering) => getDrill45MeasureNotes(p.hand, fingering, p.peakRepeats),
+  },
+  longNote: {
+    // No key, no hand, no octave span, no exercise number: a long tone names one
+    // absolute written pitch and holds it, so it shares no parameter with the keyed
+    // family and carries four of its own instead.
+    params: ['noteName', 'noteOctave', 'longNoteMeasures', 'longNoteRepeats', 'bpm'],
+    labelKey: 'dashboard.longNote',
+    shortLabelKey: 'routineEdit.addExerciseLongNote',
+    // Exercise first, unlike "C Scale": there is no key here, and "G4 Long Note" would
+    // read as one.
+    rehearsalLabel: (p) => `Long Note ${p.noteName}${p.noteOctave}`,
+    // `p.rootMidi` is deliberately unread. It anchors a *pitch class* in the
+    // instrument's register, which is the wrong question for a pitch that already
+    // names its own octave.
+    generateXml: (p) =>
+      generateLongNoteXml(p.noteName, p.noteOctave, p.longNoteMeasures, p.longNoteRepeats),
+    measureNotes: (p) =>
+      getLongNoteMeasureNotes(p.noteName, p.noteOctave, p.longNoteMeasures, p.longNoteRepeats),
   },
 } as const satisfies Record<string, WarmUpDescriptor>;
 
@@ -190,6 +251,10 @@ export const DEFAULT_EXERCISE_PARAMS: ExerciseParams = {
   bpm: DEFAULT_WARMUP_BPM,
   octaves: 1,
   peakRepeats: DEFAULT_PEAK_REPEATS,
+  noteName: DEFAULT_LONG_NOTE_NAME,
+  noteOctave: DEFAULT_LONG_NOTE_OCTAVE,
+  longNoteMeasures: DEFAULT_LONG_NOTE_MEASURES,
+  longNoteRepeats: DEFAULT_LONG_NOTE_REPEATS,
 };
 
 /**
@@ -204,8 +269,31 @@ export const DEFAULT_EXERCISE_PARAMS: ExerciseParams = {
 const measureCountCache = new Map<string, number>();
 const MEASURE_COUNT_CACHE_LIMIT = 512;
 
+/**
+ * Every field that can change the note count.
+ *
+ * Written as a Record rather than a hand-typed template string so that adding a field
+ * to `ExerciseParams` fails to compile until it is listed here. The old key enumerated
+ * the parameters by hand, which meant a new one silently *collided* instead — two
+ * blocks differing only in the missing field sharing a cached length, and a routine's
+ * tempo schedule drifting away from its own score.
+ */
+const CACHE_KEY_FIELDS: Record<keyof Omit<ExerciseParams, 'bpm'>, true> = {
+  exercise: true,
+  pitchClass: true,
+  mode: true,
+  hand: true,
+  octaves: true,
+  peakRepeats: true,
+  noteName: true,
+  noteOctave: true,
+  longNoteMeasures: true,
+  longNoteRepeats: true,
+};
+const CACHE_KEY_ORDER = Object.keys(CACHE_KEY_FIELDS) as (keyof ScoreParams)[];
+
 export function measureCount(type: WarmUpType, p: ScoreParams): number {
-  const cacheKey = `${type}|${p.exercise}|${p.pitchClass}|${p.mode}|${p.hand}|${p.octaves}|${p.peakRepeats}`;
+  const cacheKey = `${type}|${CACHE_KEY_ORDER.map((f) => p[f]).join('|')}`;
   const hit = measureCountCache.get(cacheKey);
   if (hit !== undefined) return hit;
 

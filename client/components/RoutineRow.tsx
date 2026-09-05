@@ -6,6 +6,7 @@ import type { Routine } from '@domain/routine';
 import { estimateRoutineSeconds } from '@domain/routineMusicXml';
 import { Colors } from '@theme/colors';
 import { AppIcon } from './AppIcon';
+import { InstrumentBadge } from './InstrumentBadge';
 
 interface RoutineRowProps {
   routine: Routine;
@@ -53,9 +54,12 @@ export function RoutineRow({
         <Text className="text-lg font-semibold text-slate-950" numberOfLines={1}>
           {routine.title || t('routineEdit.newTitle')}
         </Text>
-        <Text className="mt-0.5 text-sm opacity-[0.85] text-slate-950" numberOfLines={1}>
-          {subtitle}
-        </Text>
+        <View className="mt-0.5 flex-row items-center gap-2">
+          <InstrumentBadge instrument={routine.instrument} />
+          <Text className="flex-1 text-sm opacity-[0.85] text-slate-950" numberOfLines={1}>
+            {subtitle}
+          </Text>
+        </View>
       </View>
 
       {!isSelectionMode ? (

@@ -2,6 +2,10 @@ import {
   MAX_XML_BYTES,
   scrapeMusicXmlMetadata,
   scrapeTempoBpm,
+  scrapePartPolyphony,
+  scrapePartTranspose,
+  scrapeScoreParts,
+  isPartMonophonic,
   validateMusicXml,
 } from '../musicxml';
 
@@ -225,5 +229,166 @@ describe('scrapeTempoBpm', () => {
   test('handles a BOM-prefixed document', () => {
     const xml = '﻿' + makeScore('4.0', 'score-partwise', '<sound tempo="72"/>');
     expect(scrapeTempoBpm(xml)).toBe(72);
+  });
+});
+
+describe('scrapePartTranspose', () => {
+  const wrap = (parts: string) => `<score-partwise version="4.0">${parts}</score-partwise>`;
+  const part = (id: string, attributes: string) =>
+    `<part id="${id}"><measure number="1"><attributes>${attributes}</attributes></measure></part>`;
+
+  it('reads a Bb clarinet declaration', () => {
+    const xml = wrap(
+      part('P1', '<transpose><diatonic>-1</diatonic><chromatic>-2</chromatic></transpose>'),
+    );
+    expect(scrapePartTranspose(xml)).toBe(-2);
+  });
+
+  it('returns null when the part declares no transposition', () => {
+    // Not 0: "nobody said" is what tells a concert-pitch score apart from one already
+    // written for its instrument. See defaultBaseTranspose.
+    expect(scrapePartTranspose(wrap(part('P1', '<divisions>1</divisions>')))).toBeNull();
+  });
+
+  it('distinguishes an explicit zero from a missing element', () => {
+    const xml = wrap(part('P1', '<transpose><chromatic>0</chromatic></transpose>'));
+    expect(scrapePartTranspose(xml)).toBe(0);
+  });
+
+  it('counts octave-change, as a bass clarinet needs', () => {
+    const xml = wrap(
+      part(
+        'P1',
+        '<transpose><chromatic>-2</chromatic><octave-change>-1</octave-change></transpose>',
+      ),
+    );
+    expect(scrapePartTranspose(xml)).toBe(-14);
+  });
+
+  it('reads the named part, not the first one', () => {
+    const xml = wrap(
+      part('P1', '<divisions>1</divisions>') +
+        part('P2', '<transpose><chromatic>-2</chromatic></transpose>'),
+    );
+    expect(scrapePartTranspose(xml, 'P2')).toBe(-2);
+    expect(scrapePartTranspose(xml, 'P1')).toBeNull();
+    // Unscoped finds the first declaration anywhere.
+    expect(scrapePartTranspose(xml)).toBe(-2);
+  });
+
+  it('reports nothing declared for a part id that is not in the file', () => {
+    // Reading some other part's element would silently transpose the wrong line.
+    const xml = wrap(part('P1', '<transpose><chromatic>-2</chromatic></transpose>'));
+    expect(scrapePartTranspose(xml, 'P9')).toBeNull();
+  });
+
+  it('tolerates single quotes and extra attributes on the part element', () => {
+    const xml = `<score-partwise><part id='P2' foo="bar"><measure><attributes><transpose><chromatic>-9</chromatic></transpose></attributes></measure></part></score-partwise>`;
+    expect(scrapePartTranspose(xml, 'P2')).toBe(-9);
+  });
+
+  it('treats a childless transpose element as no declaration', () => {
+    expect(scrapePartTranspose(wrap(part('P1', '<transpose></transpose>')))).toBeNull();
+  });
+});
+
+describe('scrapePartPolyphony', () => {
+  const wrap = (parts: string, partList = '') =>
+    `<score-partwise version="4.0">${partList}${parts}</score-partwise>`;
+  const part = (id: string, body: string) =>
+    `<part id="${id}"><measure number="1">${body}</measure></part>`;
+  const note = (step: string, voice = '1', extra = '') =>
+    `<note>${extra}<pitch><step>${step}</step><octave>4</octave></pitch><duration>1</duration><voice>${voice}</voice></note>`;
+
+  it('calls a plain single line monophonic', () => {
+    const xml = wrap(part('P1', note('C') + note('D')));
+    expect(scrapePartPolyphony(xml, 'P1')).toMatchObject({
+      staffCount: 1,
+      hasChords: false,
+      voiceCount: 1,
+      reason: null,
+    });
+    expect(isPartMonophonic(xml, 'P1')).toBe(true);
+  });
+
+  it('refuses a two-staff part', () => {
+    const xml = wrap(part('P1', '<attributes><staves>2</staves></attributes>' + note('C')));
+    expect(scrapePartPolyphony(xml, 'P1')?.reason).toBe('staves');
+  });
+
+  it('takes the largest staff count, so one two-staff passage disqualifies the part', () => {
+    const xml = wrap(
+      part(
+        'P1',
+        '<attributes><staves>1</staves></attributes>' +
+          note('C') +
+          '<attributes><staves>2</staves></attributes>',
+      ),
+    );
+    expect(scrapePartPolyphony(xml, 'P1')).toMatchObject({ staffCount: 2, reason: 'staves' });
+  });
+
+  it('refuses a part containing chords', () => {
+    const xml = wrap(part('P1', note('C') + note('E', '1', '<chord/>')));
+    expect(scrapePartPolyphony(xml, 'P1')).toMatchObject({ hasChords: true, reason: 'chords' });
+  });
+
+  it('refuses a part with more than one voice', () => {
+    const xml = wrap(part('P1', note('C', '1') + note('E', '2')));
+    expect(scrapePartPolyphony(xml, 'P1')).toMatchObject({ voiceCount: 2, reason: 'voices' });
+  });
+
+  it('counts a part that writes no voice element at all as one voice', () => {
+    const xml = wrap(part('P1', '<note><pitch><step>C</step><octave>4</octave></pitch></note>'));
+    expect(scrapePartPolyphony(xml, 'P1')).toMatchObject({ voiceCount: 1, reason: null });
+  });
+
+  it('reports the staff count first, the way a reader would see it', () => {
+    // A piano score fails all three at once; naming one is enough to explain itself.
+    const xml = wrap(
+      part(
+        'P1',
+        '<attributes><staves>2</staves></attributes>' + note('C', '1') + note('E', '5', '<chord/>'),
+      ),
+    );
+    expect(scrapePartPolyphony(xml, 'P1')?.reason).toBe('staves');
+  });
+
+  it('judges the named part, not the whole document', () => {
+    const xml = wrap(part('P1', note('C') + note('E', '1', '<chord/>')) + part('P2', note('G')));
+    expect(scrapePartPolyphony(xml, 'P1')?.reason).toBe('chords');
+    expect(scrapePartPolyphony(xml, 'P2')?.reason).toBeNull();
+  });
+
+  it('says nothing about a part it cannot find, rather than reading the document', () => {
+    const xml = wrap(part('P1', '<attributes><staves>2</staves></attributes>'));
+    expect(scrapePartPolyphony(xml, 'P9')).toBeNull();
+    expect(isPartMonophonic(xml, 'P9')).toBeUndefined();
+  });
+});
+
+describe('scrapeScoreParts', () => {
+  const scorePart = (id: string, name: string) =>
+    `<score-part id="${id}"><part-name>${name}</part-name></score-part>`;
+  const part = (id: string, body: string) =>
+    `<part id="${id}"><measure number="1">${body}</measure></part>`;
+  const note = (step: string, voice = '1', extra = '') =>
+    `<note>${extra}<pitch><step>${step}</step><octave>4</octave></pitch><voice>${voice}</voice></note>`;
+
+  it('settles each part’s monophony at import, so nothing re-reads the score later', () => {
+    const xml =
+      `<score-partwise version="4.0"><part-list>${scorePart('P1', 'Piano')}${scorePart('P2', 'Clarinet')}</part-list>` +
+      part('P1', '<attributes><staves>2</staves></attributes>' + note('C')) +
+      part('P2', note('G')) +
+      '</score-partwise>';
+    expect(scrapeScoreParts(xml)).toEqual([
+      { id: 'P1', name: 'Piano', monophonic: false, polyphonyReason: 'staves' },
+      { id: 'P2', name: 'Clarinet', monophonic: true },
+    ]);
+  });
+
+  it('leaves the flag absent when the part body is not there to read', () => {
+    const xml = `<score-partwise version="4.0"><part-list>${scorePart('P1', 'Flute')}</part-list></score-partwise>`;
+    expect(scrapeScoreParts(xml)).toEqual([{ id: 'P1', name: 'Flute' }]);
   });
 });

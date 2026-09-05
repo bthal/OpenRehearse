@@ -7,9 +7,11 @@ This repository uses **`specs/`** as the source of truth for product intent and 
 
 ## What this is
 
-Practice companion for piano students: import MusicXML, render the score via OSMD, synthesize audio
-from the notation, keep the OSMD cursor aligned with playback, and loop one active passage (a
-"bit") for focused repetition. Offline after import. Scores stay on-device — never uploaded.
+Practice companion for instrumentalists: import MusicXML, render the score via OSMD, synthesize
+audio from the notation, keep the OSMD cursor aligned with playback, and loop one active passage (a
+"bit") for focused repetition. Piano and Bb clarinet ship; a piece carries its instrument, the part
+being practised, and its transposition. Offline — sample sets are bundled and nothing is fetched at
+runtime. Scores stay on-device — never uploaded.
 
 ```
 RN native shell (Expo Router screens, Zustand)
@@ -32,16 +34,18 @@ RN/OSMD/Tone imports. See `specs/architecture.md` for the authoritative version.
 | Screens & flows | `specs/features/dashboard.md`, `specs/features/playview.md` |
 | Practice-time tracking & heatmap | `specs/features/dashboard.md`, `compound-docs/practice-tracking.md` |
 | Settings & count-in | `specs/features/settings.md`, `compound-docs/tone-playback.md` (count-in) |
-| Files & MusicXML | `specs/features/import.md` |
+| Files & MusicXML | `specs/features/import.md`, `compound-docs/expo-rn-setup.md` (picker & SAF traps) |
 | Sections: detection, user editing & the PlayView label | `specs/features/section-detection.md`, `compound-docs/osmd-webview.md` |
 | Bits (saved loops), the marker strip & the bit toolbar | `specs/features/playview.md`, `specs/features/pieces-domain.md`, `compound-docs/osmd-webview.md` |
 | Play-surface overlays & animation | `specs/features/playview.md`, `compound-docs/expo-rn-setup.md` |
 | Local data & offline | `specs/features/offline-storage.md` |
 | Audio + cursor sync | `specs/features/playback-synthesis.md`, `specs/features/playview.md`, `compound-docs/tone-playback.md` |
 | State & domain | `specs/features/pieces-domain.md` |
-| Warm-up exercises | `specs/features/warmup.md` |
+| Warm-up exercises | `specs/features/warmup.md`, `compound-docs/settings-persistence.md` (the measure-count memo key) |
+| Instruments, transposition, part selection | `specs/features/instruments.md` |
 | Routines (build + playback) | `specs/features/warmup.md` (Routines section) |
 | Adding a persisted setting | `compound-docs/settings-persistence.md` |
+| Samples, sounding pitch, offline audio | `specs/features/instruments.md` § Audio, `compound-docs/tone-playback.md` |
 | Colours, typography, logo, icons | `specs/brand.md`, `compound-docs/brand-assets.md` |
 
 ## Module map (where code goes)
@@ -120,6 +124,14 @@ Two invariants worth knowing before you touch anything here:
   that same bundle step: `score-web/**` is outside tsc and Jest, so building it is the *only*
   check it gets, and without it a broken bundle reaches CI untouched. See
   [`compound-docs/release-pipeline.md`](compound-docs/release-pipeline.md) for why it works this way.
+  Being gitignored also means **the bundle does not follow your branch** — a `git checkout` swaps
+  `score-web/src/` and leaves the built `html.ts` behind, so the WebView can run code arbitrarily
+  older than the native side calling into it. That fails partially and quietly: globals the old
+  bundle already had still work, so the score loads and plays while the newer ones are missing,
+  and `injectJavaScript` reports it only as an opaque `SCRIPT ERR: Script error. @0:0`. Two guards
+  now exist — `prestart`/`preandroid`/`preios`/`preweb`/`preclear` rebuild before Metro starts, and
+  `injectInstrumentAudio` checks for its global and surfaces an `ERROR` naming the fix. See the
+  landmine section in [`compound-docs/osmd-webview.md`](compound-docs/osmd-webview.md).
 - **The git tag is the version; nothing in the repo is.** `client/package.json` and
   `client/app.json` hold `0.0.0` placeholders and are never bumped — that is what lets any commit
   be released. `release.yml` derives `app.json`'s `version` and the integer `android.versionCode`
@@ -149,6 +161,14 @@ The `/commit` command runs a guided pass over all of this: assess scope → read
 
 - **MusicXML**: **`.xml`** (uncompressed) and **`.mxl`** (compressed); both **2.x–4.x**; reject other formats clearly.
 - **Scores**: **local device only** in MVP — **do not** upload MusicXML to any server.
+- **Instruments**: `INSTRUMENT_REGISTRY` (`src/domain/instrumentRegistry.ts`) is the **only**
+  enumeration — never switch on an instrument name. It owns the sample set, written range,
+  staff layout, sounding interval and exercise list. Playback sounds the **sounding** pitch, not the
+  written one. Sample sets are **bundled**, never fetched. Other parts of a multi-part score are
+  **filtered, never stripped** — the XML is stored whole. A `staffLayout: 'single'` instrument may
+  only be assigned to a **monophonic** part (no `<staves>` > 1, no `<chord/>`, one `<voice>`), the
+  selection is **refused rather than reduced**, and a piece's instrument and part are **immutable
+  after import**. The dashboard's instrument scope is a **view filter** over that screen only.
 - **Loops**: **one** active loop; handles **continuously draggable** but **discretised to the note
   grid** (bounds are half-open `[A, B)`, minimum one quarter note); **immediate jump** at wrap.
   Saved loops ("**bits**") do not change that: a bit is *stored bounds plus practice settings*,

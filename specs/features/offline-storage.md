@@ -13,6 +13,13 @@
 - **Practice history**: total seconds of active playback per local calendar day
   (`practice_daily` table), feeding the dashboard heatmap.
 
+## What ships in the app
+
+- **Instrument samples** for every supported instrument, bundled in the APK
+  (`client/assets/samples/`). These used to be fetched from a CDN and cached by the WebView, which
+  made offline playback true only by accident — a cache eviction or a first play in airplane mode
+  meant silence. See `specs/features/instruments.md` § Audio.
+
 ## What is not stored on server (MVP)
 
 - **No** MusicXML or rendered assets uploaded to any backend.
@@ -30,5 +37,6 @@
 
 ## Acceptance criteria
 
-- [ ] Airplane mode: dashboard lists local pieces; PlayView plays (subject to WebView cache behavior — ensure bundle assets offline).
+- [ ] Airplane mode on a **fresh install**: dashboard lists local pieces and PlayView plays. No
+      warm cache is required — nothing the app plays is fetched at runtime.
 - [ ] Uninstall = data loss is acceptable for MVP unless we add export later.

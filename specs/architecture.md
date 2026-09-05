@@ -44,7 +44,7 @@ See [`../README.md`](../README.md#releasing) for the operator's view and
 
 | Area | Responsibility |
 |------|----------------|
-| `client/src/domain/` | Pure TS: Pieces, Bits, musical time, loop validation, tempo |
+| `client/src/domain/` | Pure TS: Pieces, Bits, musical time, loop validation, tempo, the instrument registry and detection |
 | `client/src/data/` | LocalPieceRepository, file pickers, XML cache |
 | `client/src/state/` | Zustand stores (piecesStore, playViewStore) |
 | `client/app/` | Expo Router screens (Dashboard, PlayView) |
@@ -74,5 +74,7 @@ Define a **versioned** JSON schema between RN and WebView, e.g.:
 
 ## Open technical choices (to resolve in first implementation PR)
 
-- Exact **synth** library and **soundfont** size vs. APK size.
+- ~~Exact **synth** library and **soundfont** size vs. APK size.~~ Resolved: Tone.Sampler with
+  bundled per-note MP3s, thinned to about one per minor third, ~2.4 MB for two instruments. See
+  `features/instruments.md` § Audio.
 - Whether **WebView** hosts both OSMD + Tone.js or native audio is driven by **scheduled events** from WebView (second path is harder; default: all in Web).

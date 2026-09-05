@@ -1,0 +1,290 @@
+/**
+ * The single source of truth for what instruments exist and what each one is.
+ *
+ * Deliberately the same shape as `WARM_UP_REGISTRY`: `InstrumentId` is derived from
+ * the keys, display order is key order, and every consumer reads what it needs off a
+ * descriptor rather than switching on a name. That is what keeps "which exercises can
+ * a clarinet do", "how is its score engraved", and "what does it sound like" in one
+ * place instead of scattered across the screens that ask.
+ *
+ * Adding an instrument is a row here plus a bundled sample set. It is *not* free —
+ * the samples, the range and the exercise list all have to be got right — which is
+ * why the catalogue is short on purpose. See `specs/features/instruments.md`.
+ */
+import {
+  CLARINET_SAMPLE_NOTES,
+  PIANO_SAMPLE_NOTES,
+  type StaffLayout,
+  type SustainLoop,
+  type WrittenRange,
+} from './instrument';
+import type { WarmUpType } from './warmupRegistry';
+
+export interface InstrumentDescriptor {
+  /** i18n key for the display name. */
+  labelKey: string;
+  /**
+   * i18n key for the name in a tight space — a row badge, the dashboard scope button.
+   * "Clarinet in B♭" is the honest name and stays the display one; it is also three
+   * words too long for a chip beside a piece title.
+   */
+  shortLabelKey: string;
+  /** Directory name under `assets/samples/`; also the id used in the sample bridge. */
+  sampleSet: string;
+  /** Sounding-pitch note names the sample set provides, one file each. */
+  sampleNotes: readonly string[];
+  /**
+   * Where this set's recordings may be looped so a note can outlast its buffer.
+   *
+   * Absent means one-shot: the note stops when the sample runs out, which is right for
+   * anything that decays. Present routes the instrument through the looping player
+   * instead of `Tone.Sampler` — the Sampler has no loop option at all.
+   */
+  sustainLoop?: SustainLoop;
+  /** What the player reads. Governs what the UI offers, never what playback permits. */
+  writtenRange: WrittenRange;
+  /**
+   * Sounding pitch relative to written, in semitones. `0` for a concert-pitch
+   * instrument; `-2` for a Bb clarinet, which sounds a major 2nd below what it reads.
+   *
+   * This is authoritative for playback, in preference to the file's `<transpose>`
+   * element — reading the interval off the file would double-count the moment a
+   * concert-pitch score is assigned to a transposing instrument.
+   */
+  transposeSemitones: number;
+  staffLayout: StaffLayout;
+  /** The warm-up families this instrument can do, in registry order. */
+  exercises: readonly WarmUpType[];
+}
+
+export const INSTRUMENT_REGISTRY = {
+  piano: {
+    labelKey: 'instruments.piano',
+    shortLabelKey: 'instruments.pianoShort',
+    sampleSet: 'salamander-piano',
+    sampleNotes: PIANO_SAMPLE_NOTES,
+    // No `sustainLoop`, and this one is not an oversight to be corrected later. A
+    // Salamander sample is 4–25 s and falls from about -24 dBFS at the onset to
+    // -55 dBFS by 1.25 s; looping any part of that would hold a dead tail open. A
+    // piano note is *supposed* to stop.
+    // A0–C8, the standard 88.
+    writtenRange: { lowMidi: 21, highMidi: 108 },
+    transposeSemitones: 0,
+    staffLayout: 'grand',
+    exercises: ['hanon', 'scales', 'arpeggio', 'chromatic', 'fiveScale', 'drill45'],
+  },
+  clarinetBb: {
+    labelKey: 'instruments.clarinetBb',
+    shortLabelKey: 'instruments.clarinetBbShort',
+    sampleSet: 'fluidr3-clarinet',
+    sampleNotes: CLARINET_SAMPLE_NOTES,
+    // Every file in this set is exactly 3.128889 s of dead-flat tone — no decay, no
+    // release, and an onset only ~1.6 dB below the steady state — then a hard cut. So
+    // any part of it is usable sustain material, and without a loop a clarinet note
+    // simply stops after 3.13 s (a whole note below ~77 BPM, and every long tone).
+    //
+    // The bounds were measured across all 17 files, not guessed:
+    //   startSec 0.50 — the slowest onset (C3) has settled by ~0.15 s, so this clears
+    //                   it with room to spare, and leaves 0.30 s of headroom above the
+    //                   crossfade, which must fit in [startSec - crossfadeSec, startSec).
+    //   endSec   2.90 — 0.23 s clear of the hard cut at 3.128889 s. The margin is for
+    //                   the decoder, not the audio: mp3 encoder padding is trimmed by
+    //                   whatever decodes the file, and Chromium need not agree with the
+    //                   tool these numbers were measured with to within a few frames.
+    //   crossfadeSec 0.20 — long enough that the blend reads as a transition rather
+    //                   than an edge, short enough to be 8% of the 2.4 s loop.
+    //
+    // The loop length is deliberately the longest the two margins allow: a longer loop
+    // is a less repetitive one. It is *not* tuned against seam artefacts, and that is
+    // considered. One spec covers 17 pitches, so the two blended copies meet at an
+    // effectively random phase per note; the resulting level modulation across the seam
+    // (about 2-3 dB typically, up to ~7 dB on the unluckiest note) moves chaotically
+    // with a 5 ms change in endSec and reshuffles again under a different decoder.
+    // There is nothing stable to optimise against. See `src/score-web/sustainLoop.ts`.
+    sustainLoop: { startSec: 0.5, endSec: 2.9, crossfadeSec: 0.2 },
+    // Written E3–C7; sounding D3–Bb6.
+    writtenRange: { lowMidi: 52, highMidi: 96 },
+    transposeSemitones: -2,
+    staffLayout: 'single',
+    // Scales, chromatic and long tones. `drill45` is two simultaneous voices per hand
+    // and cannot exist here at all; Hanon would render as a single line but trains
+    // piano finger independence and prints piano fingerings, so it is excluded as
+    // pointless rather than impossible. Arpeggios and 5-finger are playable and are
+    // the obvious next additions — held back only to keep the first slice small.
+    // `longNote` is the reverse case: a wind exercise the piano has no use for,
+    // because a struck string decays and cannot be held.
+    exercises: ['scales', 'chromatic', 'longNote'],
+  },
+} as const satisfies Record<string, InstrumentDescriptor>;
+
+export type InstrumentId = keyof typeof INSTRUMENT_REGISTRY;
+
+/** Display order for every list of instruments in the app. */
+export const INSTRUMENT_IDS = Object.keys(INSTRUMENT_REGISTRY) as InstrumentId[];
+
+/** What a piece or routine is when it does not say — see `normaliseInstrumentId`. */
+export const DEFAULT_INSTRUMENT: InstrumentId = 'piano';
+
+export function isInstrumentId(value: unknown): value is InstrumentId {
+  return (
+    typeof value === 'string' && Object.prototype.hasOwnProperty.call(INSTRUMENT_REGISTRY, value)
+  );
+}
+
+/**
+ * Forces a value read off disk into a known instrument.
+ *
+ * Everything stored before instruments existed is a piano piece, and so is anything
+ * whose column has rotted — the same normalise-on-read contract `normaliseBits` and
+ * `normaliseSections` give, and for the same reason: no migration, and no consumer
+ * past the repository has to defend against `undefined`.
+ */
+export function normaliseInstrumentId(raw: unknown): InstrumentId {
+  return isInstrumentId(raw) ? raw : DEFAULT_INSTRUMENT;
+}
+
+/** Descriptor lookup that tolerates unknown input, for data loaded off disk. */
+export function instrumentDescriptor(value: unknown): InstrumentDescriptor | null {
+  return isInstrumentId(value) ? INSTRUMENT_REGISTRY[value] : null;
+}
+
+export function supportsExercise(instrument: InstrumentId, type: WarmUpType): boolean {
+  // `as const` narrows each exercises tuple to its own literal union, so widen to compare.
+  return (INSTRUMENT_REGISTRY[instrument].exercises as readonly WarmUpType[]).includes(type);
+}
+
+/**
+ * Where this instrument's samples may be looped, or `null` if they are one-shots.
+ *
+ * A function rather than a field read because `as const` keeps each row's literal type,
+ * and a row that omits the optional field has no such property to read at all. Widening
+ * to the descriptor here is what makes "does this instrument loop?" one question with
+ * one answer instead of a narrowing puzzle at every call site.
+ */
+export function sustainLoopFor(instrument: InstrumentId): SustainLoop | null {
+  const descriptor: InstrumentDescriptor = INSTRUMENT_REGISTRY[instrument];
+  return descriptor.sustainLoop ?? null;
+}
+
+/** The exercises this instrument offers, in registry order. */
+export function exercisesFor(instrument: InstrumentId): readonly WarmUpType[] {
+  return INSTRUMENT_REGISTRY[instrument].exercises;
+}
+
+/**
+ * What the speaker plays for a note the player reads.
+ *
+ * The app is something you play along with: a Bb clarinet sounds a major 2nd below
+ * what it reads, so sounding written pitch through clarinet samples would put the app
+ * a whole tone above the person reading the same notes off the same screen.
+ */
+export function soundingMidi(writtenMidi: number, instrument: InstrumentId): number {
+  return writtenMidi + INSTRUMENT_REGISTRY[instrument].transposeSemitones;
+}
+
+/**
+ * The transposition that makes an imported score readable on this instrument.
+ *
+ * A correctly exported clarinet part is *already* written in the transposed key and
+ * needs nothing; a concert-pitch melody needs the whole interval. `<transpose>` is the
+ * signal the engraver actually wrote, and it is exactly what tells the two apart —
+ * which is why its presence, not the instrument alone, decides.
+ *
+ * `fileTransposeSemitones` is the part's `<transpose><chromatic>` value, or `null`
+ * when the part carries no `<transpose>` element at all. Note that `0` and `null` are
+ * different answers here: an explicit `<transpose>` of 0 still means the engraver
+ * declared the part's pitch relationship, so we leave it alone.
+ */
+export function defaultBaseTranspose(
+  instrument: InstrumentId,
+  fileTransposeSemitones: number | null,
+): number {
+  if (fileTransposeSemitones !== null) return 0;
+  // Negating a concert-pitch instrument's 0 yields `-0`, which is a distinct value:
+  // it would be stored as such and would fail an `Object.is` comparison against 0.
+  const interval = INSTRUMENT_REGISTRY[instrument].transposeSemitones;
+  return interval === 0 ? 0 : -interval;
+}
+
+/** Whether a written pitch sits within what this instrument reads. */
+export function isInWrittenRange(instrument: InstrumentId, writtenMidi: number): boolean {
+  const { lowMidi, highMidi } = INSTRUMENT_REGISTRY[instrument].writtenRange;
+  return writtenMidi >= lowMidi && writtenMidi <= highMidi;
+}
+
+/**
+ * The MIDI root a keyed exercise starts on for this instrument.
+ *
+ * The piano has always anchored at C4 (60) for the right hand and C3 (48) for the
+ * left, and keeps doing so. A single-staff instrument instead takes the lowest
+ * occurrence of the pitch class at or above the bottom of its written range, so an
+ * exercise sits where the instrument actually plays rather than where a piano would.
+ */
+export function exerciseRootMidi(instrument: InstrumentId, pitchClass: number): number {
+  const d = INSTRUMENT_REGISTRY[instrument];
+  if (d.staffLayout === 'grand') return 60 + (((pitchClass % 12) + 12) % 12);
+  const pc = ((pitchClass % 12) + 12) % 12;
+  const low = d.writtenRange.lowMidi;
+  // First note of that pitch class at or above the range floor.
+  return low + ((((pc - (low % 12)) % 12) + 12) % 12);
+}
+
+/**
+ * How many octaves of a keyed exercise fit inside the instrument's written range.
+ *
+ * The picker offers only these, which is what removes the error state: the UI never
+ * presents a combination the instrument cannot play, so nothing has to fail later.
+ * Always at least 1 — an instrument too small for a single octave of some key would
+ * be a registry bug, and silently offering zero options would hide it.
+ */
+export function maxExerciseOctaves(instrument: InstrumentId, pitchClass: number): number {
+  const d = INSTRUMENT_REGISTRY[instrument];
+  if (d.staffLayout === 'grand') return 3;
+  const root = exerciseRootMidi(instrument, pitchClass);
+  const span = d.writtenRange.highMidi - root;
+  return Math.max(1, Math.min(3, Math.floor(span / 12)));
+}
+
+/**
+ * The written octaves in which this pitch class lands inside the instrument's range.
+ *
+ * For an exercise that names one absolute pitch rather than a key. The picker offers
+ * only these, the same contract `maxExerciseOctaves` gives the octave-span control:
+ * the UI never presents a note the instrument cannot play.
+ *
+ * Takes a pitch class rather than a note name so the long-note spelling table stays
+ * out of this module — C# and Db are the same question here.
+ */
+export function longNoteOctaves(instrument: InstrumentId, pitchClass: number): number[] {
+  const { lowMidi, highMidi } = INSTRUMENT_REGISTRY[instrument].writtenRange;
+  const pc = ((pitchClass % 12) + 12) % 12;
+  const octaves: number[] = [];
+  // Scientific pitch: MIDI 0 is C-1, so C4 = 60 = middle C, hence the -1.
+  for (let midi = pc; midi <= 127; midi += 12) {
+    if (midi >= lowMidi && midi <= highMidi) octaves.push(Math.floor(midi / 12) - 1);
+  }
+  return octaves;
+}
+
+/**
+ * The nearest offered octave to `octave` for this note.
+ *
+ * Changing the note can strand the octave — C#7 is above the clarinet's top C7 while
+ * C7 itself is not — and a settings file written under another instrument can arrive
+ * out of range too. Ties go to the lower octave. An empty option list would mean an
+ * instrument with under an octave of range, which is a registry bug, so the input is
+ * returned unchanged rather than quietly substituting something.
+ */
+export function clampLongNoteOctave(
+  instrument: InstrumentId,
+  pitchClass: number,
+  octave: number,
+): number {
+  const options = longNoteOctaves(instrument, pitchClass);
+  const first = options[0];
+  if (first === undefined || options.includes(octave)) return octave;
+  return options.reduce(
+    (best, o) => (Math.abs(o - octave) < Math.abs(best - octave) ? o : best),
+    first,
+  );
+}

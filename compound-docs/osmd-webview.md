@@ -149,6 +149,53 @@ The `score-web/` project has its own `tsconfig.json` that declares `"lib": ["ES2
 
 **NOTE:** The build script (`npm run build:score-web`) uses `npm ci`, which requires `score-web/package-lock.json`. On first clone or after deleting `score-web/node_modules/`, run `cd score-web && npm install` once to generate the lock file, then commit it. Subsequent runs use `npm ci` for reproducible installs.
 
+## LANDMINE: `html.ts` is generated and gitignored, so it does not follow your branch
+
+**LANDMINE:** `src/score-web/html.ts` is the esbuild output of `score-web/src/`, and it is
+gitignored (`client/.gitignore:10`). It is therefore **whatever your last local build
+produced**, regardless of which branch is checked out. `git checkout` swaps the source and
+leaves the bundle behind, so the WebView can be running code that is arbitrarily older than
+the native side driving it.
+
+A stale bundle does **not** fail loudly. `injectJavaScript` surfaces an error in the injected
+source only as an opaque cross-origin console line:
+
+```
+LOG  [score-web] OSMD ready
+LOG  [score-web] SCRIPT ERR: Script error. @0:0
+```
+
+— no name, no line, no stack. Worse, the failure is *partial*: a global the old bundle
+already had still works, so the score loads and renders and plays. Only the newer globals
+are missing. The app then behaves plausibly but wrongly, which reads as a feature bug rather
+than a build problem.
+
+This actually happened. A bundle built before the instruments feature had no
+`__rn_set_instrument_audio`, `__rn_set_part` or `__rn_set_transpose` — three injections,
+three `SCRIPT ERR` lines — but did have `__rn_load_xml`, so every piece loaded fine and
+played on that build's hardcoded Salamander CDN piano. The symptom reported was "a clarinet
+piece plays as piano, and it used to work"; nothing in the instruments code was wrong.
+
+**Diagnosis:** count how many `SCRIPT ERR` lines appear, and grep the bundle for the global
+the native side is about to call:
+
+```bash
+grep -c __rn_set_instrument_audio client/src/score-web/html.ts   # 0 means stale
+```
+
+**Fix:** `npm run bundle:score-web` (plain esbuild), or `npm run build:score-web` (also
+reinstalls `score-web/node_modules`). Restart Metro with `npm run clear` afterwards so the
+1.5 MB module is re-read.
+
+**Guards now in place:**
+- `prestart` / `preandroid` / `preios` / `preweb` / `preclear` in `client/package.json`
+  rebuild the bundle before Metro starts, so the local dev loop cannot drift.
+- `injectInstrumentAudio` (`src/score-web/instrumentAudio.ts`) checks for its global before
+  calling it and posts an `ERROR` naming the fix, so a stale bundle shows a visible score
+  error instead of quietly playing the wrong instrument.
+- CI (`npm run ci`) ends in `bundle:score-web`, and EAS rebuilds via
+  `eas-build-post-install` — a shipped APK cannot carry a stale bundle.
+
 ## Hiding the OSMD default cursor element
 
 The OSMD cursor (`cursor.cursorElement`) is an `<img>` that renders as a green arrow at the current step. We use a custom `#cursor-line` div for the visual cursor instead.
@@ -530,3 +577,47 @@ and breaks the manual single-line `PageWidth`).
 **not** cover `playback.ts`. Type-check it separately with `cd score-web && npx tsc --noEmit`, and
 rebuild the bundle after any `score-web/` change (see “`score-web/` edits are invisible until the
 bundle is rebuilt” in [`tone-playback.md`](tone-playback.md)).
+
+## Transposition and part filtering both belong between `load()` and `render()`
+
+**PATTERN:** `osmd.load(xml)` → resolve/hide parts → set `Sheet.Transpose` → `updateGraphic()` →
+`osmd.render()` → `initPlayback()`.
+
+```typescript
+await osmd.load(xml);
+const practised = instruments.find((i) => i.IdString === partId) ?? null;
+if (practised) for (const i of instruments) i.Visible = i === practised;
+setPractisedInstrument(practised);
+if (semitones !== 0) {
+  if (!osmd.TransposeCalculator) osmd.TransposeCalculator = new TransposeCalculator();
+  osmd.Sheet.Transpose = semitones;
+  osmd.updateGraphic();
+}
+osmd.render();
+initPlayback(osmd);
+```
+
+**LANDMINE:** that window is not a stylistic choice. `initPlayback` derives the note grid, the
+cursor steps and every barline pixel from the *rendered* layout, and transposing changes
+accidentals and key signatures and therefore measure widths. Transposing after the grid is built
+leaves the two describing different scores. Bits are stored as ticks, so they survive it untouched
+— which is also why a transposition change never invalidates saved loops.
+
+**LANDMINE:** OSMD ships `TransposeCalculator` in the free build but leaves `osmd.TransposeCalculator`
+unset. Without it `Sheet.Transpose` is silently ignored — OSMD logs an info line and renders the
+original. Import it from the package root (`export * from "./Plugins"`).
+
+**LANDMINE:** `Instrument.Visible = false` **cascades to every Voice**, and OSMD's
+`getVisibleEntries` gates on `ParentVoice.Visible`. So hiding a part also *silences* it. That is
+what the current one-part-only behaviour wants, but a future accompaniment mode cannot use
+`Visible` to hide-but-still-sound — it needs the independent `Audible` flag, which
+`CurrentAudibleVoiceEntries` reads.
+
+**PATTERN:** `NotesUnderCursor(instrument)` takes an optional `Instrument` and filters by
+`ParentVoice.Parent.IdString`. Passing it explicitly is preferred over relying on the `Visible`
+cascade, so render and playback cannot end up disagreeing about which line is being practised.
+
+**LANDMINE:** OSMD reads `<transpose><chromatic>` into `instrument.PlaybackTranspose` and **never
+applies it to pitches** — nothing in the bundle consumes that property. So `note.halfTone` is always
+the *written* pitch, and any sounding-pitch offset is the caller's job. Do not add the file's
+`<transpose>` on top of the instrument's own interval; that double-counts.

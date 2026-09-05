@@ -1,10 +1,15 @@
 import type {
   WarmUpBpm,
   WarmUpHand,
+  WarmUpLongNoteMeasures,
+  WarmUpLongNoteName,
+  WarmUpLongNoteOctave,
+  WarmUpLongNoteRepeats,
   WarmUpOctaves,
   WarmUpPeakRepeats,
   WarmUpScaleMode,
 } from './warmup';
+import type { InstrumentId } from './instrumentRegistry';
 import type { WarmUpType } from './warmupRegistry';
 
 export const PAUSE_MEASURES = [1, 2, 3, 4] as const;
@@ -22,6 +27,11 @@ export interface ExerciseBlock {
   exercise?: number;
   // drill45 only; absent on blocks saved before this parameter existed (treated as 1).
   peakRepeats?: WarmUpPeakRepeats;
+  // longNote only; absent on blocks saved before the exercise existed.
+  noteName?: WarmUpLongNoteName;
+  noteOctave?: WarmUpLongNoteOctave;
+  longNoteMeasures?: WarmUpLongNoteMeasures;
+  longNoteRepeats?: WarmUpLongNoteRepeats;
 }
 
 export interface PauseBlock {
@@ -34,6 +44,15 @@ export type RoutineBlock = ExerciseBlock | PauseBlock;
 export interface Routine {
   id: string;
   title: string;
+  /**
+   * The instrument this routine is built for. Chosen when the routine is created and
+   * read-only thereafter: changing it would invalidate blocks whose exercise the new
+   * instrument cannot do, and the Add Exercise picker already prevents such a block
+   * from being created in the first place, so there is nothing to re-validate.
+   *
+   * Routines stored before instruments existed normalise to `piano` on read.
+   */
+  instrument: InstrumentId;
   blocks: RoutineBlock[];
   // Absent on routines saved before the metronome became part of the routine (treated as
   // off, which is how every such routine played by default).
