@@ -11,7 +11,9 @@ import {
   DEFAULT_INSTRUMENT,
   INSTRUMENT_IDS,
   INSTRUMENT_REGISTRY,
+  clampLongNoteOctave,
   exercisesFor,
+  longNoteOctaves,
   supportsExercise,
   type InstrumentId,
 } from '@domain/instrumentRegistry';
@@ -26,13 +28,25 @@ import {
   validateRoutine,
 } from '@domain/routine';
 import {
+  DEFAULT_LONG_NOTE_MEASURES,
+  DEFAULT_LONG_NOTE_NAME,
+  DEFAULT_LONG_NOTE_OCTAVE,
+  DEFAULT_LONG_NOTE_REPEATS,
   DEFAULT_PEAK_REPEATS,
   WARMUP_BPMS,
   WARMUP_KEYS,
+  WARMUP_LONG_NOTE_MEASURES,
+  WARMUP_LONG_NOTE_NOTES,
+  WARMUP_LONG_NOTE_REPEATS,
   WARMUP_OCTAVES,
   WARMUP_PEAK_REPEATS,
+  longNoteEntry,
   type WarmUpBpm,
   type WarmUpHand,
+  type WarmUpLongNoteMeasures,
+  type WarmUpLongNoteName,
+  type WarmUpLongNoteOctave,
+  type WarmUpLongNoteRepeats,
   type WarmUpOctaves,
   type WarmUpPeakRepeats,
 } from '@domain/warmup';
@@ -58,6 +72,10 @@ type PickerType =
   | 'hand'
   | 'octaves'
   | 'peakRepeats'
+  | 'noteName'
+  | 'noteOctave'
+  | 'longNoteMeasures'
+  | 'longNoteRepeats'
   | 'measures'
   | 'addType'
   | 'addMeasures';
@@ -102,6 +120,14 @@ function defaultExerciseBlock(type: WarmUpType): ExerciseBlock {
     octaves,
     ...(hasParam(type, 'exercise') ? { exercise: DEFAULT_EXERCISE_PARAMS.exercise } : {}),
     ...(hasParam(type, 'peakRepeats') ? { peakRepeats: DEFAULT_PEAK_REPEATS } : {}),
+    ...(hasParam(type, 'noteName')
+      ? {
+          noteName: DEFAULT_EXERCISE_PARAMS.noteName,
+          noteOctave: DEFAULT_EXERCISE_PARAMS.noteOctave,
+          longNoteMeasures: DEFAULT_EXERCISE_PARAMS.longNoteMeasures,
+          longNoteRepeats: DEFAULT_EXERCISE_PARAMS.longNoteRepeats,
+        }
+      : {}),
   };
 }
 
@@ -124,6 +150,23 @@ function octavesLabel(octaves: WarmUpOctaves, t: TFn): string {
 
 function peakRepeatsLabel(peakRepeats: WarmUpPeakRepeats | undefined, t: TFn): string {
   return t('routineEdit.peakRepeats', { times: peakRepeats ?? DEFAULT_PEAK_REPEATS });
+}
+
+function longNoteNameLabel(block: ExerciseBlock): string {
+  return block.noteName ?? DEFAULT_LONG_NOTE_NAME;
+}
+
+/** The absolute written octave, e.g. `Oct 4`. Distinct from `octavesLabel`'s span. */
+function longNoteOctaveLabel(block: ExerciseBlock, t: TFn): string {
+  return t('routineEdit.noteOctave', { octave: block.noteOctave ?? DEFAULT_LONG_NOTE_OCTAVE });
+}
+
+function longNoteMeasuresLabel(measures: WarmUpLongNoteMeasures | undefined, t: TFn): string {
+  return t('routineEdit.measure', { count: measures ?? DEFAULT_LONG_NOTE_MEASURES });
+}
+
+function longNoteRepeatsLabel(repeats: WarmUpLongNoteRepeats | undefined, t: TFn): string {
+  return t('routineEdit.longNoteRepeats', { times: repeats ?? DEFAULT_LONG_NOTE_REPEATS });
 }
 
 // ─── Small presentational components (defined outside to satisfy lint) ─────────
@@ -304,6 +347,13 @@ export default function RoutineEditScreen() {
 
   // ─── "Add Exercise" picker ─────────────────────────────────────────────────
 
+  // Declaring `hand` is not enough: a single-staff instrument has no hand to choose,
+  // and `instrumentBlockParams` already forces the one-part case when the score is
+  // built, so the pill would open a picker that changes nothing.
+  function showHand(type: WarmUpType): boolean {
+    return hasParam(type, 'hand') && INSTRUMENT_REGISTRY[instrument].staffLayout !== 'single';
+  }
+
   function openAddPicker(atIndex: number) {
     setPicker({
       atIndex,
@@ -346,6 +396,30 @@ export default function RoutineEditScreen() {
     } else if (type === 'peakRepeats' && block.type !== 'pause') {
       options = WARMUP_PEAK_REPEATS.map((p) => ({ label: peakRepeatsLabel(p, t), value: p }));
       currentValue = block.peakRepeats ?? DEFAULT_PEAK_REPEATS;
+    } else if (type === 'noteName' && block.type !== 'pause') {
+      options = WARMUP_LONG_NOTE_NOTES.map((n) => ({ label: n.label, value: n.label }));
+      currentValue = block.noteName ?? DEFAULT_LONG_NOTE_NAME;
+    } else if (type === 'noteOctave' && block.type !== 'pause') {
+      // Only the octaves this routine's instrument can actually reach for that note.
+      const pc = longNoteEntry(block.noteName ?? DEFAULT_LONG_NOTE_NAME).pitchClass;
+      options = longNoteOctaves(instrument, pc).map((o) => ({ label: String(o), value: o }));
+      currentValue = clampLongNoteOctave(
+        instrument,
+        pc,
+        block.noteOctave ?? DEFAULT_LONG_NOTE_OCTAVE,
+      );
+    } else if (type === 'longNoteMeasures' && block.type !== 'pause') {
+      options = WARMUP_LONG_NOTE_MEASURES.map((m) => ({
+        label: longNoteMeasuresLabel(m, t),
+        value: m,
+      }));
+      currentValue = block.longNoteMeasures ?? DEFAULT_LONG_NOTE_MEASURES;
+    } else if (type === 'longNoteRepeats' && block.type !== 'pause') {
+      options = WARMUP_LONG_NOTE_REPEATS.map((r) => ({
+        label: longNoteRepeatsLabel(r, t),
+        value: r,
+      }));
+      currentValue = block.longNoteRepeats ?? DEFAULT_LONG_NOTE_REPEATS;
     }
 
     setPicker({ blockKey, type, options, currentValue });
@@ -399,6 +473,29 @@ export default function RoutineEditScreen() {
       patchBlock(blockKey!, { octaves: value as WarmUpOctaves });
     } else if (type === 'peakRepeats') {
       patchBlock(blockKey!, { peakRepeats: value as WarmUpPeakRepeats });
+    } else if (type === 'noteName') {
+      // The octave moves with the note in the same write: changing the note can put
+      // the stored octave outside what this instrument can play.
+      const name = value as WarmUpLongNoteName;
+      const block = blocks.find((b) => b._key === blockKey);
+      const current =
+        block && block.type !== 'pause'
+          ? (block.noteOctave ?? DEFAULT_LONG_NOTE_OCTAVE)
+          : DEFAULT_LONG_NOTE_OCTAVE;
+      patchBlock(blockKey!, {
+        noteName: name,
+        noteOctave: clampLongNoteOctave(
+          instrument,
+          longNoteEntry(name).pitchClass,
+          current,
+        ) as WarmUpLongNoteOctave,
+      });
+    } else if (type === 'noteOctave') {
+      patchBlock(blockKey!, { noteOctave: value as WarmUpLongNoteOctave });
+    } else if (type === 'longNoteMeasures') {
+      patchBlock(blockKey!, { longNoteMeasures: value as WarmUpLongNoteMeasures });
+    } else if (type === 'longNoteRepeats') {
+      patchBlock(blockKey!, { longNoteRepeats: value as WarmUpLongNoteRepeats });
     }
     setPicker(null);
   }
@@ -491,13 +588,15 @@ export default function RoutineEditScreen() {
                           label={`${block.bpm} BPM`}
                           onPress={() => openPicker(block._key, 'bpm', block)}
                         />
-                        <Pill
-                          label={t(
-                            HAND_OPTIONS.find((h) => h.value === block.hand)?.tKey ??
-                              'routineEdit.handBoth',
-                          )}
-                          onPress={() => openPicker(block._key, 'hand', block)}
-                        />
+                        {showHand(block.type) && (
+                          <Pill
+                            label={t(
+                              HAND_OPTIONS.find((h) => h.value === block.hand)?.tKey ??
+                                'routineEdit.handBoth',
+                            )}
+                            onPress={() => openPicker(block._key, 'hand', block)}
+                          />
+                        )}
                         {hasParam(block.type, 'octaves') && (
                           <Pill
                             label={octavesLabel(block.octaves, t)}
@@ -508,6 +607,30 @@ export default function RoutineEditScreen() {
                           <Pill
                             label={peakRepeatsLabel(block.peakRepeats, t)}
                             onPress={() => openPicker(block._key, 'peakRepeats', block)}
+                          />
+                        )}
+                        {hasParam(block.type, 'noteName') && (
+                          <Pill
+                            label={longNoteNameLabel(block)}
+                            onPress={() => openPicker(block._key, 'noteName', block)}
+                          />
+                        )}
+                        {hasParam(block.type, 'noteOctave') && (
+                          <Pill
+                            label={longNoteOctaveLabel(block, t)}
+                            onPress={() => openPicker(block._key, 'noteOctave', block)}
+                          />
+                        )}
+                        {hasParam(block.type, 'longNoteMeasures') && (
+                          <Pill
+                            label={longNoteMeasuresLabel(block.longNoteMeasures, t)}
+                            onPress={() => openPicker(block._key, 'longNoteMeasures', block)}
+                          />
+                        )}
+                        {hasParam(block.type, 'longNoteRepeats') && (
+                          <Pill
+                            label={longNoteRepeatsLabel(block.longNoteRepeats, t)}
+                            onPress={() => openPicker(block._key, 'longNoteRepeats', block)}
                           />
                         )}
                       </View>

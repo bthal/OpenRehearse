@@ -3,10 +3,18 @@ import { create } from 'zustand';
 
 import {
   WARMUP_BPMS,
+  WARMUP_LONG_NOTE_MEASURES,
+  WARMUP_LONG_NOTE_NAMES,
+  WARMUP_LONG_NOTE_OCTAVES,
+  WARMUP_LONG_NOTE_REPEATS,
   WARMUP_OCTAVES,
   WARMUP_PEAK_REPEATS,
   type WarmUpBpm,
   type WarmUpHand,
+  type WarmUpLongNoteMeasures,
+  type WarmUpLongNoteName,
+  type WarmUpLongNoteOctave,
+  type WarmUpLongNoteRepeats,
   type WarmUpOctaves,
   type WarmUpPeakRepeats,
   type WarmUpScaleMode,
@@ -127,6 +135,29 @@ function coerceExercise(raw: unknown): ExerciseSettings {
       o.peakRepeats,
       WARMUP_PEAK_REPEATS,
       DEFAULT_EXERCISE_PARAMS.peakRepeats,
+    ),
+    noteName: pick<WarmUpLongNoteName>(
+      o.noteName,
+      WARMUP_LONG_NOTE_NAMES,
+      DEFAULT_EXERCISE_PARAMS.noteName,
+    ),
+    // Only checked against the octave list, not against an instrument's range: this
+    // function has no instrument in hand. Range clamping happens at the screen, where
+    // `effectiveNoteOctave` already does it for a note change.
+    noteOctave: pick<WarmUpLongNoteOctave>(
+      o.noteOctave,
+      WARMUP_LONG_NOTE_OCTAVES,
+      DEFAULT_EXERCISE_PARAMS.noteOctave,
+    ),
+    longNoteMeasures: pick<WarmUpLongNoteMeasures>(
+      o.longNoteMeasures,
+      WARMUP_LONG_NOTE_MEASURES,
+      DEFAULT_EXERCISE_PARAMS.longNoteMeasures,
+    ),
+    longNoteRepeats: pick<WarmUpLongNoteRepeats>(
+      o.longNoteRepeats,
+      WARMUP_LONG_NOTE_REPEATS,
+      DEFAULT_EXERCISE_PARAMS.longNoteRepeats,
     ),
   };
 }

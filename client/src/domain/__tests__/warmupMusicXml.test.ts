@@ -5,6 +5,7 @@ import {
   generateDrill45Xml,
   generateFiveScaleXml,
   generateHanonXml,
+  generateLongNoteXml,
   generateScaleXml,
 } from '../warmupMusicXml';
 
@@ -607,5 +608,61 @@ describe('exercise anchoring for a non-piano instrument', () => {
     const single = generateScaleXml(0, 'major', 'right', 1, 60);
     expect(single.match(/<score-part /g)).toHaveLength(1);
     expect(generateScaleXml(0, 'major', 'both', 1, 60).match(/<score-part /g)).toHaveLength(2);
+  });
+});
+
+describe('generateLongNoteXml', () => {
+  const count = (xml: string, needle: string) => xml.split(needle).length - 1;
+
+  it('writes every repetition out, each one hold plus a bar to breathe', () => {
+    const xml = generateLongNoteXml('G', 4, 2, 4);
+    // (2 held + 1 rest) × 4. The rest after the last repetition is deliberate: every
+    // block is then the same shape, wherever it sits in a routine.
+    expect(measureCount(xml, 'P1')).toBe(12);
+    expect(pitches(xml)).toEqual(Array(8).fill('G4'));
+    expect(count(xml, '<rest measure="yes"/>')).toBe(4);
+    // One part, no key signature — the accidental comes from the spelling, not a key.
+    expect(xml).not.toContain('<part id="P2">');
+    expect(xml).toContain('<fifths>0</fifths>');
+  });
+
+  it('ties the held measures into one sounding note', () => {
+    const bars = partXml(generateLongNoteXml('G', 4, 4, 1), 'P1').split('<measure');
+    // bars[0] is the pre-measure preamble; bars[5] is the trailing rest.
+    expect(bars[1]).toContain('<tie type="start"/>');
+    expect(bars[1]).not.toContain('type="stop"');
+    expect(bars[2]).toContain('<tie type="stop"/><tie type="start"/>');
+    expect(bars[4]).toContain('<tie type="stop"/>');
+    expect(bars[4]).not.toContain('type="start"');
+    expect(bars[5]).toContain('<rest measure="yes"/>');
+  });
+
+  it('emits <tied> alongside every <tie>', () => {
+    // OSMD builds Note.NoteTie from <tied> inside <notations>, not from <tie>; a chain
+    // carrying only one of the two looks right and re-attacks at every barline.
+    const xml = generateLongNoteXml('A', 4, 3, 2);
+    const expected = 2 * (3 - 1);
+    expect(count(xml, '<tie type="start"/>')).toBe(expected);
+    expect(count(xml, '<tied type="start"/>')).toBe(expected);
+    expect(count(xml, '<tie type="stop"/>')).toBe(expected);
+    expect(count(xml, '<tied type="stop"/>')).toBe(expected);
+  });
+
+  it('writes a one-measure hold as a plain whole note', () => {
+    const xml = generateLongNoteXml('G', 4, 1, 4);
+    expect(xml).not.toContain('<tie');
+    expect(measureCount(xml, 'P1')).toBe(8);
+  });
+
+  it('keeps the spelling it was given', () => {
+    expect(generateLongNoteXml('Bb', 3, 1, 1)).toContain('<step>B</step><alter>-1</alter>');
+    expect(generateLongNoteXml('A#', 3, 1, 1)).toContain('<step>A</step><alter>1</alter>');
+    // Same sounding pitch, different notation — which is the point of offering both.
+    expect(generateLongNoteXml('Gb', 4, 1, 1)).not.toBe(generateLongNoteXml('F#', 4, 1, 1));
+  });
+
+  it('clamps out-of-range lengths rather than throwing', () => {
+    // Settings and routine blocks are read off disk with a blind cast.
+    expect(measureCount(generateLongNoteXml('G', 4, 99, 0), 'P1')).toBe(9);
   });
 });

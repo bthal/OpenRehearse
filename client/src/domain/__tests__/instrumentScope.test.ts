@@ -61,6 +61,7 @@ describe('warmUpRowsForScope', () => {
     expect(warmUpRowsForScope('clarinetBb')).toEqual([
       { type: 'scales', instrument: 'clarinetBb' },
       { type: 'chromatic', instrument: 'clarinetBb' },
+      { type: 'longNote', instrument: 'clarinetBb' },
     ]);
   });
 
@@ -80,7 +81,7 @@ describe('warmUpRowsForScope', () => {
   it('never lists an exercise for an instrument that cannot do it', () => {
     for (const row of warmUpRowsForScope('all')) {
       if (row.instrument === 'clarinetBb') {
-        expect(['scales', 'chromatic']).toContain(row.type);
+        expect(['scales', 'chromatic', 'longNote']).toContain(row.type);
       }
     }
   });

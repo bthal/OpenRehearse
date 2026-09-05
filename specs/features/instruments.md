@@ -40,10 +40,11 @@ Each descriptor carries:
 | `transposeSemitones` | 0 | −2 |
 | `staffLayout` | `grand` | `single` |
 | `writtenRange` | A0–C8 | E3–C7 |
-| `exercises` | all six | `scales`, `chromatic` |
+| `exercises` | all six | `scales`, `chromatic`, `longNote` |
 
-The clarinet's exercise set is deliberately narrow. `drill45` is structurally impossible — it is two
-simultaneous voices per hand. Hanon is monophonic per hand and would render, but it exists to train
+The clarinet's exercise set is deliberately narrow, and it is not a subset. `longNote` runs the
+other way: a wind exercise the piano does not get, because a struck string decays and cannot be
+held. `drill45` is structurally impossible — it is two simultaneous voices per hand. Hanon is monophonic per hand and would render, but it exists to train
 piano finger independence and its printed fingerings are piano fingerings, so it is excluded as
 musically pointless rather than technically impossible. Arpeggios and 5-finger scales are playable
 on a clarinet and are a candidate for the next slice; they are out now only to keep this one small.
@@ -157,6 +158,12 @@ Playback keeps a wide absolute gate against garbage data, but does not silence n
 outside the instrument's `writtenRange`. A practice transposition that quietly dropped its top notes
 would be a broken exercise, and silence would contradict what the score plainly shows. The sampler
 pitch-shifts; `writtenRange` governs what the app *offers*, not what it permits.
+
+What it offers, it now governs twice over: `maxExerciseOctaves` limits how many octaves of a keyed
+exercise the picker will show, and `longNoteOctaves` limits which written octaves a named note may
+sit in. Both take a pitch class rather than a note name — C# and Db are the same question — and
+both keep the same contract: the UI never presents a combination the instrument cannot play, so
+nothing has to fail later.
 
 ## Multi-part scores
 
@@ -282,8 +289,8 @@ one thing the heatmap is for.
 - [ ] A single-line score always asks which instrument it is for; a two-staff one never does.
 - [ ] The piece edit modal states the instrument and the part and offers no way to change either.
 - [ ] A stored clarinet piece whose part is recorded as polyphonic reads back as a piano piece.
-- [ ] Warm-up section offers only scales and chromatic for clarinet, on a single staff, with no hand
-      control.
+- [ ] Warm-up section offers only scales, chromatic and long notes for clarinet, on a single staff,
+      with no hand control — on the exercise screen and on routine blocks alike.
 - [ ] The dashboard scope filters warm-ups, routines and pieces, survives a restart, defaults to
       All on a fresh install, and changes nothing outside that screen.
 - [ ] Under All, each exercise appears once per instrument that has it, grouped by exercise.

@@ -43,3 +43,80 @@ export type WarmUpOctaves = (typeof WARMUP_OCTAVES)[number];
 export const WARMUP_PEAK_REPEATS = [1, 2, 4, 8, 16] as const;
 export type WarmUpPeakRepeats = (typeof WARMUP_PEAK_REPEATS)[number];
 export const DEFAULT_PEAK_REPEATS: WarmUpPeakRepeats = 1;
+
+// ─── Long note ────────────────────────────────────────────────────────────────
+// One held written pitch, named absolutely. Same shape as WARMUP_KEYS, and for the
+// same reason: the table is the enumeration. `step`/`alter` map straight onto
+// MusicXML so the generator never has to re-derive a spelling.
+//
+// Seventeen entries — seven naturals plus both spellings of each black key, because a
+// clarinettist's part may write either and the exercise should look like the music.
+// Cb and B# are deliberately absent: they cross an octave boundary, where the octave
+// number would stop meaning what the picker says it means.
+export const WARMUP_LONG_NOTE_NOTES = [
+  { label: 'C', step: 'C', alter: 0, pitchClass: 0 },
+  { label: 'C#', step: 'C', alter: 1, pitchClass: 1 },
+  { label: 'Db', step: 'D', alter: -1, pitchClass: 1 },
+  { label: 'D', step: 'D', alter: 0, pitchClass: 2 },
+  { label: 'D#', step: 'D', alter: 1, pitchClass: 3 },
+  { label: 'Eb', step: 'E', alter: -1, pitchClass: 3 },
+  { label: 'E', step: 'E', alter: 0, pitchClass: 4 },
+  { label: 'F', step: 'F', alter: 0, pitchClass: 5 },
+  { label: 'F#', step: 'F', alter: 1, pitchClass: 6 },
+  { label: 'Gb', step: 'G', alter: -1, pitchClass: 6 },
+  { label: 'G', step: 'G', alter: 0, pitchClass: 7 },
+  { label: 'G#', step: 'G', alter: 1, pitchClass: 8 },
+  { label: 'Ab', step: 'A', alter: -1, pitchClass: 8 },
+  { label: 'A', step: 'A', alter: 0, pitchClass: 9 },
+  { label: 'A#', step: 'A', alter: 1, pitchClass: 10 },
+  { label: 'Bb', step: 'B', alter: -1, pitchClass: 10 },
+  { label: 'B', step: 'B', alter: 0, pitchClass: 11 },
+] as const;
+
+export type WarmUpLongNote = (typeof WARMUP_LONG_NOTE_NOTES)[number];
+export type WarmUpLongNoteName = WarmUpLongNote['label'];
+
+/**
+ * Just the tokens, for validating a value read off disk.
+ *
+ * The annotation is load-bearing: without it `.map` widens the element type to
+ * `string`, and the store's option check would then accept any string at all.
+ */
+export const WARMUP_LONG_NOTE_NAMES: readonly WarmUpLongNoteName[] = WARMUP_LONG_NOTE_NOTES.map(
+  (n) => n.label,
+);
+
+export const DEFAULT_LONG_NOTE_NAME: WarmUpLongNoteName = 'G';
+
+/**
+ * Candidate written octaves, scientific pitch (C4 = middle C = MIDI 60).
+ *
+ * A superset of any instrument's range on purpose: which of these the picker actually
+ * offers is the instrument's answer, not this list's — see `longNoteOctaves`.
+ */
+export const WARMUP_LONG_NOTE_OCTAVES = [0, 1, 2, 3, 4, 5, 6, 7, 8] as const;
+export type WarmUpLongNoteOctave = (typeof WARMUP_LONG_NOTE_OCTAVES)[number];
+export const DEFAULT_LONG_NOTE_OCTAVE: WarmUpLongNoteOctave = 4;
+
+/** How many measures the note is held for, tied across each barline. */
+export const WARMUP_LONG_NOTE_MEASURES = [1, 2, 3, 4, 5, 6, 7, 8] as const;
+export type WarmUpLongNoteMeasures = (typeof WARMUP_LONG_NOTE_MEASURES)[number];
+export const DEFAULT_LONG_NOTE_MEASURES: WarmUpLongNoteMeasures = 2;
+
+/** How many hold-then-breathe blocks the exercise contains. */
+export const WARMUP_LONG_NOTE_REPEATS = [1, 2, 4, 8] as const;
+export type WarmUpLongNoteRepeats = (typeof WARMUP_LONG_NOTE_REPEATS)[number];
+export const DEFAULT_LONG_NOTE_REPEATS: WarmUpLongNoteRepeats = 4;
+
+/**
+ * Table lookup that tolerates a value read off disk, mirroring `keyLabel`'s fallback.
+ *
+ * Lives here rather than in the registry because the generator needs it, and the
+ * generator cannot import the registry — the registry imports the generator.
+ */
+export function longNoteEntry(name: unknown): WarmUpLongNote {
+  return (
+    WARMUP_LONG_NOTE_NOTES.find((n) => n.label === name) ??
+    WARMUP_LONG_NOTE_NOTES.find((n) => n.label === DEFAULT_LONG_NOTE_NAME)!
+  );
+}

@@ -1,14 +1,21 @@
 import { INSTRUMENT_REGISTRY, exerciseRootMidi, type InstrumentId } from './instrumentRegistry';
 import type { ExerciseBlock, Routine, RoutineBlock } from './routine';
-import { DEFAULT_PEAK_REPEATS } from './warmup';
+import {
+  DEFAULT_LONG_NOTE_MEASURES,
+  DEFAULT_LONG_NOTE_NAME,
+  DEFAULT_LONG_NOTE_OCTAVE,
+  DEFAULT_LONG_NOTE_REPEATS,
+  DEFAULT_PEAK_REPEATS,
+} from './warmup';
 import {
   keyLabel,
   measureCount as exerciseMeasureCount,
   warmUpDescriptor,
   type ExerciseParams,
   type MeasureNotes,
+  type WarmUpParam,
 } from './warmupRegistry';
-import { DIVISIONS, getKeyFifths } from './warmupMusicXml';
+import { DIVISIONS, WHOLE_REST, getKeyFifths } from './warmupMusicXml';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -54,9 +61,6 @@ function wrapMeasure(
   return `<measure number="${measureNumber}">${prefix}${notes.join('')}</measure>`;
 }
 
-// Full-measure rest note string (for the unused hand in single-hand exercises).
-const WHOLE_REST = `<note><rest measure="yes"/><duration>${DIVISIONS * 4}</duration><type>whole</type></note>`;
-
 // ─── Rehearsal label ──────────────────────────────────────────────────────────
 
 // A saved block carries every parameter; absent ones fall back to their default so a
@@ -70,7 +74,19 @@ function blockParams(block: ExerciseBlock): ExerciseParams {
     bpm: block.bpm,
     octaves: block.octaves,
     peakRepeats: block.peakRepeats ?? DEFAULT_PEAK_REPEATS,
+    noteName: block.noteName ?? DEFAULT_LONG_NOTE_NAME,
+    noteOctave: block.noteOctave ?? DEFAULT_LONG_NOTE_OCTAVE,
+    longNoteMeasures: block.longNoteMeasures ?? DEFAULT_LONG_NOTE_MEASURES,
+    longNoteRepeats: block.longNoteRepeats ?? DEFAULT_LONG_NOTE_REPEATS,
   };
+}
+
+// Tolerant of a type this build doesn't know, for the same reason
+// `measureNotesForBlock` is: routines.json is loaded with a blind cast, so an
+// unrecognised type is reachable and `hasParam` would throw on it.
+function blockHasParam(block: ExerciseBlock, param: WarmUpParam): boolean {
+  const d = warmUpDescriptor(block.type);
+  return d ? (d.params as readonly WarmUpParam[]).includes(param) : false;
 }
 
 function exerciseRehearsalLabel(block: ExerciseBlock): string {
@@ -197,7 +213,6 @@ export function generateRoutineXml(routine: Routine): string {
       const bpm = nextExerciseBpm(routine.blocks, i + 1);
       const includePauseTempo = lastEmittedBpm === null || bpm !== lastEmittedBpm;
       const measureCount = block.measures;
-      const wholeRest = `<note><rest measure="yes"/><duration>${DIVISIONS * 4}</duration><type>whole</type></note>`;
 
       for (let m = 0; m < measureCount; m++) {
         if (m === 0) {
@@ -205,12 +220,12 @@ export function generateRoutineXml(routine: Routine): string {
           const attrXml = `<attributes><divisions>${DIVISIONS}</divisions><time><beats>4</beats><beat-type>4</beat-type></time></attributes>`;
           const prefix =
             attrXml + rehearsalDirection('Pause') + (includePauseTempo ? tempoDirection(bpm) : '');
-          const mXml = `<measure number="${measureNumber}">${prefix}${wholeRest}</measure>`;
+          const mXml = `<measure number="${measureNumber}">${prefix}${WHOLE_REST}</measure>`;
           p1Measures.push(mXml);
           p2Measures.push(mXml);
         } else {
           // Subsequent pause measures — plain whole rest, no attr repeat.
-          const mXml = `<measure number="${measureNumber}">${wholeRest}</measure>`;
+          const mXml = `<measure number="${measureNumber}">${WHOLE_REST}</measure>`;
           p1Measures.push(mXml);
           p2Measures.push(mXml);
         }
@@ -222,7 +237,13 @@ export function generateRoutineXml(routine: Routine): string {
 
     // Exercise block
     const { pitchClass, mode, bpm } = block;
-    const fifths = getKeyFifths(pitchClass, mode);
+    // An exercise that declares no key has no key to print: drill45 is fixed C major
+    // and a long tone has none at all. Reading the block's stored pitchClass here
+    // would let a stale value print a key signature the standalone generator — which
+    // hardcodes 0 — never would.
+    const keyed = blockHasParam(block, 'key');
+    const fifths = keyed ? getKeyFifths(pitchClass, mode) : 0;
+    const keyMode = keyed ? mode : ('major' as const);
     const label = exerciseRehearsalLabel(block);
     const includeTempo = lastEmittedBpm === null || bpm !== lastEmittedBpm;
 
@@ -237,7 +258,7 @@ export function generateRoutineXml(routine: Routine): string {
         const needClef = !clefEmitted;
         const commonOpts = {
           fifths,
-          mode,
+          mode: keyMode,
           includeClef: needClef,
           rehearsalLabel: label,
           bpm,

@@ -333,6 +333,26 @@ has decayed to inaudibility long before the shortfall matters. The rule now live
 `client/src/domain/ties.ts` (`soundingLengthWholes`) with unit tests, because `score-web/` is
 outside tsc and Jest.
 
+**Third part, from the Long Note exercise — writing a tie is not symmetric with reading one.**
+Until that exercise nothing in the app *emitted* a tie; the rules above are all about parsing
+imported MusicXML. Two things bite when generating one.
+
+`<tie>` and `<tied>` are different elements and both are required. `<tie>` (a direct child of
+`<note>`) is the sound; `<tied>` (inside `<notations>`) is the printed slur. **OSMD builds
+`Note.NoteTie` from `<tied>` only** — its reader walks `notations.elements("tied")` and never looks
+at `<tie>`. A chain written with `<tie>` alone therefore leaves `NoteTie` null on every note, the
+skip rule above never fires, and the pitch re-attacks at every barline while looking perfectly tied
+on screen. Emitting `<tied>` alone happens to work in this app but is wrong for anything else
+reading the file. Write both.
+
+Element order inside `<note>` is fixed by the schema: pitch, duration, tie, type, notations. That is
+why `tiedWholeNote` in `warmupMusicXml.ts` is a separate builder rather than an append to
+`wholeNote()` — appending would put `<tie>` after `<type>`. On a middle note the stop precedes the
+start, in both elements.
+
+Together with the sustain loop below, this is what makes a long tone work: a two-bar tie at 60 BPM
+is eight seconds, and the raw clarinet sample is 3.13.
+
 ## LANDMINE: a sustained-instrument note cannot outlast its sample — `Tone.Sampler` never loops
 
 `Tone.Sampler` has no loop option (`SamplerOptions` is `attack | release | onload | onerror |

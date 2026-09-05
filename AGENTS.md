@@ -41,7 +41,7 @@ RN/OSMD/Tone imports. See `specs/architecture.md` for the authoritative version.
 | Local data & offline | `specs/features/offline-storage.md` |
 | Audio + cursor sync | `specs/features/playback-synthesis.md`, `specs/features/playview.md` |
 | State & domain | `specs/features/pieces-domain.md` |
-| Warm-up exercises | `specs/features/warmup.md` |
+| Warm-up exercises | `specs/features/warmup.md`, `compound-docs/settings-persistence.md` (the measure-count memo key) |
 | Instruments, transposition, part selection | `specs/features/instruments.md` |
 | Routines (build + playback) | `specs/features/warmup.md` (Routines section) |
 | Adding a persisted setting | `compound-docs/settings-persistence.md` |

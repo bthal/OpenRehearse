@@ -3,8 +3,8 @@
 ## Goal
 
 Built-in exercises (Hanon Nos. 1-20, major/minor scales, arpeggios, chromatic scales, 5-finger
-scales, and a 4-5 finger drill) rendered as live score and played back with synthesis — no
-file import needed.
+scales, a 4-5 finger drill, and long tones) rendered as live score and played back with
+synthesis — no file import needed.
 
 ## Parameters
 
@@ -24,6 +24,22 @@ Hanon, Scales, Arpeggios, Chromatic, and 5-Finger scales share the same controls
 | Hand | Both / Right / Left |
 | BPM | 40, 50, 60, 70, 80, 100, 120, 140, 160, 180 |
 | Peak Repeats | 1 / 2 / 4 / 8 / 16 (times the peak bar is played; 1 = the plain drill) |
+
+**Long Note** shares nothing with the keyed exercises. It names one absolute written pitch rather
+than a key, so it carries its own parameters:
+
+| Parameter | Options |
+|-----------|---------|
+| Note | 17 spellings — the seven naturals plus both spellings of each black key |
+| Octave | Only the written octaves that put the chosen note inside the instrument's range |
+| Bars | 1-8 (measures the note is held for) |
+| Reps | 1 / 2 / 4 / 8 (hold-then-breathe blocks) |
+| BPM | 40, 50, 60, 70, 80, 100, 120, 140, 160, 180 |
+
+Note and octave together name a **written** pitch; the instrument's transposition applies to
+playback only, so a clarinet reading G4 sounds F4. Changing the note can strand the octave — Db6
+is playable on a clarinet and Db7 is not — so the octave moves with it, to the nearest one the
+instrument can reach.
 
 ## Score generation
 
@@ -69,6 +85,13 @@ Hanon, Scales, Arpeggios, Chromatic, and 5-Finger scales share the same controls
   that many measures — ×2 gives a 7-measure drill
   (RH `C D | E F | G A | G A | G F | E D | C`), ×16 a 21-measure one — leaving the
   ostinato, the fingering marks, and the whole-note ending untouched.
+- **Long Note**: (N tied whole notes + one whole-rest measure) × R, written out literally —
+  including the rest after the final repetition, so every hold-then-breathe block is the same
+  shape and the exercise splices cleanly anywhere in a routine. One part, treble clef, no key
+  signature: the accidental comes from the chosen spelling, not from a key. A one-measure hold
+  carries no tie at all. Hold time is `bars × 4 × 60 / bpm`, so two bars at 60 BPM is eight
+  seconds — well past the raw clarinet sample, which is what the sustain loop in
+  `playback-synthesis.md` exists for.
 - Eighth notes beamed in groups of 4. No tempo marking rendered in score;
   BPM injected via WebView bridge after LOADED.
 
@@ -91,8 +114,11 @@ Settings are keyed by **instrument + exercise**, so clarinet scales keep their o
 count from piano scales; the store is indexed by instrument, since there is no "current" one.
 
 Which exercises exist for an instrument is declared by `INSTRUMENT_REGISTRY`, not here — a Bb
-clarinet offers scales and chromatic. A single-staff instrument's generators emit one part; `hand`
-is simply not among its parameters, and its exercises are anchored in that instrument's own
+clarinet offers scales, chromatic and long notes. Long Note runs the other way from the rest: a
+wind exercise the piano does not get, because a struck string decays and cannot be held.
+A single-staff instrument's generators emit one part, and the hand control is **hidden** for it,
+on the exercise screen and on routine blocks alike — there is no hand to choose, and the score is
+forced to the one-part case regardless. Its exercises are anchored in that instrument's own
 register rather than the piano's C4, with the octave picker offering only counts that fit its
 written range. See `specs/features/instruments.md`.
 
@@ -100,7 +126,9 @@ written range. See `specs/features/instruments.md`.
 
 - Dashboard shows a **Warm-ups** section above the piece list.
 - Warm-up view is **landscape**; left toolbar: back, play/pause, metronome, BPM, hand,
-  key, octave (peak repeats in place of key/octave for the 4-5 drill). Each picker opens a
+  key, octave (peak repeats in place of key/octave for the 4-5 drill; note, octave, bars and
+  reps for a long note). Every control follows the exercise's declared parameters, and the hand
+  control additionally follows whether the instrument has two staves. Each picker opens a
   sliding panel over the score; opening pauses playback.
 - Settings persisted per **instrument and** exercise type to device storage
   (`warmup-settings.json`). A file written before instruments existed is read as the piano block
@@ -117,13 +145,18 @@ written range. See `specs/features/instruments.md`.
       exercise appears once per instrument that has it, grouped by exercise.
 - [ ] Opening a warm-up row from All practises that row's instrument and leaves the scope alone.
 - [ ] Octave options never exceed what fits the instrument's written range.
+- [ ] A held note sounds as one continuous tone across the barline, with no re-attack.
+- [ ] The note-octave picker offers only octaves the instrument can play, and changing the note
+      clamps the octave to the nearest one it can.
+- [ ] The score shows written pitch; the clarinet sounds a whole tone lower.
+- [ ] No hand control appears for a single-staff instrument, on any of its exercises.
 - [ ] Changing any parameter while playing pauses playback and re-generates the score.
 
 ---
 
 ## Routines
 
-A **Routine** is an ordered list of exercise blocks (Hanon, Scales, Arpeggios, Chromatic, 5-Finger) and optional Pause blocks, rendered and played back as a single continuous score.
+A **Routine** is an ordered list of exercise blocks (Hanon, Scales, Arpeggios, Chromatic, 5-Finger, 4-5 Drill, Long Note) and optional Pause blocks, rendered and played back as a single continuous score.
 
 A routine is built **for one instrument**, chosen while the routine is new and read-only once it
 exists: changing it on a saved routine would invalidate blocks the new instrument cannot play. The

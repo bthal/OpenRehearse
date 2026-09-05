@@ -1,6 +1,10 @@
 import type {
   WarmUpBpm,
   WarmUpHand,
+  WarmUpLongNoteMeasures,
+  WarmUpLongNoteName,
+  WarmUpLongNoteOctave,
+  WarmUpLongNoteRepeats,
   WarmUpOctaves,
   WarmUpPeakRepeats,
   WarmUpScaleMode,
@@ -23,6 +27,11 @@ export interface ExerciseBlock {
   exercise?: number;
   // drill45 only; absent on blocks saved before this parameter existed (treated as 1).
   peakRepeats?: WarmUpPeakRepeats;
+  // longNote only; absent on blocks saved before the exercise existed.
+  noteName?: WarmUpLongNoteName;
+  noteOctave?: WarmUpLongNoteOctave;
+  longNoteMeasures?: WarmUpLongNoteMeasures;
+  longNoteRepeats?: WarmUpLongNoteRepeats;
 }
 
 export interface PauseBlock {

@@ -207,6 +207,74 @@ describe('routines for a single-staff instrument', () => {
     expect(xml).toContain('<part id="P2">');
   });
 
+  it('splices a long note into a clarinet routine', () => {
+    const xml = generateRoutineXml(
+      makeRoutine({
+        instrument: 'clarinetBb',
+        blocks: [
+          {
+            type: 'longNote',
+            pitchClass: 0,
+            mode: 'major',
+            hand: 'both',
+            bpm: 60,
+            octaves: 1,
+            noteName: 'G',
+            noteOctave: 4,
+            longNoteMeasures: 2,
+            longNoteRepeats: 4,
+          },
+        ],
+      }),
+    );
+    expect(xml).toContain('<rehearsal>Long Note G4</rehearsal>');
+    expect(measureCount(xml, 'P1')).toBe(12);
+    expect(xml).not.toContain('<part id="P2">');
+  });
+
+  it('does not let a preceding key signature leak into a long note', () => {
+    // The block still carries a pitchClass because every block does; a long tone
+    // declares no key, so nothing should be printed for it.
+    const xml = generateRoutineXml(
+      makeRoutine({
+        instrument: 'clarinetBb',
+        blocks: [
+          { type: 'scales', pitchClass: 2, mode: 'major', hand: 'both', bpm: 60, octaves: 1 },
+          {
+            type: 'longNote',
+            pitchClass: 2,
+            mode: 'major',
+            hand: 'both',
+            bpm: 60,
+            octaves: 1,
+            noteName: 'Bb',
+            noteOctave: 4,
+            longNoteMeasures: 1,
+            longNoteRepeats: 1,
+          },
+        ],
+      }),
+    );
+    // D major is 2 sharps; the long-note block that follows resets to none.
+    expect(xml).toContain('<fifths>2</fifths>');
+    expect(xml).toContain('<fifths>0</fifths>');
+  });
+
+  it('falls back to the defaults for a long note saved without its parameters', () => {
+    // Same convention as `exercise` and `peakRepeats`: absent means the default, and
+    // no migration ever runs over routines.json.
+    const xml = generateRoutineXml(
+      makeRoutine({
+        instrument: 'clarinetBb',
+        blocks: [
+          { type: 'longNote', pitchClass: 0, mode: 'major', hand: 'both', bpm: 60, octaves: 1 },
+        ],
+      }),
+    );
+    expect(xml).toContain('<rehearsal>Long Note G4</rehearsal>');
+    expect(measureCount(xml, 'P1')).toBe(12);
+  });
+
   it('ignores a block’s stored hand, which the instrument has no control for', () => {
     // 'both' is what the block carries; a clarinet cannot honour it, and quietly
     // producing two staves would contradict the picker that never offered the choice.

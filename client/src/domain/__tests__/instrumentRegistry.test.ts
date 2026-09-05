@@ -2,6 +2,7 @@ import {
   DEFAULT_INSTRUMENT,
   INSTRUMENT_IDS,
   INSTRUMENT_REGISTRY,
+  clampLongNoteOctave,
   defaultBaseTranspose,
   exerciseRootMidi,
   exercisesFor,
@@ -9,6 +10,7 @@ import {
   instrumentDescriptor,
   isInWrittenRange,
   isInstrumentId,
+  longNoteOctaves,
   normaliseInstrumentId,
   soundingMidi,
   supportsExercise,
@@ -63,18 +65,54 @@ describe('instrumentDescriptor', () => {
 });
 
 describe('exercise availability', () => {
+  it('offers a named note only in octaves the instrument can reach', () => {
+    // Clarinet written range is E3-C7, so where a pitch class lands differs by note.
+    expect(longNoteOctaves('clarinetBb', 0)).toEqual([4, 5, 6, 7]); // C: C7 is the top
+    expect(longNoteOctaves('clarinetBb', 1)).toEqual([4, 5, 6]); // C#: C#7 is past it
+    expect(longNoteOctaves('clarinetBb', 4)).toEqual([3, 4, 5, 6]); // E: E3 is the floor
+    expect(longNoteOctaves('clarinetBb', 11)).toEqual([3, 4, 5, 6]);
+  });
+
+  it('never offers an octave outside the written range', () => {
+    for (let pc = 0; pc < 12; pc++) {
+      const octaves = longNoteOctaves('clarinetBb', pc);
+      expect(octaves.length).toBeGreaterThan(0);
+      for (const o of octaves) {
+        expect(isInWrittenRange('clarinetBb', (o + 1) * 12 + pc)).toBe(true);
+      }
+      // The neighbours of the span are genuinely out, not merely unlisted.
+      expect(isInWrittenRange('clarinetBb', (octaves[0]! + 1) * 12 + pc - 12)).toBe(false);
+      expect(
+        isInWrittenRange('clarinetBb', (octaves[octaves.length - 1]! + 1) * 12 + pc + 12),
+      ).toBe(false);
+    }
+  });
+
+  it('clamps a stranded octave to the nearest one the note can use', () => {
+    // C#7 does not exist on the clarinet even though C7 does, so choosing C# from
+    // octave 7 has to land somewhere.
+    expect(clampLongNoteOctave('clarinetBb', 1, 7)).toBe(6);
+    expect(clampLongNoteOctave('clarinetBb', 4, 2)).toBe(3);
+    // A valid octave is left exactly as it is, and clamping is idempotent.
+    expect(clampLongNoteOctave('clarinetBb', 4, 3)).toBe(3);
+    expect(clampLongNoteOctave('clarinetBb', 1, clampLongNoteOctave('clarinetBb', 1, 7))).toBe(6);
+  });
+
   it('gives the piano every exercise', () => {
     expect(supportsExercise('piano', 'hanon')).toBe(true);
     expect(supportsExercise('piano', 'drill45')).toBe(true);
   });
 
   it('gives the clarinet only the monophonic exercises it is meant to have', () => {
-    expect(exercisesFor('clarinetBb')).toEqual(['scales', 'chromatic']);
+    expect(exercisesFor('clarinetBb')).toEqual(['scales', 'chromatic', 'longNote']);
     // drill45 is two simultaneous voices per hand — structurally impossible.
     expect(supportsExercise('clarinetBb', 'drill45')).toBe(false);
     // Hanon would render as one line, but trains piano fingers and prints piano
     // fingerings. Excluded on purpose, not by accident.
     expect(supportsExercise('clarinetBb', 'hanon')).toBe(false);
+    // The long tone runs the other way: a wind exercise the piano cannot do, because
+    // a struck string decays instead of holding.
+    expect(supportsExercise('piano', 'longNote')).toBe(false);
   });
 });
 

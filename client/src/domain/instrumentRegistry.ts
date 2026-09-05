@@ -106,12 +106,14 @@ export const INSTRUMENT_REGISTRY = {
     writtenRange: { lowMidi: 52, highMidi: 96 },
     transposeSemitones: -2,
     staffLayout: 'single',
-    // Scales and chromatic only for now. `drill45` is two simultaneous voices per hand
+    // Scales, chromatic and long tones. `drill45` is two simultaneous voices per hand
     // and cannot exist here at all; Hanon would render as a single line but trains
     // piano finger independence and prints piano fingerings, so it is excluded as
     // pointless rather than impossible. Arpeggios and 5-finger are playable and are
     // the obvious next additions — held back only to keep the first slice small.
-    exercises: ['scales', 'chromatic'],
+    // `longNote` is the reverse case: a wind exercise the piano has no use for,
+    // because a struck string decays and cannot be held.
+    exercises: ['scales', 'chromatic', 'longNote'],
   },
 } as const satisfies Record<string, InstrumentDescriptor>;
 
@@ -241,4 +243,48 @@ export function maxExerciseOctaves(instrument: InstrumentId, pitchClass: number)
   const root = exerciseRootMidi(instrument, pitchClass);
   const span = d.writtenRange.highMidi - root;
   return Math.max(1, Math.min(3, Math.floor(span / 12)));
+}
+
+/**
+ * The written octaves in which this pitch class lands inside the instrument's range.
+ *
+ * For an exercise that names one absolute pitch rather than a key. The picker offers
+ * only these, the same contract `maxExerciseOctaves` gives the octave-span control:
+ * the UI never presents a note the instrument cannot play.
+ *
+ * Takes a pitch class rather than a note name so the long-note spelling table stays
+ * out of this module — C# and Db are the same question here.
+ */
+export function longNoteOctaves(instrument: InstrumentId, pitchClass: number): number[] {
+  const { lowMidi, highMidi } = INSTRUMENT_REGISTRY[instrument].writtenRange;
+  const pc = ((pitchClass % 12) + 12) % 12;
+  const octaves: number[] = [];
+  // Scientific pitch: MIDI 0 is C-1, so C4 = 60 = middle C, hence the -1.
+  for (let midi = pc; midi <= 127; midi += 12) {
+    if (midi >= lowMidi && midi <= highMidi) octaves.push(Math.floor(midi / 12) - 1);
+  }
+  return octaves;
+}
+
+/**
+ * The nearest offered octave to `octave` for this note.
+ *
+ * Changing the note can strand the octave — C#7 is above the clarinet's top C7 while
+ * C7 itself is not — and a settings file written under another instrument can arrive
+ * out of range too. Ties go to the lower octave. An empty option list would mean an
+ * instrument with under an octave of range, which is a registry bug, so the input is
+ * returned unchanged rather than quietly substituting something.
+ */
+export function clampLongNoteOctave(
+  instrument: InstrumentId,
+  pitchClass: number,
+  octave: number,
+): number {
+  const options = longNoteOctaves(instrument, pitchClass);
+  const first = options[0];
+  if (first === undefined || options.includes(octave)) return octave;
+  return options.reduce(
+    (best, o) => (Math.abs(o - octave) < Math.abs(best - octave) ? o : best),
+    first,
+  );
 }

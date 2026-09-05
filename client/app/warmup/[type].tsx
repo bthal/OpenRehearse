@@ -26,8 +26,10 @@ import { AppIcon } from '@components/AppIcon';
 import {
   DEFAULT_INSTRUMENT,
   INSTRUMENT_REGISTRY,
+  clampLongNoteOctave,
   exerciseRootMidi,
   isInstrumentId,
+  longNoteOctaves,
   maxExerciseOctaves,
   supportsExercise,
 } from '@domain/instrumentRegistry';
@@ -40,10 +42,19 @@ import { useCountInSync } from '@score-web/useCountInSync';
 import {
   WARMUP_BPMS,
   WARMUP_KEYS,
+  WARMUP_LONG_NOTE_MEASURES,
+  WARMUP_LONG_NOTE_NOTES,
+  WARMUP_LONG_NOTE_OCTAVES,
+  WARMUP_LONG_NOTE_REPEATS,
   WARMUP_OCTAVES,
   WARMUP_PEAK_REPEATS,
+  longNoteEntry,
   type WarmUpBpm,
   type WarmUpHand,
+  type WarmUpLongNoteMeasures,
+  type WarmUpLongNoteName,
+  type WarmUpLongNoteOctave,
+  type WarmUpLongNoteRepeats,
   type WarmUpOctaves,
   type WarmUpPeakRepeats,
 } from '@domain/warmup';
@@ -58,7 +69,17 @@ import {
 import { useWarmUpStore } from '@state/warmupStore';
 import { Colors } from '@theme/colors';
 
-type PanelKey = 'speed' | 'hand' | 'key' | 'octave' | 'peak' | 'exercise';
+type PanelKey =
+  | 'speed'
+  | 'hand'
+  | 'key'
+  | 'octave'
+  | 'peak'
+  | 'exercise'
+  | 'noteName'
+  | 'noteOctave'
+  | 'longNoteMeasures'
+  | 'longNoteRepeats';
 type OpenPanel = PanelKey | null;
 
 const PANEL_WIDTH = 176; // key panel (4 keys visible, scroll for more)
@@ -66,6 +87,10 @@ const HAND_PANEL_WIDTH = 132; // 3 × 44
 const OCTAVE_PANEL_WIDTH = 132; // 3 × 44
 const PEAK_PANEL_WIDTH = 220; // 5 × 44
 const EXERCISE_PANEL_WIDTH = 176; // 4 visible, scroll for the rest
+const NOTE_PANEL_WIDTH = 176; // 17 spellings — 4 visible, scroll for the rest
+const NOTE_OCTAVE_PANEL_WIDTH = 220; // at most 5 octaves fit any instrument's range
+const LONG_MEASURES_PANEL_WIDTH = 176; // 8 values, scroll
+const LONG_REPEATS_PANEL_WIDTH = 176; // 4 × 44
 
 const HAND_OPTIONS: WarmUpHand[] = ['both', 'left', 'right'];
 
@@ -131,6 +156,10 @@ export default function WarmUpView() {
     octave: new Animated.Value(0),
     peak: new Animated.Value(0),
     exercise: new Animated.Value(0),
+    noteName: new Animated.Value(0),
+    noteOctave: new Animated.Value(0),
+    longNoteMeasures: new Animated.Value(0),
+    longNoteRepeats: new Animated.Value(0),
   }));
   const [panelLayout, setPanelLayout] = useState<Record<PanelKey, { top: number; left: number }>>({
     speed: { top: 0, left: 0 },
@@ -139,6 +168,10 @@ export default function WarmUpView() {
     octave: { top: 0, left: 0 },
     peak: { top: 0, left: 0 },
     exercise: { top: 0, left: 0 },
+    noteName: { top: 0, left: 0 },
+    noteOctave: { top: 0, left: 0 },
+    longNoteMeasures: { top: 0, left: 0 },
+    longNoteRepeats: { top: 0, left: 0 },
   });
 
   const scoreAreaRef = useRef<View>(null);
@@ -148,6 +181,10 @@ export default function WarmUpView() {
   const octaveTriggerRef = useRef<View>(null);
   const peakTriggerRef = useRef<View>(null);
   const exerciseTriggerRef = useRef<View>(null);
+  const noteNameTriggerRef = useRef<View>(null);
+  const noteOctaveTriggerRef = useRef<View>(null);
+  const longMeasuresTriggerRef = useRef<View>(null);
+  const longRepeatsTriggerRef = useRef<View>(null);
   const toolbarRef = useRef<View>(null);
   const webViewRef = useRef<WebView>(null);
 
@@ -166,6 +203,7 @@ export default function WarmUpView() {
   // only. Depending on `settings` wholesale would reload the score on every tempo
   // change, which handleBpmChange goes out of its way to avoid.
   const { exercise, pitchClass, mode, hand, octaves, peakRepeats } = settings;
+  const { noteName, noteOctave, longNoteMeasures, longNoteRepeats } = settings;
   // The picker only offers what fits, but a value stored while another instrument was
   // selected can outlive that choice — so the generator is given the clamped value
   // rather than trusting what is on disk.
@@ -180,6 +218,23 @@ export default function WarmUpView() {
     octaves,
     maxExerciseOctaves(instrument, pitchClass),
   ) as WarmUpOctaves;
+
+  // Same contract for the long note's absolute octave: offer only the octaves this
+  // instrument can reach for the chosen spelling, and render the clamped value rather
+  // than whatever a settings file happens to hold.
+  const notePitchClass = longNoteEntry(noteName).pitchClass;
+  const noteOctaveOptions = useMemo(
+    () =>
+      WARMUP_LONG_NOTE_OCTAVES.filter((n): n is WarmUpLongNoteOctave =>
+        longNoteOctaves(instrument, notePitchClass).includes(n),
+      ),
+    [instrument, notePitchClass],
+  );
+  const effectiveNoteOctave = clampLongNoteOctave(
+    instrument,
+    notePitchClass,
+    noteOctave,
+  ) as WarmUpLongNoteOctave;
 
   const sendScore = useCallback(async () => {
     setLoadingScore(true);
@@ -197,6 +252,10 @@ export default function WarmUpView() {
           : {}),
         octaves: effectiveOctaves,
         peakRepeats,
+        noteName,
+        noteOctave: effectiveNoteOctave,
+        longNoteMeasures,
+        longNoteRepeats,
         // Anchors the exercise in this instrument's own register rather than the
         // piano's C4. Derived, never persisted — see ScoreParams.
         rootMidi: exerciseRootMidi(instrument, pitchClass),
@@ -220,6 +279,10 @@ export default function WarmUpView() {
     hand,
     effectiveOctaves,
     peakRepeats,
+    noteName,
+    effectiveNoteOctave,
+    longNoteMeasures,
+    longNoteRepeats,
     instrument,
     setLoadingScore,
     setScoreError,
@@ -386,6 +449,57 @@ export default function WarmUpView() {
     [isPlaying, updateSettings],
   );
 
+  const handleNoteNameChange = useCallback(
+    (value: WarmUpLongNoteName) => {
+      if (isPlaying) webViewRef.current?.injectJavaScript('window.__rn_pause();void 0;');
+      // The octave moves with the note in one write. Db6 is playable and Db7 is not,
+      // so a note change alone could strand the stored octave outside the list the
+      // picker is about to show.
+      const pc = longNoteEntry(value).pitchClass;
+      updateSettings({
+        noteName: value,
+        noteOctave: clampLongNoteOctave(instrument, pc, noteOctave) as WarmUpLongNoteOctave,
+      });
+      setOpenPanel(null);
+      animatePanel('noteName', 0);
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [isPlaying, updateSettings, instrument, noteOctave],
+  );
+
+  const handleNoteOctaveChange = useCallback(
+    (value: WarmUpLongNoteOctave) => {
+      if (isPlaying) webViewRef.current?.injectJavaScript('window.__rn_pause();void 0;');
+      updateSettings({ noteOctave: value });
+      setOpenPanel(null);
+      animatePanel('noteOctave', 0);
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [isPlaying, updateSettings],
+  );
+
+  const handleLongNoteMeasuresChange = useCallback(
+    (value: WarmUpLongNoteMeasures) => {
+      if (isPlaying) webViewRef.current?.injectJavaScript('window.__rn_pause();void 0;');
+      updateSettings({ longNoteMeasures: value });
+      setOpenPanel(null);
+      animatePanel('longNoteMeasures', 0);
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [isPlaying, updateSettings],
+  );
+
+  const handleLongNoteRepeatsChange = useCallback(
+    (value: WarmUpLongNoteRepeats) => {
+      if (isPlaying) webViewRef.current?.injectJavaScript('window.__rn_pause();void 0;');
+      updateSettings({ longNoteRepeats: value });
+      setOpenPanel(null);
+      animatePanel('longNoteRepeats', 0);
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [isPlaying, updateSettings],
+  );
+
   const handleMetronomeToggle = useCallback(() => {
     webViewRef.current?.injectJavaScript('window.__rn_toggle_metronome();void 0;');
     setMetronomeOn(!metronomeOn);
@@ -396,6 +510,15 @@ export default function WarmUpView() {
   const showKey = hasParam(warmUpType, 'key');
   const showOctave = hasParam(warmUpType, 'octaves');
   const showPeak = hasParam(warmUpType, 'peakRepeats');
+  const showNoteName = hasParam(warmUpType, 'noteName');
+  const showNoteOctave = hasParam(warmUpType, 'noteOctave');
+  const showLongMeasures = hasParam(warmUpType, 'longNoteMeasures');
+  const showLongRepeats = hasParam(warmUpType, 'longNoteRepeats');
+  // Declaring `hand` is not enough on its own: a single-staff instrument has no hand
+  // to choose, and `sendScore` already forces the one-part case, so the control would
+  // be a button that cannot change anything.
+  const showHand =
+    hasParam(warmUpType, 'hand') && INSTRUMENT_REGISTRY[instrument].staffLayout !== 'single';
 
   const currentKeyLabel = keyLabel(settings.pitchClass, settings.mode);
 
@@ -501,20 +624,22 @@ export default function WarmUpView() {
                 </TouchableOpacity>
               </View>
 
-              {/* Hand trigger */}
-              <View ref={handTriggerRef}>
-                <TouchableOpacity
-                  onPress={() => togglePanel('hand', handTriggerRef)}
-                  hitSlop={8}
-                  className="p-1.5"
-                >
-                  <AppIcon
-                    path={HAND_ICON[settings.hand]}
-                    size={22}
-                    color={settings.hand !== 'both' ? Colors.primary : Colors.icon}
-                  />
-                </TouchableOpacity>
-              </View>
+              {/* Hand trigger — two-staff instruments only */}
+              {showHand && (
+                <View ref={handTriggerRef}>
+                  <TouchableOpacity
+                    onPress={() => togglePanel('hand', handTriggerRef)}
+                    hitSlop={8}
+                    className="p-1.5"
+                  >
+                    <AppIcon
+                      path={HAND_ICON[settings.hand]}
+                      size={22}
+                      color={settings.hand !== 'both' ? Colors.primary : Colors.icon}
+                    />
+                  </TouchableOpacity>
+                </View>
+              )}
 
               {/* Key trigger — exercises that declare a key */}
               {showKey && (
@@ -571,6 +696,88 @@ export default function WarmUpView() {
                     <Text className="text-[9px] text-black mt-0.5">
                       {t('warmup.octave', { count: effectiveOctaves })}
                     </Text>
+                  </TouchableOpacity>
+                </View>
+              )}
+
+              {/* Note trigger — exercises that name an absolute pitch */}
+              {showNoteName && (
+                <View ref={noteNameTriggerRef}>
+                  <TouchableOpacity
+                    onPress={() => togglePanel('noteName', noteNameTriggerRef)}
+                    hitSlop={8}
+                    className="items-center px-2 py-1"
+                  >
+                    <Text
+                      className="text-base font-semibold mt-0.5"
+                      style={{ color: openPanel === 'noteName' ? Colors.primary : Colors.icon }}
+                    >
+                      {noteName}
+                    </Text>
+                    <Text className="text-[9px] text-black mt-0.5">{t('warmup.note')}</Text>
+                  </TouchableOpacity>
+                </View>
+              )}
+
+              {/* Note-octave trigger */}
+              {showNoteOctave && (
+                <View ref={noteOctaveTriggerRef}>
+                  <TouchableOpacity
+                    onPress={() => togglePanel('noteOctave', noteOctaveTriggerRef)}
+                    hitSlop={8}
+                    className="items-center px-2 py-1"
+                  >
+                    <Text
+                      className="text-base font-semibold mt-0.5"
+                      style={{ color: openPanel === 'noteOctave' ? Colors.primary : Colors.icon }}
+                    >
+                      {effectiveNoteOctave}
+                    </Text>
+                    <Text className="text-[9px] text-black mt-0.5">
+                      {t('warmup.octave', { count: 1 })}
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+              )}
+
+              {/* Hold-length trigger */}
+              {showLongMeasures && (
+                <View ref={longMeasuresTriggerRef}>
+                  <TouchableOpacity
+                    onPress={() => togglePanel('longNoteMeasures', longMeasuresTriggerRef)}
+                    hitSlop={8}
+                    className="items-center px-2 py-1"
+                  >
+                    <Text
+                      className="text-base font-semibold mt-0.5"
+                      style={{
+                        color: openPanel === 'longNoteMeasures' ? Colors.primary : Colors.icon,
+                      }}
+                    >
+                      {longNoteMeasures}
+                    </Text>
+                    <Text className="text-[9px] text-black mt-0.5">{t('warmup.hold')}</Text>
+                  </TouchableOpacity>
+                </View>
+              )}
+
+              {/* Repeat-count trigger */}
+              {showLongRepeats && (
+                <View ref={longRepeatsTriggerRef}>
+                  <TouchableOpacity
+                    onPress={() => togglePanel('longNoteRepeats', longRepeatsTriggerRef)}
+                    hitSlop={8}
+                    className="items-center px-2 py-1"
+                  >
+                    <Text
+                      className="text-base font-semibold mt-0.5"
+                      style={{
+                        color: openPanel === 'longNoteRepeats' ? Colors.primary : Colors.icon,
+                      }}
+                    >
+                      ×{longNoteRepeats}
+                    </Text>
+                    <Text className="text-[9px] text-black mt-0.5">{t('warmup.repeats')}</Text>
                   </TouchableOpacity>
                 </View>
               )}
@@ -653,32 +860,184 @@ export default function WarmUpView() {
           </Animated.View>
 
           {/* Hand panel */}
-          <Animated.View
-            pointerEvents={openPanel === 'hand' ? 'auto' : 'none'}
-            style={[
-              panelBase,
-              {
-                top: panelLayout.hand.top,
-                left: panelLayout.hand.left,
-                width: panelWidthInterp('hand', HAND_PANEL_WIDTH),
-              },
-            ]}
-          >
-            {HAND_OPTIONS.map((hand) => (
-              <TouchableOpacity
-                key={hand}
-                onPress={() => handleHandChange(hand)}
-                hitSlop={4}
-                style={{ width: 44, height: 44, alignItems: 'center', justifyContent: 'center' }}
-              >
-                <AppIcon
-                  path={HAND_ICON[hand]}
-                  size={22}
-                  color={settings.hand === hand ? Colors.primary : Colors.iconMuted}
-                />
-              </TouchableOpacity>
-            ))}
-          </Animated.View>
+          {showHand && (
+            <Animated.View
+              pointerEvents={openPanel === 'hand' ? 'auto' : 'none'}
+              style={[
+                panelBase,
+                {
+                  top: panelLayout.hand.top,
+                  left: panelLayout.hand.left,
+                  width: panelWidthInterp('hand', HAND_PANEL_WIDTH),
+                },
+              ]}
+            >
+              {HAND_OPTIONS.map((hand) => (
+                <TouchableOpacity
+                  key={hand}
+                  onPress={() => handleHandChange(hand)}
+                  hitSlop={4}
+                  style={{ width: 44, height: 44, alignItems: 'center', justifyContent: 'center' }}
+                >
+                  <AppIcon
+                    path={HAND_ICON[hand]}
+                    size={22}
+                    color={settings.hand === hand ? Colors.primary : Colors.iconMuted}
+                  />
+                </TouchableOpacity>
+              ))}
+            </Animated.View>
+          )}
+
+          {/* Note panel */}
+          {showNoteName && (
+            <Animated.View
+              pointerEvents={openPanel === 'noteName' ? 'auto' : 'none'}
+              style={[
+                panelBase,
+                {
+                  top: panelLayout.noteName.top,
+                  left: panelLayout.noteName.left,
+                  width: panelWidthInterp('noteName', NOTE_PANEL_WIDTH),
+                },
+              ]}
+            >
+              <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+                {WARMUP_LONG_NOTE_NOTES.map((n) => (
+                  <TouchableOpacity
+                    key={n.label}
+                    onPress={() => handleNoteNameChange(n.label)}
+                    hitSlop={4}
+                    style={{
+                      width: 44,
+                      height: 44,
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                    }}
+                  >
+                    <Text
+                      style={{
+                        fontSize: 13,
+                        fontWeight: '600',
+                        color: noteName === n.label ? Colors.primary : Colors.iconMuted,
+                      }}
+                    >
+                      {n.label}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </ScrollView>
+            </Animated.View>
+          )}
+
+          {/* Note-octave panel */}
+          {showNoteOctave && (
+            <Animated.View
+              pointerEvents={openPanel === 'noteOctave' ? 'auto' : 'none'}
+              style={[
+                panelBase,
+                {
+                  top: panelLayout.noteOctave.top,
+                  left: panelLayout.noteOctave.left,
+                  width: panelWidthInterp('noteOctave', NOTE_OCTAVE_PANEL_WIDTH),
+                },
+              ]}
+            >
+              {noteOctaveOptions.map((n) => (
+                <TouchableOpacity
+                  key={n}
+                  onPress={() => handleNoteOctaveChange(n)}
+                  hitSlop={4}
+                  style={{ width: 44, height: 44, alignItems: 'center', justifyContent: 'center' }}
+                >
+                  <Text
+                    style={{
+                      fontSize: 13,
+                      fontWeight: '600',
+                      color: effectiveNoteOctave === n ? Colors.primary : Colors.iconMuted,
+                    }}
+                  >
+                    {n}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </Animated.View>
+          )}
+
+          {/* Hold-length panel */}
+          {showLongMeasures && (
+            <Animated.View
+              pointerEvents={openPanel === 'longNoteMeasures' ? 'auto' : 'none'}
+              style={[
+                panelBase,
+                {
+                  top: panelLayout.longNoteMeasures.top,
+                  left: panelLayout.longNoteMeasures.left,
+                  width: panelWidthInterp('longNoteMeasures', LONG_MEASURES_PANEL_WIDTH),
+                },
+              ]}
+            >
+              <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+                {WARMUP_LONG_NOTE_MEASURES.map((n) => (
+                  <TouchableOpacity
+                    key={n}
+                    onPress={() => handleLongNoteMeasuresChange(n)}
+                    hitSlop={4}
+                    style={{
+                      width: 44,
+                      height: 44,
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                    }}
+                  >
+                    <Text
+                      style={{
+                        fontSize: 13,
+                        fontWeight: '600',
+                        color: longNoteMeasures === n ? Colors.primary : Colors.iconMuted,
+                      }}
+                    >
+                      {n}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </ScrollView>
+            </Animated.View>
+          )}
+
+          {/* Repeat-count panel */}
+          {showLongRepeats && (
+            <Animated.View
+              pointerEvents={openPanel === 'longNoteRepeats' ? 'auto' : 'none'}
+              style={[
+                panelBase,
+                {
+                  top: panelLayout.longNoteRepeats.top,
+                  left: panelLayout.longNoteRepeats.left,
+                  width: panelWidthInterp('longNoteRepeats', LONG_REPEATS_PANEL_WIDTH),
+                },
+              ]}
+            >
+              {WARMUP_LONG_NOTE_REPEATS.map((n) => (
+                <TouchableOpacity
+                  key={n}
+                  onPress={() => handleLongNoteRepeatsChange(n)}
+                  hitSlop={4}
+                  style={{ width: 44, height: 44, alignItems: 'center', justifyContent: 'center' }}
+                >
+                  <Text
+                    style={{
+                      fontSize: 13,
+                      fontWeight: '600',
+                      color: longNoteRepeats === n ? Colors.primary : Colors.iconMuted,
+                    }}
+                  >
+                    ×{n}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </Animated.View>
+          )}
 
           {/* Key panel */}
           {showKey && (
