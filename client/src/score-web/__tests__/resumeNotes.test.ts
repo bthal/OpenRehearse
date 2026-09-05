@@ -52,6 +52,32 @@ describe('notesSoundingAt', () => {
     ]);
   });
 
+  it('stops a resumed note at the loop end so the next wrap does not stack a second voice', () => {
+    // Loop A at 4q, B at 6q, inside a note running 0-8q. Left unbounded the voice
+    // would still have 2q to run when the wrap sounds another copy of the same pitch,
+    // and every pass would add one more.
+    expect(notesSoundingAt(HELD, q(4), PPQ, q(6))).toEqual([
+      { midi: 67, elapsedQ: 4, remainingQ: 2 },
+    ]);
+  });
+
+  it('leaves a note that already ends before the loop end alone', () => {
+    expect(notesSoundingAt(HELD, q(4), PPQ, q(99))).toEqual([
+      { midi: 67, elapsedQ: 4, remainingQ: 4 },
+    ]);
+  });
+
+  it('ignores a bound that is not a usable one rather than falling silent', () => {
+    // A bound at or behind the resume position would leave nothing to sound. That is
+    // a caller bug, and a slightly long note is a better failure than silence.
+    expect(notesSoundingAt(HELD, q(4), PPQ, q(4))).toEqual([
+      { midi: 67, elapsedQ: 4, remainingQ: 4 },
+    ]);
+    expect(notesSoundingAt(HELD, q(4), PPQ, Number.NaN)).toEqual([
+      { midi: 67, elapsedQ: 4, remainingQ: 4 },
+    ]);
+  });
+
   it('tolerates a zero or negative duration rather than sounding a phantom note', () => {
     expect(notesSoundingAt([{ ticks: 0, midi: 60, durQ: 0 }], q(1), PPQ)).toEqual([]);
   });

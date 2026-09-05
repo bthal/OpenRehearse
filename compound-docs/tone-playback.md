@@ -1353,6 +1353,42 @@ Three things that are easy to get wrong in the resume itself:
 - **Pass the transport's start *time*, not `now`.** A count-in defers the start by seconds; a
   resumed note scheduled at `now` would sound during the click track.
 
-**Still open:** a transport *loop* that wraps back to an A handle sitting inside a held note has the
-same gap, because the looping branch above drops `event.startOffset < this._loopStart` too. The
-first pass is fine — it goes through `startPlayback` — but later wraps are not.
+### The same gap on a loop wrap
+
+A bit whose A handle sits inside a held note hits this twice over. The first pass is fine, because
+it goes through `startPlayback`. Every wrap after it was silent, for a related but *different*
+reason — note the mechanism, because the obvious guess is wrong. The app loops the **Transport**,
+not the Part, so `Part._loop` is false and the branch above never runs at all. What happens is in
+`Transport._processTick`:
+
+```javascript
+if (ticks >= this._loopEnd) {
+    this.emit("loopEnd", tickTime);
+    this._clock.setTicksAtTime(this._loopStart, tickTime);
+    ticks = this._loopStart;
+    this.emit("loopStart", tickTime, ...);
+    this.emit("loop", tickTime);
+}
+// ...
+this._timeline.forEachAtTime(ticks, (event) => event.invoke(tickTime));
+```
+
+Ticks rewind to `loopStart` and only the events **at** that tick are invoked. A `Tone.Part` puts
+each note on that timeline as a one-shot `transport.schedule` at its absolute onset
+(`ToneEvent._rescheduleEvents`), so anything scheduled earlier is never reached again.
+
+**Fix:** the `loop` emit is the hook — `Tone.Transport.on('loop', ...)`, sounding the in-progress
+notes at A. Three traps in it:
+
+- **Do not read `Tone.Transport.ticks` in that handler.** The rewind is applied *at* `tickTime`,
+  which is ahead of now by the lookahead, so the read can still return the pre-wrap value. Use the
+  loop region's own `aTicks`.
+- **The handler's argument is the audio time of the wrap**, and that is what the resumed note must
+  be scheduled at.
+- **Bound the note at B.** This is the one that bites: left to run its natural length, a resumed
+  note outlives the wrap, and the next wrap sounds the same pitch again while the first is still
+  going. Voices stack one per pass until the loop is stopped. Hence `untilTicks` on
+  `notesSoundingAt`.
+
+`initPlayback` runs again on every score load, so the handler is removed before it is added —
+otherwise the previous score's closure stays subscribed and every held note sounds twice.

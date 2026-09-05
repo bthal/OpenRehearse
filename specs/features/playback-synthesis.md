@@ -53,8 +53,10 @@ continuous tone. On a looping instrument the resume point is usually past the en
 altogether, so it is folded back into the loop region. A one-shot sample that has already run out
 sounds nothing, because it has genuinely stopped.
 
-This applies to every instrument and to both ways of arriving there — moving the playhead and
-pressing play, or resuming a pause taken mid-note.
+This applies to every instrument and to every way of arriving there: moving the playhead and
+pressing play, resuming a pause taken mid-note, and a bit looping back to an **A** handle that sits
+inside a held note. In a loop the note stops at **B** rather than running its own length, so the
+next pass sounds it afresh instead of layering a second copy over the first.
 
 ## Loop interaction
 
@@ -84,6 +86,8 @@ pressing play, or resuming a pause taken mid-note.
 - [ ] Piano playback is unchanged: notes decay and stop as before, and no piano sample loops.
 - [ ] Starting or resuming playback inside a held note sounds the rest of that note, with no
       re-attack — on the clarinet and the piano alike.
+- [ ] A bit whose A handle falls inside a held note sounds that note on every pass, not just the
+      first, and repeated passes do not stack copies of it.
 - [x] Repeat barlines are honored: playback cycles through the repeated section.
 - [x] Fermata notes sound longer; subsequent notes are delayed so the hold is audible.
 - [x] Arpeggiated chords roll from low to high (or high to low per marking).

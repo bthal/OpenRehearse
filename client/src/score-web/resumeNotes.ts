@@ -43,11 +43,18 @@ export interface SoundingNote {
  * resume position is left out because the Part will fire it itself — returning it
  * here would attack the same note twice at the same instant. A note ending exactly
  * there is left out because it has finished.
+ *
+ * `untilTicks` bounds how long a note may go on for, and exists for the loop wrap: a
+ * resumed note that outlives the loop end would still be sounding when the next wrap
+ * sounds the same pitch again, and every pass would stack one more voice. Ignored
+ * unless it is a usable bound ahead of the resume position — a slightly long note is
+ * a better answer to a caller's bad input than silence.
  */
 export function notesSoundingAt(
   events: readonly ResumeCandidate[],
   resumeTicks: number,
   ppq: number,
+  untilTicks?: number,
 ): SoundingNote[] {
   if (!Number.isFinite(resumeTicks) || resumeTicks <= 0) return [];
   if (!Number.isFinite(ppq) || ppq <= 0) return [];
@@ -60,7 +67,15 @@ export function notesSoundingAt(
     const endTicks = event.ticks + event.durQ * ppq;
     if (endTicks <= resumeTicks) continue;
     const elapsedQ = (resumeTicks - event.ticks) / ppq;
-    sounding.push({ midi: event.midi, elapsedQ, remainingQ: event.durQ - elapsedQ });
+    const bounded =
+      untilTicks !== undefined && Number.isFinite(untilTicks) && untilTicks > resumeTicks
+        ? Math.min(endTicks, untilTicks)
+        : endTicks;
+    sounding.push({
+      midi: event.midi,
+      elapsedQ,
+      remainingQ: (bounded - resumeTicks) / ppq,
+    });
   }
   return sounding;
 }

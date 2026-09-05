@@ -2653,6 +2653,11 @@ export function initPlayback(
   part = makeNotePart(noteEvents);
   part.start(0);
 
+  // Off first: initPlayback runs again on every score load, and Tone would otherwise
+  // keep the previous score's handler as well and sound each held note twice.
+  Tone.Transport.off('loop', handleTransportLoop);
+  Tone.Transport.on('loop', handleTransportLoop);
+
   initTouchHandlers();
   initLoopHandles();
   if (metronomeEnabled) startMetronome();
@@ -2672,11 +2677,15 @@ export function initPlayback(
  * Called with the audio time the transport will start at, not `now`: a count-in defers
  * that by seconds, and a resumed note has to arrive with the rest of the music.
  */
-function soundNotesInProgress(startAtTime: number): void {
+function soundNotesInProgress(startAtTime: number, atTicks: number): void {
   if (!resumePlayer) return;
   const bpm = Tone.Transport.bpm.value;
   if (!(bpm > 0)) return;
-  for (const note of notesSoundingAt(activeNoteEvents, Tone.Transport.ticks, TONE_PPQ)) {
+  // Inside a loop the note must stop at B. Left to run its own length it would still
+  // be sounding when the wrap sounds the same pitch again, and every pass would stack
+  // another voice on the one before it.
+  const until = Tone.Transport.loop && loopRegion ? loopRegion.bTicks : undefined;
+  for (const note of notesSoundingAt(activeNoteEvents, atTicks, TONE_PPQ, until)) {
     try {
       const noteName = Tone.Frequency(note.midi + soundingOffsetSemitones, 'midi').toNote();
       // One tempo for both: a tempo change can only land on a routine block boundary,
@@ -2688,6 +2697,23 @@ function soundNotesInProgress(startAtTime: number): void {
       // ignore individual-note scheduling failures, as the Part callback does
     }
   }
+}
+
+/**
+ * Re-sounds a held note each time the transport loops back into the middle of it.
+ *
+ * `Transport._processTick` rewinds ticks to `loopStart` and then invokes only the
+ * timeline events *at* that tick, so a note whose onset is behind A is dropped on
+ * every wrap exactly as it is on a manual start. The first pass is fine because it
+ * goes through `startPlayback`; without this, every pass after it is silent.
+ *
+ * The `loop` event carries the audio time of the wrap, which is what the resumed note
+ * has to be scheduled at. Transport.ticks is not read here: the rewind is applied at
+ * that future time, so reading it now can still return the pre-wrap value.
+ */
+function handleTransportLoop(time: number): void {
+  if (!loopRegion) return;
+  soundNotesInProgress(time, loopRegion.aTicks);
 }
 
 export async function startPlayback(): Promise<void> {
@@ -2788,13 +2814,13 @@ export async function startPlayback(): Promise<void> {
     countInNodes = countIn.clicks.map((c) => playClick(ctx, startAt + c.offsetSec, c.accented));
     countingIn = true;
     const transportStart = startAt + countIn.delaySec;
-    soundNotesInProgress(transportStart);
+    soundNotesInProgress(transportStart, Tone.Transport.ticks);
     Tone.Transport.start(transportStart);
   } else {
     // An explicit time rather than the implicit "now", so the resumed notes and the
     // transport agree on when the music restarts.
     const transportStart = Tone.now();
-    soundNotesInProgress(transportStart);
+    soundNotesInProgress(transportStart, Tone.Transport.ticks);
     Tone.Transport.start(transportStart);
   }
   animFrameId = requestAnimationFrame(animateCursorLoop);
@@ -2915,6 +2941,7 @@ export function disposePlayback(): void {
   // `loopingPlayer` is the same object as `resumePlayer` on a sustained set, so it is
   // dropped rather than disposed a second time.
   loopingPlayer = null;
+  Tone.Transport.off('loop', handleTransportLoop);
   resumePlayer?.dispose();
   resumePlayer = null;
   if (metronomeEventId !== null) {
