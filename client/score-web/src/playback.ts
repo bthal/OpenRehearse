@@ -365,6 +365,22 @@ let loopingPlayer: LoopingSamplePlayer | null = null;
  * costs nothing to keep: the buffers are shared references, not copies.
  */
 let resumePlayer: LoopingSamplePlayer | null = null;
+/**
+ * The bus every note player feeds, and the one thing mute turns down.
+ *
+ * Mute cannot be `Tone.Destination`: the metronome and count-in clicks are raw Web
+ * Audio nodes wired straight to `ctx.destination` (see `playClick`), and muting the
+ * master would silence the pulse the student is playing along to. Nor can it refuse
+ * notes when they are scheduled — Tone schedules ahead, so a mute would leave a tail of
+ * already-queued notes. A gain applies to audio already scheduled, so it takes effect at
+ * once in both directions.
+ *
+ * Created once and never disposed, so it outlives score reloads exactly as
+ * `notesMuted` does.
+ */
+let notesBus: Tone.Gain | null = null;
+let notesMuted = false;
+const MUTE_RAMP_SEC = 0.02;
 let part: Tone.Part<NoteEvent> | null = null;
 /**
  * The events currently on the Part, for the resume path to search.
@@ -2483,6 +2499,15 @@ export function toggleMetronome(): void {
   setMetronome(!metronomeEnabled);
 }
 
+// ─── Mute ─────────────────────────────────────────────────────────────────────
+
+/** Silences the notes and nothing else — see `notesBus`. */
+export function setMuted(muted: boolean): void {
+  notesMuted = muted;
+  // Ramped rather than set: a step on a sounding note is an audible click.
+  notesBus?.gain.rampTo(muted ? 0 : 1, MUTE_RAMP_SEC);
+}
+
 // ─── Count-in ─────────────────────────────────────────────────────────────────
 
 export function setCountIn(measures: number): void {
@@ -2843,7 +2868,8 @@ export function initPlayback(
   }
   postToNative({ type: 'SCORE_BPM', payload: initialBpm });
 
-  resumePlayer = new LoopingSamplePlayer();
+  notesBus ??= new Tone.Gain(notesMuted ? 0 : 1).toDestination();
+  resumePlayer = new LoopingSamplePlayer(notesBus);
   for (const [note, buffer] of Object.entries(sampleBuffers)) {
     resumePlayer.add(note, buffer, sampleLoopBounds[note] ?? null);
   }
@@ -2855,7 +2881,7 @@ export function initPlayback(
     sampler = new Tone.Sampler({
       urls: sampleBuffers,
       release: 1,
-    }).toDestination();
+    }).connect(notesBus);
   }
 
   // Immediately before the Part, and at the BPM it is about to be filed at: this table

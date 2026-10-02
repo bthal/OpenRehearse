@@ -49,8 +49,12 @@ export class LoopingSamplePlayer {
   private midis: number[] = [];
   private readonly voices = new Set<Tone.ToneBufferSource>();
 
-  constructor() {
-    this.output = new Tone.Gain(1).toDestination();
+  /**
+   * `destination` is the playback module's notes bus rather than the master output, so
+   * that muting the notes leaves the metronome audible.
+   */
+  constructor(destination: Tone.InputNode) {
+    this.output = new Tone.Gain(1).connect(destination);
   }
 
   /**

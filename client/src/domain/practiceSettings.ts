@@ -1,5 +1,5 @@
 // The three practice settings a passage can be worked on with: which hand(s) sound,
-// how fast, and whether the metronome clicks.
+// how fast, whether the metronome clicks, and whether the notes are muted.
 //
 // They live in the domain rather than in `playViewStore` because a saved bit stores
 // them (see `domain/bits.ts`), and the domain layer may not import from state.
@@ -19,12 +19,19 @@ export interface PracticeSettings {
   hand: ActiveHand;
   tempoMultiplier: TempoMultiplier;
   metronome: boolean;
+  /**
+   * Whether the notes are silenced — the cursor still runs and the metronome still
+   * clicks, so the student can play along to the scroll. Independent of `hand`, so
+   * unmuting brings back exactly the hand that was chosen.
+   */
+  muted: boolean;
 }
 
 export const DEFAULT_PRACTICE_SETTINGS: PracticeSettings = {
   hand: 'both',
   tempoMultiplier: 1.0,
   metronome: false,
+  muted: false,
 };
 
 /**

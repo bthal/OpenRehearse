@@ -712,6 +712,27 @@ click is unaccented until something re-schedules it. Keying the effect on "score
 re-asserts the setting after any reload, which is what a one-shot injection on the `LOADED`
 message quietly gets wrong.
 
+## LANDMINE: mute the notes bus, never `Tone.Destination`
+
+Mute silences the music and nothing else: the student is playing along to the scroll and the
+click. Two shortcuts are wrong:
+
+- **Muting the master output** (`Tone.Destination.mute`, or a gain on it) also silences the
+  metronome and the count-in. Those are raw Web Audio oscillators wired straight to
+  `ctx.destination` (`playClick`), and Tone's master is just upstream of the same speakers.
+- **Refusing notes in the `Tone.Part` callback** leaves a tail. Tone schedules ahead of the
+  playhead, so notes already queued still sound after the mute, and unmuting stays silent until
+  the next note is scheduled — the "a scheduled event cannot be taken back" rule from the other
+  side.
+
+So every note player feeds one `notesBus` (`Tone.Gain`): the `Tone.Sampler` connects to it and
+`LoopingSamplePlayer` takes it as its constructor's destination. `setMuted` ramps that gain to
+0 or 1 over 20 ms. A gain acts on audio already scheduled, so it takes effect at once in both
+directions, and the ramp keeps a sounding note from clicking. The bus is created once and
+**never disposed in the teardown**, so it — and `notesMuted` — outlive score reloads. Native
+drives it with `__rn_set_muted`, set from state after the load, the same pattern as the
+metronome above. A new note source must connect to `notesBus`, or mute stops covering it.
+
 ## LANDMINE: `'@4n'` quantize syntax is NOT valid as `scheduleRepeat`'s `startTime`
 
 Tone.js's `'@4n'` notation ("next quarter-note boundary") works for `Transport.schedule()` but

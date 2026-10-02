@@ -8,6 +8,7 @@ import {
   disposePlayback,
   toggleLoop,
   setMetronome,
+  setMuted,
   toggleMetronome,
   setActiveHand,
   setCountIn,
@@ -184,7 +185,13 @@ w.__rn_set_metronome = (on: boolean) => {
   setMetronome(on);
 };
 
-w.__rn_set_active_hand = (hand: 'both' | 'right' | 'left') => {
+// Set from native state, never toggled, so a reload cannot leave the button and the
+// audio disagreeing about whether the notes are heard.
+w.__rn_set_muted = (on: boolean) => {
+  setMuted(on);
+};
+
+w.__rn_set_active_hand =(hand: 'both' | 'right' | 'left') => {
   setActiveHand(hand);
 };
 

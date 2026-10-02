@@ -12,6 +12,7 @@ function bit(startQuarters: number, endQuarters: number, id = 'b1'): Bit {
     hand: 'both',
     tempoMultiplier: 1.0,
     metronome: false,
+    muted: false,
   };
 }
 

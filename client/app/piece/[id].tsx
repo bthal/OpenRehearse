@@ -11,6 +11,8 @@ import {
   mdiRepeat,
   mdiSpeedometer,
   mdiToyBrickPlus,
+  mdiVolumeHigh,
+  mdiVolumeOff,
 } from '@mdi/js';
 import * as Crypto from 'expo-crypto';
 import { router, Stack, useLocalSearchParams } from 'expo-router';
@@ -81,6 +83,7 @@ export default function PlayView() {
   const tempoMultiplier = usePlayViewStore((s) => s.tempoMultiplier);
   const loopActive = usePlayViewStore((s) => s.loopActive);
   const metronomeOn = usePlayViewStore((s) => s.metronomeOn);
+  const muted = usePlayViewStore((s) => s.muted);
   const activeHand = usePlayViewStore((s) => s.activeHand);
   const currentSectionIndex = usePlayViewStore((s) => s.currentSectionIndex);
   const scoreMoving = usePlayViewStore((s) => s.scoreMoving);
@@ -95,6 +98,7 @@ export default function PlayView() {
   const setTempoMultiplier = usePlayViewStore((s) => s.setTempoMultiplier);
   const setLoopActive = usePlayViewStore((s) => s.setLoopActive);
   const setMetronomeOn = usePlayViewStore((s) => s.setMetronomeOn);
+  const setMuted = usePlayViewStore((s) => s.setMuted);
   const setActiveHand = usePlayViewStore((s) => s.setActiveHand);
   const setCurrentSectionIndex = usePlayViewStore((s) => s.setCurrentSectionIndex);
   const setScoreMoving = usePlayViewStore((s) => s.setScoreMoving);
@@ -127,12 +131,13 @@ export default function PlayView() {
   // effect below.
   const pieceRef = useRef(piece);
   const sectionsRef = useRef<Section[] | undefined>(undefined);
-  // Bits and the three practice settings are all read from inside the message handler
+  // Bits and the four practice settings are all read from inside the message handler
   // and the write-back helpers, which must not be recreated on every settings change.
   const bitsRef = useRef<Bit[] | undefined>(undefined);
   const activeBitIdRef = useRef<string | null>(null);
   const activeHandRef = useRef<ActiveHand>('both');
   const metronomeOnRef = useRef(false);
+  const mutedRef = useRef(false);
   const preBitSettingsRef = useRef<PracticeSettings | null>(null);
   useEffect(() => {
     scoreBpmRef.current = scoreBpm;
@@ -159,6 +164,9 @@ export default function PlayView() {
     metronomeOnRef.current = metronomeOn;
   }, [metronomeOn]);
   useEffect(() => {
+    mutedRef.current = muted;
+  }, [muted]);
+  useEffect(() => {
     preBitSettingsRef.current = preBitSettings;
   }, [preBitSettings]);
   useEffect(() => {
@@ -170,7 +178,7 @@ export default function PlayView() {
     if (id) void touchPiece(id);
   }, [id, touchPiece]);
 
-  // Speed and metronome are the piece's own, restored once when it arrives so practice
+  // Speed, metronome and mute are the piece's own, restored once when it arrives so practice
   // resumes where it left off. Once only, and before the score reports its BPM: the
   // SCORE_BPM handler multiplies the reference by the restored value, so the piece opens
   // at the right tempo with nothing extra injected, and a later change made in the view
@@ -181,7 +189,8 @@ export default function PlayView() {
     restoredForRef.current = id;
     setTempoMultiplier(piece.tempoMultiplier ?? DEFAULT_PRACTICE_SETTINGS.tempoMultiplier);
     setMetronomeOn(piece.metronome ?? DEFAULT_PRACTICE_SETTINGS.metronome);
-  }, [id, piece, setTempoMultiplier, setMetronomeOn]);
+    setMuted(piece.muted ?? DEFAULT_PRACTICE_SETTINGS.muted);
+  }, [id, piece, setTempoMultiplier, setMetronomeOn, setMuted]);
 
   /**
    * Stores a practice setting on the piece — but not while a bit is armed, where the
@@ -189,7 +198,7 @@ export default function PlayView() {
    * restores the piece's own value from `preBitSettings`.
    */
   const persistToPiece = useCallback(
-    (settings: { tempoMultiplier?: TempoMultiplier; metronome?: boolean }) => {
+    (settings: { tempoMultiplier?: TempoMultiplier; metronome?: boolean; muted?: boolean }) => {
       if (!id || activeBitIdRef.current !== null) return;
       void setPiecePracticeSettings(id, settings);
     },
@@ -203,8 +212,8 @@ export default function PlayView() {
    * commits any glide in flight, so re-asserting the hand a bit was already using would
    * snap the score to the bit instead of letting it slide there.
    *
-   * The metronome needs no guard — the effect below mirrors it into the WebView from
-   * state, so setting it to the value it already had costs nothing.
+   * The metronome and mute need no guard — the effects below mirror them into the
+   * WebView from state, so setting either to the value it already had costs nothing.
    */
   const applyPracticeSettings = useCallback(
     (next: PracticeSettings) => {
@@ -222,8 +231,9 @@ export default function PlayView() {
         );
       }
       setMetronomeOn(next.metronome);
+      setMuted(next.muted);
     },
-    [setActiveHand, setTempoMultiplier, setMetronomeOn],
+    [setActiveHand, setTempoMultiplier, setMetronomeOn, setMuted],
   );
 
   /**
@@ -234,7 +244,7 @@ export default function PlayView() {
    * list to the WebView: the score draws nothing from these fields.
    */
   const writeBackToActiveBit = useCallback(
-    (patch: Partial<Pick<Bit, 'hand' | 'tempoMultiplier' | 'metronome'>>) => {
+    (patch: Partial<Pick<Bit, 'hand' | 'tempoMultiplier' | 'metronome' | 'muted'>>) => {
       const bitId = activeBitIdRef.current;
       const bits = bitsRef.current;
       if (!id || bitId === null || !bits) return;
@@ -440,6 +450,7 @@ export default function PlayView() {
             hand: activeHandRef.current,
             tempoMultiplier: tempoMultiplierRef.current,
             metronome: metronomeOnRef.current,
+            muted: mutedRef.current,
           };
           void setPieceBits(id, [...(bitsRef.current ?? []), created]);
           break;
@@ -487,6 +498,7 @@ export default function PlayView() {
               hand: activeHandRef.current,
               tempoMultiplier: tempoMultiplierRef.current,
               metronome: metronomeOnRef.current,
+              muted: mutedRef.current,
             });
           }
           setActiveBitId(enteredId);
@@ -548,6 +560,12 @@ export default function PlayView() {
     persistToPiece({ metronome: !metronomeOn });
   }, [metronomeOn, setMetronomeOn, writeBackToActiveBit, persistToPiece]);
 
+  const handleMuteToggle = useCallback(() => {
+    setMuted(!muted);
+    writeBackToActiveBit({ muted: !muted });
+    persistToPiece({ muted: !muted });
+  }, [muted, setMuted, writeBackToActiveBit, persistToPiece]);
+
   /**
    * Saves the live loop as a bit. The id is minted here because `crypto.randomUUID` is
    * not dependable in every WebView this ships to, and a bit's handle has to survive
@@ -574,6 +592,14 @@ export default function PlayView() {
     if (!scoreReady) return;
     webViewRef.current?.injectJavaScript(`window.__rn_set_metronome(${metronomeOn});void 0;`);
   }, [scoreReady, metronomeOn]);
+
+  // Mute reaches the WebView the same way, and for the same reason it is a set rather
+  // than a toggle: native state is the one source of truth, and a reload must not leave
+  // the two sides disagreeing about whether the notes are audible.
+  useEffect(() => {
+    if (!scoreReady) return;
+    webViewRef.current?.injectJavaScript(`window.__rn_set_muted(${muted});void 0;`);
+  }, [scoreReady, muted]);
 
   // Bit mode. The WebView owns the armed loop, so this follows BIT_ENTERED rather than
   // being set by the tap that caused it.
@@ -733,6 +759,19 @@ export default function PlayView() {
                   )}
                 </>
               )}
+
+              {/* Mute toggle — silences the notes only; the metronome below still clicks */}
+              <ToolbarSlot
+                onPress={handleMuteToggle}
+                accessibilityLabel={t('playView.mute')}
+                accessibilityState={{ selected: muted }}
+              >
+                <AppIcon
+                  path={muted ? mdiVolumeOff : mdiVolumeHigh}
+                  size={26}
+                  color={muted ? Colors.primary : Colors.icon}
+                />
+              </ToolbarSlot>
 
               {/* Metronome toggle */}
               <ToolbarSlot

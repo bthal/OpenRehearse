@@ -72,6 +72,7 @@
     "sectionOrdinal": "Section {{n}}",
     "previousSection": "Previous section",
     "nextSection": "Next section",
+    "mute": "Mute playback",
     "metronome": "Metronome",
     "handSelection": "Hand selection",
     "speed": "Speed",
@@ -94,6 +95,7 @@
     "hold": "Bars",
     "repeats": "Reps",
     "exercise": "No.",
+    "mute": "Mute playback",
     "failedToGenerate": "Failed to generate score."
   },
   "settings": {
@@ -221,6 +223,7 @@
     "exerciseNo": "No. {{number}}",
     "swapExercises": "Swap Exercises",
     "instrumentFixed": "For {{instrument}}",
+    "mute": "Mute playback",
     "metronome": "Metronome"
   },
   "routineRow": {

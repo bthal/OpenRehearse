@@ -42,6 +42,7 @@ export default function RoutinePlayView() {
   const reset = usePlayViewStore((s) => s.reset);
 
   const metronomeOn = routine?.metronome ?? false;
+  const muted = routine?.muted ?? false;
 
   const webViewRef = useRef<WebView>(null);
 
@@ -145,6 +146,12 @@ export default function RoutinePlayView() {
     if (!scoreReady) return;
     webViewRef.current?.injectJavaScript(`window.__rn_set_metronome(${metronomeOn});void 0;`);
   }, [scoreReady, metronomeOn]);
+
+  // Mute is the routine's too, pushed the same way and for the same reasons.
+  useEffect(() => {
+    if (!scoreReady) return;
+    webViewRef.current?.injectJavaScript(`window.__rn_set_muted(${muted});void 0;`);
+  }, [scoreReady, muted]);
 
   if (!routine) {
     return (

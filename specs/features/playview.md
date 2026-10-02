@@ -82,15 +82,22 @@ The entire piece is rendered in a **single horizontal line** — all measures la
   40/60/80. The reference resolves to `targetBpm ?? importedBpm ?? scoreBpm`; effective BPM =
   reference × multiplier. Bounds are **40–240** (`domain/tempo.ts`), chosen so every selectable
   speed stays inside the synth's `[20, 240]` clamp and the displayed BPM always equals playback.
-- **Speed and metronome are remembered per piece** (`Piece.tempoMultiplier`, `Piece.metronome`),
+- **Speed, metronome and mute are remembered per piece** (`Piece.tempoMultiplier`,
+  `Piece.metronome`, `Piece.muted`),
   restored once when the piece opens so practice resumes where it left off, and written back on
   every change made outside a bit — inside one the setting belongs to the bit. The **active hand
   is deliberately not remembered**: it returns to both hands on every open, because a piece left
   in one hand gives no clue on screen why the other has gone silent. Pieces last practised before
-  the fields existed read as ×1.0 with the metronome off.
+  the fields existed read as ×1.0, with the metronome off and the notes audible.
 - The metronome reaches the WebView **only** as a mirror of `metronomeOn`, pushed with
   `__rn_set_metronome` once the score has loaded and re-asserted after any reload — the click
   schedule is built from measure metadata that the load creates. Nothing toggles it blind.
+- Mute reaches the WebView the same way, as a mirror of `muted` pushed with `__rn_set_muted`.
+  It silences the **notes only**: the cursor, the transport, the metronome and the count-in all
+  carry on, so the student can play along to the scroll. It is independent of the hand filter —
+  unmuting brings back exactly the hand that was chosen — and muted notes are drawn as usual,
+  not greyed, since they are being read. Muted *and* metronome off is allowed: a silent scroll.
+  See `compound-docs/tone-playback.md` for why mute is a notes bus, not the master output.
 
 ## Loop ("bit") — MVP rules
 
@@ -143,14 +150,14 @@ have to be drawn again each session. It carries the practice settings it was sav
   is immediately **inside** it: there is never both a loop and a bit at once. The button
   takes a slot rather than replacing the loop button, so clearing a loop without saving it
   stays possible.
-- **What a bit stores**: its bounds, plus **hand**, **speed** and **metronome** as they
+- **What a bit stores**: its bounds, plus **hand**, **speed**, **metronome** and **mute** as they
   were at the moment it was saved — the passage was already being worked on that way,
   which is why it is worth keeping. Count-in is *not* per bit; it stays a global setting.
 - **Entering**: tap its marker. The score **glides** to the bit's start, its loop is armed,
   and its saved settings are applied. Tapping another bit's marker hops straight there, and
   tapping the **armed** marker leaves the bit — the marker that got you in is the way out,
   and it is already under the finger.
-- **Editing a bit's settings**: change hand, speed or metronome from inside it. The change
+- **Editing a bit's settings**: change hand, speed, metronome or mute from inside it. The change
   is **written back immediately** — a bit is a live preset, not a snapshot with a save
   button.
 - **Editing a bit's bounds**: not possible. A wrong bit is **deleted and drawn again**. The
@@ -163,8 +170,8 @@ have to be drawn again each session. It carries the practice settings it was sav
   correct a bit, and a press held a moment too long should not lose one. The cost is
   discoverability: a long press advertises nothing, and this is the only one in the app.
 - **Leaving**: either tap the armed marker or use the toolbar's leave button, which stays
-  as the discoverable route. Clears the loop and **restores the hand, speed and metronome
-  from before the first bit was entered**. A bit's settings stay sealed inside
+  as the discoverable route. Clears the loop and **restores the hand, speed, metronome and
+  mute from before the first bit was entered**. A bit's settings stay sealed inside
   it; visiting one never silently leaves the whole piece slow or one-handed.
 - **Scope**: bits live only in the PlayView. Nothing in the piece editor, nothing on the
   Dashboard. There is no cap on how many a piece may hold *in total* — but at most
@@ -263,7 +270,7 @@ else.
   overlaid on the score — no separate header row.
 - **Slides off the left edge while playing** and back on pause. Together with the play button
   vanishing and the section label rolling up, playback leaves nothing on screen but the notation.
-  The consequence is deliberate: *no* control — back, loop, metronome, hand or speed — is reachable
+  The consequence is deliberate: *no* control — back, loop, mute, metronome, hand or speed — is reachable
   while playing. Tapping the score pauses, and everything comes back, so each is one tap away.
 - The three react **immediately and independently** — no stagger, no shared cascade. Each answers
   the same moment on its own terms: the button and label are instant, the toolbar slides.
@@ -272,8 +279,8 @@ else.
   rest in the strip beside a landscape phone's camera — still on screen.
 - The slide uses `useNativeDriver: false` — required for correctness, not speed. See
   `compound-docs/expo-rn-setup.md` § "Native-driver animations flicker on release".
-- **Only the top of the toolbar swaps in bit mode.** Metronome, hand and speed stay where
-  they are and stay live — a bit owns those three settings, and editing them from inside it
+- **Only the top of the toolbar swaps in bit mode.** Mute, metronome, hand and speed stay
+  where they are and stay live — a bit owns those four settings, and editing them from inside it
   is the point. Back and the loop button are replaced by **leave bit** and **delete bit**.
   There is deliberately no Back button in bit mode: leaving the bit is the way out, and one
   extra tap to the Dashboard is cheaper than a control that abandons a bit silently.
@@ -289,6 +296,9 @@ else.
   - **Loop button** (icon: loop-icon when inactive; × when active)
   - **Save-as-bit button** — a brick-plus icon, present only while a loop is armed. Saves
     the loop as a bit and enters it. See "Bits" above.
+  - **Mute toggle** — silences the notes and nothing else (see "Playback & tempo" above). A volume icon,
+    grey while the notes sound and in the primary colour while muted, since muted is the state
+    worth noticing.
   - **Metronome toggle** — when enabled, clicks every quarter note; first beat of each measure
     accented (higher pitch, louder). Works for any time signature.
   - **Hand selector** — collapses to current selection label + hand icon (teal when filtering
@@ -324,14 +334,14 @@ else.
 ## State (Zustand)
 
 Slices: `activePieceId`, `webViewReady`, `isLoadingScore`, `scoreError`, `isPlaying`,
-`scoreBpm` (from MusicXML), `tempoMultiplier` (×0.5/×0.75/×1.0) and `metronomeOn: boolean`
-(both seeded from the piece on open and persisted back to it),
+`scoreBpm` (from MusicXML), `tempoMultiplier` (×0.5/×0.75/×1.0) and `metronomeOn: boolean` and `muted: boolean`
+(all three seeded from the piece on open and persisted back to it),
 `activeHand: 'both' | 'right' | 'left'` (resets to `'both'` on piece unmount),
 `currentSectionIndex: number | null` (driven by `SECTION_INDEX` from the WebView, which owns position),
 `scoreMoving: boolean` (driven by `SCORE_MOTION` from the WebView, which owns the gesture),
 `loop: { start, end } | null`,
 `activeBitId: string | null` (driven by `BIT_ENTERED` from the WebView, which owns the
-armed loop), `preBitSettings: PracticeSettings | null` (hand/speed/metronome as they were
+armed loop), `preBitSettings: PracticeSettings | null` (hand/speed/metronome/mute as they were
 before the first bit was entered, restored on leaving),
 `displayMode: 'one-line' | 'standard'` (global preference; `'one-line'` in MVP, no UI to change it yet).
 
@@ -389,6 +399,11 @@ before the first bit was entered, restored on leaving),
   animated overlay; closes after selection. *(Phase 5)*
 - [x] Metronome toggle present; clicks every quarter note; first-beat accent correct for any
   time signature. *(Phase 5)*
+- [ ] Mute toggle above the metronome silences the notes only: the cursor scrolls, the
+  metronome and count-in still click, the score is not greyed, and the hand filter is
+  unchanged on unmute.
+- [ ] Mute survives leaving and reopening the piece and an app restart; a piece from before
+  the field existed opens audible.
 - [x] Hand selector (Both/Right/Left): selected staff plays audio and notes stay black;
   inactive staff notes greyed (`#B0B0B0`); switching hand preserves cursor position.
 - [x] Section label shows the current section centred across the top at 50% of the screen width,
@@ -398,7 +413,7 @@ before the first bit was entered, restored on leaving),
 - [x] The label rolls up to a strip while playing and unrolls on pause, animated in both directions.
 - [x] Section junctions are marked in the score with a two-sided color fade and a crisp seam.
 - [x] A loop can be saved as a bit with one tap, which enters the new bit; the bit records
-  the hand, speed and metronome in force at that moment.
+  the hand, speed, metronome and mute in force at that moment.
 - [x] Bits persist across app restarts, stored as ticks on the piece and resolved back onto
   the note grid at load (`domain/bits.ts`, `score-web/bitResolve.ts`).
 - [x] Saving over a span an existing bit already covers enters that bit instead of creating
@@ -421,7 +436,7 @@ before the first bit was entered, restored on leaving),
   rather than collapsing onto an occupied row.
 - [x] Writing a bit — creating, deleting, or changing its settings — does **not** reload
   the score.
-- [x] Changing hand, speed or metronome inside a bit writes back to it immediately;
+- [x] Changing hand, speed, metronome or mute inside a bit writes back to it immediately;
   leaving restores the settings from before the first bit was entered.
 - [x] Deleting a bit is confirmed first; the bit toolbar offers leave and delete in place
   of back and loop.

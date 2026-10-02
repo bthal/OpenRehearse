@@ -1,11 +1,13 @@
 import { forwardRef, type ReactNode } from 'react';
-import { TouchableOpacity, View } from 'react-native';
+import { TouchableOpacity, View, type AccessibilityState } from 'react-native';
 
 import { TOOLBAR_SLOT } from '@components/ToolbarShell';
 
 interface ToolbarSlotProps {
   onPress: () => void;
   accessibilityLabel?: string;
+  /** For toggles, e.g. `{ selected: muted }`. */
+  accessibilityState?: AccessibilityState;
   children: ReactNode;
 }
 
@@ -16,7 +18,7 @@ interface ToolbarSlotProps {
  * panel up with the button that opened it.
  */
 export const ToolbarSlot = forwardRef<View, ToolbarSlotProps>(function ToolbarSlot(
-  { onPress, accessibilityLabel, children },
+  { onPress, accessibilityLabel, accessibilityState, children },
   ref,
 ) {
   return (
@@ -25,6 +27,7 @@ export const ToolbarSlot = forwardRef<View, ToolbarSlotProps>(function ToolbarSl
         onPress={onPress}
         accessibilityRole="button"
         accessibilityLabel={accessibilityLabel}
+        accessibilityState={accessibilityState}
         style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}
       >
         {children}

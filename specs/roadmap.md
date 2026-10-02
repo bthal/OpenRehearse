@@ -44,6 +44,7 @@ Phases are **sequential**; within a phase, items can be parallelized when they d
 ## Later (post-MVP backlog)
 
 - [x] **Metronome** aligned with transport; oscillator click track in WebView with downbeat detection; toolbar toggle.
+- [x] **Mute playback** — silences the notes while the cursor, metronome and count-in carry on, so a student can play along to the scroll. Per piece and per bit, per visit in warm-ups, per routine in the builder; see `specs/features/playview.md` § "Playback & tempo".
 - [x] **Practice-time tracking** with a day-based heatmap at the bottom of the dashboard; see `specs/features/dashboard.md` § "Practice-time tracking".
 - [x] **Section detection** at import, with a colored section label and prev/next navigation in PlayView; see `specs/features/section-detection.md`. Editing sections is not included.
 - [x] **Instruments** — piano and Bb clarinet, with per-piece part selection and transposition,
