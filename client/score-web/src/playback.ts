@@ -956,7 +956,7 @@ function hideSnapPreview(): void {
 
 /** Paints the preview at the onset nearest the fixed centre line. */
 function previewNearestToCenter(): void {
-  const step = nearestGridIndex(cursorSteps, viewportWidth / 2 - scrollOffsetPx);
+  const step = nearestGridIndex(cursorSteps, viewportWidth / 2 - scrollOffsetPx, currentCursorStep);
   const point = cursorSteps[step];
   if (point) showSnapPreview(point.pxLeft, step);
 }
@@ -1494,7 +1494,7 @@ function _stopInternal(): void {
  */
 function settleToNearestStep(animate: boolean): void {
   const centerInScore = viewportWidth / 2 - scrollOffsetPx;
-  const step = nearestGridIndex(cursorSteps, centerInScore);
+  const step = nearestGridIndex(cursorSteps, centerInScore, currentCursorStep);
   const target = cursorSteps[step];
   if (!target) return;
 
@@ -1940,7 +1940,13 @@ function initLoopHandles(): void {
       const reachMaxPx = which === 'a' ? lastOnsetPx : terminalPx;
       continuousPx = Math.max(firstPx, Math.min(reachMaxPx, rawPx));
 
-      const freeStep = nearestGridIndex(which === 'a' ? cursorSteps : snapGrid, continuousPx);
+      // Resolved next to the other handle, so a loop drawn inside a repeat stays in the
+      // pass it was started in — see nearestGridIndex.
+      const freeStep = nearestGridIndex(
+        which === 'a' ? cursorSteps : snapGrid,
+        continuousPx,
+        which === 'a' ? loopRegion.bStep : loopRegion.aStep,
+      );
       const desired = clampLoopIndices({
         grid: snapGrid,
         aIndex: which === 'a' ? freeStep : loopRegion.aStep,
@@ -2088,7 +2094,8 @@ function createLoop(): void {
   // every frame, and it is the same input settleFromCoast just snapped, so the loop
   // and the cursor cannot disagree about which onset they mean.
   const centerInScore = viewportWidth / 2 - scrollOffsetPx;
-  const step = cursorSteps[nearestGridIndex(cursorSteps, centerInScore)];
+  const cursorIndex = nearestGridIndex(cursorSteps, centerInScore, currentCursorStep);
+  const step = cursorSteps[cursorIndex];
   if (!step) return;
   const scorePxMin = cursorSteps[0]?.pxLeft ?? 0;
   // The terminal, not the last onset: a loop placed at the end of the piece has to
@@ -2102,10 +2109,13 @@ function createLoop(): void {
   // cursor). See domain/loop.ts.
   const { aPx, bPx } = placeLoopAtCursor({ cursorPx, scorePxMin, scorePxMax });
   // Placement is in pixels; the grid decides where that actually lands.
+  // Each bound resolves in the pass the cursor is in, so a loop placed inside a repeat
+  // cannot stretch across both passes — see nearestGridIndex.
+  const placedA = nearestGridIndex(cursorSteps, aPx, cursorIndex);
   const { aIndex, bIndex } = clampLoopIndices({
     grid: snapGrid,
-    aIndex: nearestGridIndex(cursorSteps, aPx),
-    bIndex: nearestGridIndex(snapGrid, bPx),
+    aIndex: placedA,
+    bIndex: nearestGridIndex(snapGrid, bPx, placedA),
     moved: 'b',
   });
   loopRegion = loopFromSteps(aIndex, bIndex);
@@ -2720,7 +2730,7 @@ function emitSectionAtScrollOffset(): void {
   if (sectionStartTicks.length === 0) return;
   // Nearest, matching the preview line and the settle. Flooring instead would let
   // the label flip only after the glide had already landed, reading as a lag.
-  const step = nearestGridIndex(cursorSteps, viewportWidth / 2 - scrollOffsetPx);
+  const step = nearestGridIndex(cursorSteps, viewportWidth / 2 - scrollOffsetPx, currentCursorStep);
   emitSectionIfChanged(Math.round((cursorSteps[step]?.quarters ?? 0) * TONE_PPQ));
 }
 

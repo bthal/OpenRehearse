@@ -258,15 +258,51 @@ export function nearestIndexByQuarters(grid: readonly GridPoint[], quarters: num
  * landing on the previous one would read as a bug. Exact midpoints resolve
  * forward.
  *
+ * **Repeats.** The grid is in playback order, so a repeat visits the same engraving
+ * twice and the pixels drop back at every back-jump: one pixel can be several grid
+ * points, one per pass. A single binary search over that is not a search at all — it
+ * lands in whichever pass its probes happen to hit, which on Julia Reeder put the end
+ * of m.16 in pass 2 and everything before it in pass 1, so a loop drawn over m.13–16
+ * silently spanned both passes. Each ascending run is therefore searched on its own,
+ * and where runs offer the same pixel the one whose index is nearest `nearIndex` wins:
+ * the pass the caller is already in. With no hint that is the first pass.
+ *
  * Returns 0 for an empty grid — callers guard on the point being present, the
  * same way the rest of the score-web layer does.
  */
-export function nearestGridIndex(grid: readonly GridPoint[], px: number): number {
+export function nearestGridIndex(grid: readonly GridPoint[], px: number, nearIndex = 0): number {
   if (grid.length === 0) return 0;
 
-  let lo = 0;
-  let hi = grid.length - 1;
-  let floorIdx = 0;
+  let best = 0;
+  let bestDistance = Infinity;
+  let runStart = 0;
+  for (let i = 1; i <= grid.length; i++) {
+    const prev = grid[i - 1];
+    const point = grid[i];
+    // A run ends at the last point or where the pixels drop back — a repeat's back-jump.
+    if (point !== undefined && prev !== undefined && point.pxLeft >= prev.pxLeft) continue;
+
+    const candidate = nearestInRun(grid, px, runStart, i - 1);
+    const distance = Math.abs(px - (grid[candidate]?.pxLeft ?? 0));
+    // Two passes over one engraving should agree to the pixel; the tolerance only
+    // absorbs barline anchoring, which can differ by its separation margin at a seam.
+    const tied = Math.abs(distance - bestDistance) <= MIN_STEP_SEPARATION_PX;
+    if (
+      (tied && Math.abs(candidate - nearIndex) < Math.abs(best - nearIndex)) ||
+      (!tied && distance < bestDistance)
+    ) {
+      best = candidate;
+      bestDistance = distance;
+    }
+    runStart = i;
+  }
+  return best;
+}
+
+/** {@link nearestGridIndex} within one ascending run, `[lo, hi]` inclusive. */
+function nearestInRun(grid: readonly GridPoint[], px: number, lo: number, hi: number): number {
+  const last = hi;
+  let floorIdx = lo;
   while (lo <= hi) {
     const mid = (lo + hi) >> 1;
     const point = grid[mid];
@@ -279,7 +315,7 @@ export function nearestGridIndex(grid: readonly GridPoint[], px: number): number
   }
 
   const here = grid[floorIdx];
-  const next = grid[floorIdx + 1];
+  const next = floorIdx < last ? grid[floorIdx + 1] : undefined;
   if (here === undefined || next === undefined) return floorIdx;
   return px - here.pxLeft < next.pxLeft - px ? floorIdx : floorIdx + 1;
 }
