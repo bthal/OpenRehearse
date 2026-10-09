@@ -8,15 +8,25 @@ interface WarmUpRowProps {
   title: string;
   /** The instrument this row is for — under "All" the same exercise appears twice. */
   instrument: InstrumentId;
+  /** Set inside the dashboard's Exercises group, so the rows read as belonging to it. */
+  indented?: boolean;
+  disabled?: boolean;
   onPress: () => void;
 }
 
-export function WarmUpRow({ title, instrument, onPress }: WarmUpRowProps) {
+export function WarmUpRow({
+  title,
+  instrument,
+  indented = false,
+  disabled = false,
+  onPress,
+}: WarmUpRowProps) {
   const { t } = useTranslation();
   return (
     <Pressable
       onPress={onPress}
-      className="flex-row items-center border-b border-slate-500/35 py-3.5 pl-2 pr-1 active:bg-slate-500/12"
+      disabled={disabled}
+      className={`flex-row items-center border-b border-slate-500/35 py-3.5 pr-1 active:bg-slate-500/12 ${indented ? 'pl-6' : 'pl-2'} ${disabled ? 'opacity-50' : ''}`}
     >
       <View className="flex-1">
         <Text className="text-lg font-semibold text-slate-950" numberOfLines={1}>

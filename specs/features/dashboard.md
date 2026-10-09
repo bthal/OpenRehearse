@@ -25,7 +25,17 @@ Home surface listing the user's **pieces** and entry points to **import** and **
     without the reader having to remember what is selected.
   - A section whose filtered list is empty **keeps its heading** and shows one quiet line ("No
     clarinet pieces yet") rather than collapsing.
-- **Warm-ups** section: Hanon I and Scales quick-launch rows.
+- **Warm-ups** section: the user's **routines**, then one **Exercises** row that folds the built-in
+  exercise rows (see `warmup.md`) behind a tap, so a dozen quick-launch rows do not bury the
+  routines.
+  - The Exercises row names the group and counts what it holds ("9 exercises"); the count follows
+    the instrument scope. A chevron (MDI) points down when collapsed, up when expanded. No badge —
+    it is a group, and every exercise row inside keeps its own.
+  - **Collapsed on launch.** Expanding is remembered for the rest of the session — across a trip
+    into a warm-up and back — but is **not persisted**.
+  - Expanded rows are slightly **indented** under the group row; open and close are instant.
+  - During **routine selection mode** the Exercises row and any expanded exercise rows are dimmed
+    and inert: exercises cannot be selected, and nothing should shift while routines are picked.
 - **Pieces** section:
   - **Privacy note** always visible above the list: "Your files stay on this device — nothing is uploaded."
   - **Import .mxl-File** button (outlined, white background) always in the section header.
@@ -107,6 +117,9 @@ Home surface listing the user's **pieces** and entry points to **import** and **
 - [ ] An empty filtered section keeps its heading and explains itself instead of disappearing.
 - [ ] Every piece, routine and warm-up row shows its instrument badge, under All and under a
       named scope alike.
+- [ ] The built-in exercises sit behind a collapsed Exercises row whose count follows the scope;
+      it stays open for the session, resets to collapsed on relaunch, and is inert during
+      routine selection mode.
 - [x] Practice heatmap sits at the very bottom of the Stats section, populated from tracked
       practice time and coloured from the app palette.
 - [x] Current and longest streaks head the Stats section, each shown with its unit ("3 days"); an

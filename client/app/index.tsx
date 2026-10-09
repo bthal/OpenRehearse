@@ -22,6 +22,7 @@ import { useTranslation } from 'react-i18next';
 
 import { AppIcon } from '@components/AppIcon';
 import { BrandMark } from '@components/BrandMark';
+import { ExerciseGroupToggle } from '@components/ExerciseGroupToggle';
 import { INSTRUMENT_REGISTRY } from '@domain/instrumentRegistry';
 import {
   filterByInstrument,
@@ -78,6 +79,7 @@ export default function Dashboard() {
   const scope = useSettingsStore((s) => s.dashboardScope);
   const setDashboardScope = useSettingsStore((s) => s.setDashboardScope);
   const [scopeOpen, setScopeOpen] = useState(false);
+  const [exercisesExpanded, setExercisesExpanded] = useState(false);
 
   // Piece selection
   const [editTarget, setEditTarget] = useState<{ id: string; mode: PieceEditMode } | null>(null);
@@ -247,6 +249,7 @@ export default function Dashboard() {
    */
   const scopedInstrument = scopeInstrument(scope);
   const visibleRoutines = filterByInstrument(routines, scope);
+  const exerciseRows = warmUpRowsForScope(scope);
   const visiblePieceIds = pieceIds.filter((id) => {
     const piece = piecesById[id];
     return piece ? scopeIncludes(scope, piece.instrument) : false;
@@ -399,14 +402,26 @@ export default function Dashboard() {
                 </Text>
               ) : null}
 
+              {/* The built-in exercises fold behind one row so they stop crowding the
+                routines. The open/closed state is session memory only: this root screen
+                stays mounted while the user is in a warm-up, so useState is enough. */}
+              <ExerciseGroupToggle
+                count={exerciseRows.length}
+                expanded={exercisesExpanded}
+                disabled={isRoutineSelectionMode}
+                onPress={() => setExercisesExpanded((open) => !open)}
+              />
+
               {/* Under "All" an exercise appears once per instrument that has it, and
                 the row carries its own instrument to the warm-up screen — tapping
                 "Scales (Clarinet)" must not re-point the dashboard's filter. */}
-              {warmUpRowsForScope(scope).map((row) => (
+              {(exercisesExpanded ? exerciseRows : []).map((row) => (
                 <WarmUpRow
                   key={`${row.type}-${row.instrument}`}
                   title={t(WARM_UP_REGISTRY[row.type].labelKey)}
                   instrument={row.instrument}
+                  indented
+                  disabled={isRoutineSelectionMode}
                   onPress={() =>
                     router.push({
                       pathname: '/warmup/[type]',
