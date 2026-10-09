@@ -277,6 +277,13 @@ else.
   is the point. Back and the loop button are replaced by **leave bit** and **delete bit**.
   There is deliberately no Back button in bit mode: leaving the bit is the way out, and one
   extra tap to the Dashboard is cheaper than a control that abandons a bit silently.
+- **Every control is one fixed 48dp slot**, 4dp apart, so the card's width never changes with what
+  a control is showing (the speed button swapping its label for an icon used to resize it).
+- **Fly-out panels are the card turned on its side**: solid white, the same rounding, shadow and
+  slot size, the card's padding rotated a quarter turn (so a panel is exactly as tall as the card is
+  wide). One opens **8dp right of the card**, vertically centred on its button, and lives inside
+  the toolbar's sliding wrapper — **playing carries it off with the toolbar and closes it**, so it
+  is never left standing over the score. `components/ToolbarShell.tsx`, `ToolbarPanel.tsx`.
 - Controls (top to bottom):
   - **Back button** — navigates back to the Dashboard.
   - **Loop button** (icon: loop-icon when inactive; × when active)

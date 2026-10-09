@@ -129,7 +129,9 @@ written range. See `specs/features/instruments.md`.
   key, octave (peak repeats in place of key/octave for the 4-5 drill; note, octave, bars and
   reps for a long note). Every control follows the exercise's declared parameters, and the hand
   control additionally follows whether the instrument has two staves. Each picker opens a
-  sliding panel over the score; opening pauses playback.
+  sliding panel over the score; opening pauses playback. The panels are the play view's (see
+  `playview.md` § Toolbar): same card style and slot size, beside the toolbar, leaving with it on
+  play. Long lists show four options and scroll.
 - Settings persisted per **instrument and** exercise type to device storage
   (`warmup-settings.json`). A file written before instruments existed is read as the piano block
   rather than discarded, and one carrying the old "which instrument is showing" key is read with

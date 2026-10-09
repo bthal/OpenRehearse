@@ -12,14 +12,7 @@ import {
 import { router, Stack, useLocalSearchParams } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import {
-  Animated,
-  ActivityIndicator,
-  ScrollView,
-  Text,
-  TouchableOpacity,
-  View,
-} from 'react-native';
+import { ActivityIndicator, Text, TouchableOpacity, View } from 'react-native';
 import WebView, { type WebViewMessageEvent } from 'react-native-webview';
 
 import { AppIcon } from '@components/AppIcon';
@@ -35,7 +28,14 @@ import {
 } from '@domain/instrumentRegistry';
 import { injectInstrumentAudio } from '@score-web/instrumentAudio';
 import { CenterPlayButton } from '@components/CenterPlayButton';
+import {
+  TOOLBAR_PANEL_ICON_SIZE,
+  ToolbarPanel,
+  ToolbarPanelText,
+  panelTopFor,
+} from '@components/ToolbarPanel';
 import { ToolbarShell } from '@components/ToolbarShell';
+import { ToolbarSlot } from '@components/ToolbarSlot';
 import { SCORE_WEB_HTML } from '@score-web/html';
 import type { WebToNativeMessage } from '@score-web/messageProtocol';
 import { useCountInSync } from '@score-web/useCountInSync';
@@ -81,16 +81,6 @@ type PanelKey =
   | 'longNoteMeasures'
   | 'longNoteRepeats';
 type OpenPanel = PanelKey | null;
-
-const PANEL_WIDTH = 176; // key panel (4 keys visible, scroll for more)
-const HAND_PANEL_WIDTH = 132; // 3 × 44
-const OCTAVE_PANEL_WIDTH = 132; // 3 × 44
-const PEAK_PANEL_WIDTH = 220; // 5 × 44
-const EXERCISE_PANEL_WIDTH = 176; // 4 visible, scroll for the rest
-const NOTE_PANEL_WIDTH = 176; // 17 spellings — 4 visible, scroll for the rest
-const NOTE_OCTAVE_PANEL_WIDTH = 220; // at most 5 octaves fit any instrument's range
-const LONG_MEASURES_PANEL_WIDTH = 176; // 8 values, scroll
-const LONG_REPEATS_PANEL_WIDTH = 176; // 4 × 44
 
 const HAND_OPTIONS: WarmUpHand[] = ['both', 'left', 'right'];
 
@@ -149,30 +139,7 @@ export default function WarmUpView() {
   const resetPlayback = useWarmUpStore((s) => s.resetPlayback);
 
   const [openPanel, setOpenPanel] = useState<OpenPanel>(null);
-  const [panelAnim] = useState(() => ({
-    speed: new Animated.Value(0),
-    hand: new Animated.Value(0),
-    key: new Animated.Value(0),
-    octave: new Animated.Value(0),
-    peak: new Animated.Value(0),
-    exercise: new Animated.Value(0),
-    noteName: new Animated.Value(0),
-    noteOctave: new Animated.Value(0),
-    longNoteMeasures: new Animated.Value(0),
-    longNoteRepeats: new Animated.Value(0),
-  }));
-  const [panelLayout, setPanelLayout] = useState<Record<PanelKey, { top: number; left: number }>>({
-    speed: { top: 0, left: 0 },
-    hand: { top: 0, left: 0 },
-    key: { top: 0, left: 0 },
-    octave: { top: 0, left: 0 },
-    peak: { top: 0, left: 0 },
-    exercise: { top: 0, left: 0 },
-    noteName: { top: 0, left: 0 },
-    noteOctave: { top: 0, left: 0 },
-    longNoteMeasures: { top: 0, left: 0 },
-    longNoteRepeats: { top: 0, left: 0 },
-  });
+  const [panelTop, setPanelTop] = useState<Partial<Record<PanelKey, number>>>({});
 
   const scoreAreaRef = useRef<View>(null);
   const speedTriggerRef = useRef<View>(null);
@@ -185,7 +152,6 @@ export default function WarmUpView() {
   const noteOctaveTriggerRef = useRef<View>(null);
   const longMeasuresTriggerRef = useRef<View>(null);
   const longRepeatsTriggerRef = useRef<View>(null);
-  const toolbarRef = useRef<View>(null);
   const webViewRef = useRef<WebView>(null);
 
   // Keep a ref so the loaded handler always sees the latest bpm without recreating
@@ -318,6 +284,9 @@ export default function WarmUpView() {
           break;
         case 'PLAYBACK_STATE':
           setPlaying(msg.payload === 'playing');
+          // The toolbar slides away on play and carries any open panel with it; closing
+          // it here means it is not still standing open when the toolbar comes back.
+          if (msg.payload === 'playing') setOpenPanel(null);
           break;
         case 'PLAYBACK_END':
           setPlaying(false);
@@ -336,49 +305,18 @@ export default function WarmUpView() {
     [setLoadingScore, setScoreError, setPlaying, setLoopActive, setScoreMoving],
   );
 
-  function animatePanel(panel: PanelKey, toValue: number) {
-    Animated.spring(panelAnim[panel], {
-      toValue,
-      useNativeDriver: false,
-      bounciness: 4,
-      speed: 18,
-    }).start();
-  }
-
-  function measureTrigger(triggerRef: React.RefObject<View | null>, panelKey: PanelKey) {
+  function togglePanel(panel: PanelKey, triggerRef: React.RefObject<View | null>) {
+    if (openPanel === panel) {
+      setOpenPanel(null);
+      return;
+    }
+    if (isPlaying) webViewRef.current?.injectJavaScript('window.__rn_pause();void 0;');
     triggerRef.current?.measureLayout(
       scoreAreaRef.current as never,
-      (_tx, ty, _tw, th) => {
-        toolbarRef.current?.measureLayout(
-          scoreAreaRef.current as never,
-          (_bx, _by, bw) => {
-            setPanelLayout((prev) => ({
-              ...prev,
-              [panelKey]: { top: ty + th / 2 - 22, left: bw },
-            }));
-          },
-          () => {},
-        );
-      },
+      (_x, y, _w, h) => setPanelTop((prev) => ({ ...prev, [panel]: panelTopFor(y, h) })),
       () => {},
     );
-  }
-
-  function togglePanel(panel: PanelKey, triggerRef: React.RefObject<View | null>) {
-    const isOpening = openPanel !== panel;
-
-    // Close whichever panel is open
-    if (openPanel && openPanel !== panel) animatePanel(openPanel, 0);
-
-    if (isOpening) {
-      if (isPlaying) webViewRef.current?.injectJavaScript('window.__rn_pause();void 0;');
-      measureTrigger(triggerRef, panel);
-      setOpenPanel(panel);
-      animatePanel(panel, 1);
-    } else {
-      setOpenPanel(null);
-      animatePanel(panel, 0);
-    }
+    setOpenPanel(panel);
   }
 
   const handleBpmChange = useCallback(
@@ -388,9 +326,7 @@ export default function WarmUpView() {
       bpmRef.current = bpm;
       webViewRef.current?.injectJavaScript(`window.__rn_set_tempo(${bpm});void 0;`);
       setOpenPanel(null);
-      animatePanel('speed', 0);
     },
-    // eslint-disable-next-line react-hooks/exhaustive-deps
     [isPlaying, updateSettings],
   );
 
@@ -399,9 +335,7 @@ export default function WarmUpView() {
       if (isPlaying) webViewRef.current?.injectJavaScript('window.__rn_pause();void 0;');
       updateSettings({ hand });
       setOpenPanel(null);
-      animatePanel('hand', 0);
     },
-    // eslint-disable-next-line react-hooks/exhaustive-deps
     [isPlaying, updateSettings],
   );
 
@@ -410,9 +344,7 @@ export default function WarmUpView() {
       if (isPlaying) webViewRef.current?.injectJavaScript('window.__rn_pause();void 0;');
       updateSettings({ pitchClass, mode });
       setOpenPanel(null);
-      animatePanel('key', 0);
     },
-    // eslint-disable-next-line react-hooks/exhaustive-deps
     [isPlaying, updateSettings],
   );
 
@@ -421,9 +353,7 @@ export default function WarmUpView() {
       if (isPlaying) webViewRef.current?.injectJavaScript('window.__rn_pause();void 0;');
       updateSettings({ octaves });
       setOpenPanel(null);
-      animatePanel('octave', 0);
     },
-    // eslint-disable-next-line react-hooks/exhaustive-deps
     [isPlaying, updateSettings],
   );
 
@@ -432,9 +362,7 @@ export default function WarmUpView() {
       if (isPlaying) webViewRef.current?.injectJavaScript('window.__rn_pause();void 0;');
       updateSettings({ peakRepeats: value });
       setOpenPanel(null);
-      animatePanel('peak', 0);
     },
-    // eslint-disable-next-line react-hooks/exhaustive-deps
     [isPlaying, updateSettings],
   );
 
@@ -443,9 +371,7 @@ export default function WarmUpView() {
       if (isPlaying) webViewRef.current?.injectJavaScript('window.__rn_pause();void 0;');
       updateSettings({ exercise: value });
       setOpenPanel(null);
-      animatePanel('exercise', 0);
     },
-    // eslint-disable-next-line react-hooks/exhaustive-deps
     [isPlaying, updateSettings],
   );
 
@@ -461,9 +387,7 @@ export default function WarmUpView() {
         noteOctave: clampLongNoteOctave(instrument, pc, noteOctave) as WarmUpLongNoteOctave,
       });
       setOpenPanel(null);
-      animatePanel('noteName', 0);
     },
-    // eslint-disable-next-line react-hooks/exhaustive-deps
     [isPlaying, updateSettings, instrument, noteOctave],
   );
 
@@ -472,9 +396,7 @@ export default function WarmUpView() {
       if (isPlaying) webViewRef.current?.injectJavaScript('window.__rn_pause();void 0;');
       updateSettings({ noteOctave: value });
       setOpenPanel(null);
-      animatePanel('noteOctave', 0);
     },
-    // eslint-disable-next-line react-hooks/exhaustive-deps
     [isPlaying, updateSettings],
   );
 
@@ -483,9 +405,7 @@ export default function WarmUpView() {
       if (isPlaying) webViewRef.current?.injectJavaScript('window.__rn_pause();void 0;');
       updateSettings({ longNoteMeasures: value });
       setOpenPanel(null);
-      animatePanel('longNoteMeasures', 0);
     },
-    // eslint-disable-next-line react-hooks/exhaustive-deps
     [isPlaying, updateSettings],
   );
 
@@ -494,9 +414,7 @@ export default function WarmUpView() {
       if (isPlaying) webViewRef.current?.injectJavaScript('window.__rn_pause();void 0;');
       updateSettings({ longNoteRepeats: value });
       setOpenPanel(null);
-      animatePanel('longNoteRepeats', 0);
     },
-    // eslint-disable-next-line react-hooks/exhaustive-deps
     [isPlaying, updateSettings],
   );
 
@@ -521,27 +439,6 @@ export default function WarmUpView() {
     hasParam(warmUpType, 'hand') && INSTRUMENT_REGISTRY[instrument].staffLayout !== 'single';
 
   const currentKeyLabel = keyLabel(settings.pitchClass, settings.mode);
-
-  function panelWidthInterp(panel: Exclude<OpenPanel, null>, maxWidth: number) {
-    return panelAnim[panel].interpolate({
-      inputRange: [0, 1],
-      outputRange: [0, maxWidth],
-      extrapolate: 'clamp',
-    });
-  }
-
-  const panelBase = {
-    position: 'absolute' as const,
-    overflow: 'hidden' as const,
-    flexDirection: 'row' as const,
-    backgroundColor: 'rgba(255,255,255,0.92)',
-    borderRadius: 10,
-    elevation: 4,
-    shadowColor: '#000',
-    shadowOpacity: 0.12,
-    shadowRadius: 6,
-    shadowOffset: { width: 2, height: 0 },
-  };
 
   return (
     <>
@@ -572,583 +469,303 @@ export default function WarmUpView() {
 
           {/* Toolbar — slides away while playing, leaving the notation alone. */}
           {scoreReady && (
-            <ToolbarShell ref={toolbarRef} hidden={isPlaying}>
+            <ToolbarShell
+              hidden={isPlaying}
+              panels={
+                <>
+                  {showExercise && (
+                    <ToolbarPanel
+                      open={openPanel === 'exercise'}
+                      top={panelTop.exercise ?? 0}
+                      maxVisible={4}
+                    >
+                      {HANON_EXERCISE_NUMBERS.map((n) => (
+                        <ToolbarSlot key={n} onPress={() => handleExerciseChange(n)}>
+                          <ToolbarPanelText active={settings.exercise === n}>{n}</ToolbarPanelText>
+                        </ToolbarSlot>
+                      ))}
+                    </ToolbarPanel>
+                  )}
+
+                  <ToolbarPanel
+                    open={openPanel === 'speed'}
+                    top={panelTop.speed ?? 0}
+                    maxVisible={4}
+                  >
+                    {WARMUP_BPMS.map((bpm) => (
+                      <ToolbarSlot key={bpm} onPress={() => handleBpmChange(bpm)}>
+                        <ToolbarPanelText active={settings.bpm === bpm}>{bpm}</ToolbarPanelText>
+                      </ToolbarSlot>
+                    ))}
+                  </ToolbarPanel>
+
+                  {showHand && (
+                    <ToolbarPanel open={openPanel === 'hand'} top={panelTop.hand ?? 0}>
+                      {HAND_OPTIONS.map((h) => (
+                        <ToolbarSlot key={h} onPress={() => handleHandChange(h)}>
+                          <AppIcon
+                            path={HAND_ICON[h]}
+                            size={TOOLBAR_PANEL_ICON_SIZE}
+                            color={settings.hand === h ? Colors.primary : Colors.iconMuted}
+                          />
+                        </ToolbarSlot>
+                      ))}
+                    </ToolbarPanel>
+                  )}
+
+                  {showKey && (
+                    <ToolbarPanel open={openPanel === 'key'} top={panelTop.key ?? 0} maxVisible={4}>
+                      {WARMUP_KEYS.map((k) => (
+                        <ToolbarSlot
+                          key={k.label}
+                          onPress={() => handleKeyChange(k.pitchClass, k.mode)}
+                        >
+                          <ToolbarPanelText
+                            active={
+                              k.pitchClass === settings.pitchClass && k.mode === settings.mode
+                            }
+                          >
+                            {k.label}
+                          </ToolbarPanelText>
+                        </ToolbarSlot>
+                      ))}
+                    </ToolbarPanel>
+                  )}
+
+                  {showPeak && (
+                    <ToolbarPanel open={openPanel === 'peak'} top={panelTop.peak ?? 0}>
+                      {WARMUP_PEAK_REPEATS.map((n) => (
+                        <ToolbarSlot key={n} onPress={() => handlePeakRepeatsChange(n)}>
+                          <ToolbarPanelText active={settings.peakRepeats === n}>
+                            ×{n}
+                          </ToolbarPanelText>
+                        </ToolbarSlot>
+                      ))}
+                    </ToolbarPanel>
+                  )}
+
+                  {showOctave && (
+                    <ToolbarPanel open={openPanel === 'octave'} top={panelTop.octave ?? 0}>
+                      {octaveOptions.map((n) => (
+                        <ToolbarSlot key={n} onPress={() => handleOctaveChange(n)}>
+                          <ToolbarPanelText active={effectiveOctaves === n}>{n}</ToolbarPanelText>
+                        </ToolbarSlot>
+                      ))}
+                    </ToolbarPanel>
+                  )}
+
+                  {showNoteName && (
+                    <ToolbarPanel
+                      open={openPanel === 'noteName'}
+                      top={panelTop.noteName ?? 0}
+                      maxVisible={4}
+                    >
+                      {WARMUP_LONG_NOTE_NOTES.map((n) => (
+                        <ToolbarSlot key={n.label} onPress={() => handleNoteNameChange(n.label)}>
+                          <ToolbarPanelText active={noteName === n.label}>
+                            {n.label}
+                          </ToolbarPanelText>
+                        </ToolbarSlot>
+                      ))}
+                    </ToolbarPanel>
+                  )}
+
+                  {showNoteOctave && (
+                    <ToolbarPanel open={openPanel === 'noteOctave'} top={panelTop.noteOctave ?? 0}>
+                      {noteOctaveOptions.map((n) => (
+                        <ToolbarSlot key={n} onPress={() => handleNoteOctaveChange(n)}>
+                          <ToolbarPanelText active={effectiveNoteOctave === n}>
+                            {n}
+                          </ToolbarPanelText>
+                        </ToolbarSlot>
+                      ))}
+                    </ToolbarPanel>
+                  )}
+
+                  {showLongMeasures && (
+                    <ToolbarPanel
+                      open={openPanel === 'longNoteMeasures'}
+                      top={panelTop.longNoteMeasures ?? 0}
+                      maxVisible={4}
+                    >
+                      {WARMUP_LONG_NOTE_MEASURES.map((n) => (
+                        <ToolbarSlot key={n} onPress={() => handleLongNoteMeasuresChange(n)}>
+                          <ToolbarPanelText active={longNoteMeasures === n}>{n}</ToolbarPanelText>
+                        </ToolbarSlot>
+                      ))}
+                    </ToolbarPanel>
+                  )}
+
+                  {showLongRepeats && (
+                    <ToolbarPanel
+                      open={openPanel === 'longNoteRepeats'}
+                      top={panelTop.longNoteRepeats ?? 0}
+                    >
+                      {WARMUP_LONG_NOTE_REPEATS.map((n) => (
+                        <ToolbarSlot key={n} onPress={() => handleLongNoteRepeatsChange(n)}>
+                          <ToolbarPanelText active={longNoteRepeats === n}>×{n}</ToolbarPanelText>
+                        </ToolbarSlot>
+                      ))}
+                    </ToolbarPanel>
+                  )}
+                </>
+              }
+            >
               {/* Back */}
-              <TouchableOpacity onPress={() => router.back()} hitSlop={12} className="p-1">
+              <ToolbarSlot onPress={() => router.back()} accessibilityLabel={t('playView.back')}>
                 <AppIcon path={mdiExitToApp} size={24} color={Colors.icon} flip="vertical" />
-              </TouchableOpacity>
+              </ToolbarSlot>
 
               {/* Metronome */}
-              <TouchableOpacity onPress={handleMetronomeToggle} hitSlop={8} className="p-1.5">
+              <ToolbarSlot
+                onPress={handleMetronomeToggle}
+                accessibilityLabel={t('playView.metronome')}
+              >
                 <AppIcon
                   path={metronomeOn ? mdiMetronome : mdiMetronomeTick}
                   size={26}
                   color={metronomeOn ? Colors.primary : Colors.icon}
                 />
-              </TouchableOpacity>
+              </ToolbarSlot>
 
               {/* Exercise-number trigger — families with numbered exercises */}
               {showExercise && (
-                <View ref={exerciseTriggerRef}>
-                  <TouchableOpacity
-                    onPress={() => togglePanel('exercise', exerciseTriggerRef)}
-                    hitSlop={8}
-                    className="items-center px-2 py-1"
-                  >
-                    <Text
-                      className="text-base font-semibold mt-0.5"
-                      style={{ color: openPanel === 'exercise' ? Colors.primary : Colors.icon }}
-                    >
-                      {settings.exercise}
-                    </Text>
-                    <Text className="text-[9px] text-black mt-0.5">{t('warmup.exercise')}</Text>
-                  </TouchableOpacity>
-                </View>
+                <ToolbarSlot
+                  ref={exerciseTriggerRef}
+                  onPress={() => togglePanel('exercise', exerciseTriggerRef)}
+                >
+                  <ValueTrigger
+                    value={settings.exercise}
+                    label={t('warmup.exercise')}
+                    open={openPanel === 'exercise'}
+                  />
+                </ToolbarSlot>
               )}
 
               {/* Speed trigger */}
-              <View ref={speedTriggerRef}>
-                <TouchableOpacity
-                  onPress={() => togglePanel('speed', speedTriggerRef)}
-                  hitSlop={8}
-                  className="items-center px-2 py-1"
-                >
-                  <View style={{ height: 22, justifyContent: 'center', alignItems: 'center' }}>
-                    {openPanel === 'speed' ? (
-                      <AppIcon path={mdiSpeedometer} size={22} color={Colors.primary} />
-                    ) : (
-                      <Text className="text-base font-semibold text-gray-700">{settings.bpm}</Text>
-                    )}
-                  </View>
-                  <Text className="text-[9px] text-black mt-0.5">{t('common.bpm')}</Text>
-                </TouchableOpacity>
-              </View>
+              <ToolbarSlot
+                ref={speedTriggerRef}
+                onPress={() => togglePanel('speed', speedTriggerRef)}
+              >
+                <View style={{ height: 22, justifyContent: 'center', alignItems: 'center' }}>
+                  {openPanel === 'speed' ? (
+                    <AppIcon path={mdiSpeedometer} size={22} color={Colors.primary} />
+                  ) : (
+                    <Text className="text-base font-semibold text-gray-700">{settings.bpm}</Text>
+                  )}
+                </View>
+                <Text className="text-[9px] text-black mt-0.5">{t('common.bpm')}</Text>
+              </ToolbarSlot>
 
               {/* Hand trigger — two-staff instruments only */}
               {showHand && (
-                <View ref={handTriggerRef}>
-                  <TouchableOpacity
-                    onPress={() => togglePanel('hand', handTriggerRef)}
-                    hitSlop={8}
-                    className="p-1.5"
-                  >
-                    <AppIcon
-                      path={HAND_ICON[settings.hand]}
-                      size={22}
-                      color={settings.hand !== 'both' ? Colors.primary : Colors.icon}
-                    />
-                  </TouchableOpacity>
-                </View>
+                <ToolbarSlot
+                  ref={handTriggerRef}
+                  onPress={() => togglePanel('hand', handTriggerRef)}
+                >
+                  <AppIcon
+                    path={HAND_ICON[settings.hand]}
+                    size={22}
+                    color={settings.hand !== 'both' ? Colors.primary : Colors.icon}
+                  />
+                </ToolbarSlot>
               )}
 
               {/* Key trigger — exercises that declare a key */}
               {showKey && (
-                <View ref={keyTriggerRef}>
-                  <TouchableOpacity
-                    onPress={() => togglePanel('key', keyTriggerRef)}
-                    hitSlop={8}
-                    className="items-center px-2 py-1"
-                  >
-                    <Text
-                      className="text-base font-semibold mt-0.5"
-                      style={{ color: openPanel === 'key' ? Colors.primary : Colors.icon }}
-                    >
-                      {currentKeyLabel}
-                    </Text>
-                    <Text className="text-[9px] text-black mt-0.5">{t('warmup.key')}</Text>
-                  </TouchableOpacity>
-                </View>
+                <ToolbarSlot ref={keyTriggerRef} onPress={() => togglePanel('key', keyTriggerRef)}>
+                  <ValueTrigger
+                    value={currentKeyLabel}
+                    label={t('warmup.key')}
+                    open={openPanel === 'key'}
+                  />
+                </ToolbarSlot>
               )}
 
               {/* Peak repeats trigger — exercises that declare it */}
               {showPeak && (
-                <View ref={peakTriggerRef}>
-                  <TouchableOpacity
-                    onPress={() => togglePanel('peak', peakTriggerRef)}
-                    hitSlop={8}
-                    className="items-center px-2 py-1"
-                  >
-                    <Text
-                      className="text-base font-semibold mt-0.5"
-                      style={{ color: openPanel === 'peak' ? Colors.primary : Colors.icon }}
-                    >
-                      ×{settings.peakRepeats}
-                    </Text>
-                    <Text className="text-[9px] text-black mt-0.5">{t('warmup.peak')}</Text>
-                  </TouchableOpacity>
-                </View>
+                <ToolbarSlot
+                  ref={peakTriggerRef}
+                  onPress={() => togglePanel('peak', peakTriggerRef)}
+                >
+                  <ValueTrigger
+                    value={`×${settings.peakRepeats}`}
+                    label={t('warmup.peak')}
+                    open={openPanel === 'peak'}
+                  />
+                </ToolbarSlot>
               )}
 
               {/* Octave trigger — exercises that declare octaves */}
               {showOctave && (
-                <View ref={octaveTriggerRef}>
-                  <TouchableOpacity
-                    onPress={() => togglePanel('octave', octaveTriggerRef)}
-                    hitSlop={8}
-                    className="items-center px-2 py-1"
-                  >
-                    <Text
-                      className="text-base font-semibold mt-0.5"
-                      style={{ color: openPanel === 'octave' ? Colors.primary : Colors.icon }}
-                    >
-                      {effectiveOctaves}
-                    </Text>
-                    <Text className="text-[9px] text-black mt-0.5">
-                      {t('warmup.octave', { count: effectiveOctaves })}
-                    </Text>
-                  </TouchableOpacity>
-                </View>
+                <ToolbarSlot
+                  ref={octaveTriggerRef}
+                  onPress={() => togglePanel('octave', octaveTriggerRef)}
+                >
+                  <ValueTrigger
+                    value={effectiveOctaves}
+                    label={t('warmup.octave', { count: effectiveOctaves })}
+                    open={openPanel === 'octave'}
+                  />
+                </ToolbarSlot>
               )}
 
               {/* Note trigger — exercises that name an absolute pitch */}
               {showNoteName && (
-                <View ref={noteNameTriggerRef}>
-                  <TouchableOpacity
-                    onPress={() => togglePanel('noteName', noteNameTriggerRef)}
-                    hitSlop={8}
-                    className="items-center px-2 py-1"
-                  >
-                    <Text
-                      className="text-base font-semibold mt-0.5"
-                      style={{ color: openPanel === 'noteName' ? Colors.primary : Colors.icon }}
-                    >
-                      {noteName}
-                    </Text>
-                    <Text className="text-[9px] text-black mt-0.5">{t('warmup.note')}</Text>
-                  </TouchableOpacity>
-                </View>
+                <ToolbarSlot
+                  ref={noteNameTriggerRef}
+                  onPress={() => togglePanel('noteName', noteNameTriggerRef)}
+                >
+                  <ValueTrigger
+                    value={noteName}
+                    label={t('warmup.note')}
+                    open={openPanel === 'noteName'}
+                  />
+                </ToolbarSlot>
               )}
 
               {/* Note-octave trigger */}
               {showNoteOctave && (
-                <View ref={noteOctaveTriggerRef}>
-                  <TouchableOpacity
-                    onPress={() => togglePanel('noteOctave', noteOctaveTriggerRef)}
-                    hitSlop={8}
-                    className="items-center px-2 py-1"
-                  >
-                    <Text
-                      className="text-base font-semibold mt-0.5"
-                      style={{ color: openPanel === 'noteOctave' ? Colors.primary : Colors.icon }}
-                    >
-                      {effectiveNoteOctave}
-                    </Text>
-                    <Text className="text-[9px] text-black mt-0.5">
-                      {t('warmup.octave', { count: 1 })}
-                    </Text>
-                  </TouchableOpacity>
-                </View>
+                <ToolbarSlot
+                  ref={noteOctaveTriggerRef}
+                  onPress={() => togglePanel('noteOctave', noteOctaveTriggerRef)}
+                >
+                  <ValueTrigger
+                    value={effectiveNoteOctave}
+                    label={t('warmup.octave', { count: 1 })}
+                    open={openPanel === 'noteOctave'}
+                  />
+                </ToolbarSlot>
               )}
 
               {/* Hold-length trigger */}
               {showLongMeasures && (
-                <View ref={longMeasuresTriggerRef}>
-                  <TouchableOpacity
-                    onPress={() => togglePanel('longNoteMeasures', longMeasuresTriggerRef)}
-                    hitSlop={8}
-                    className="items-center px-2 py-1"
-                  >
-                    <Text
-                      className="text-base font-semibold mt-0.5"
-                      style={{
-                        color: openPanel === 'longNoteMeasures' ? Colors.primary : Colors.icon,
-                      }}
-                    >
-                      {longNoteMeasures}
-                    </Text>
-                    <Text className="text-[9px] text-black mt-0.5">{t('warmup.hold')}</Text>
-                  </TouchableOpacity>
-                </View>
+                <ToolbarSlot
+                  ref={longMeasuresTriggerRef}
+                  onPress={() => togglePanel('longNoteMeasures', longMeasuresTriggerRef)}
+                >
+                  <ValueTrigger
+                    value={longNoteMeasures}
+                    label={t('warmup.hold')}
+                    open={openPanel === 'longNoteMeasures'}
+                  />
+                </ToolbarSlot>
               )}
 
               {/* Repeat-count trigger */}
               {showLongRepeats && (
-                <View ref={longRepeatsTriggerRef}>
-                  <TouchableOpacity
-                    onPress={() => togglePanel('longNoteRepeats', longRepeatsTriggerRef)}
-                    hitSlop={8}
-                    className="items-center px-2 py-1"
-                  >
-                    <Text
-                      className="text-base font-semibold mt-0.5"
-                      style={{
-                        color: openPanel === 'longNoteRepeats' ? Colors.primary : Colors.icon,
-                      }}
-                    >
-                      ×{longNoteRepeats}
-                    </Text>
-                    <Text className="text-[9px] text-black mt-0.5">{t('warmup.repeats')}</Text>
-                  </TouchableOpacity>
-                </View>
+                <ToolbarSlot
+                  ref={longRepeatsTriggerRef}
+                  onPress={() => togglePanel('longNoteRepeats', longRepeatsTriggerRef)}
+                >
+                  <ValueTrigger
+                    value={`×${longNoteRepeats}`}
+                    label={t('warmup.repeats')}
+                    open={openPanel === 'longNoteRepeats'}
+                  />
+                </ToolbarSlot>
               )}
             </ToolbarShell>
-          )}
-
-          {/* Exercise-number panel */}
-          {showExercise && (
-            <Animated.View
-              pointerEvents={openPanel === 'exercise' ? 'auto' : 'none'}
-              style={[
-                panelBase,
-                {
-                  top: panelLayout.exercise.top,
-                  left: panelLayout.exercise.left,
-                  width: panelWidthInterp('exercise', EXERCISE_PANEL_WIDTH),
-                },
-              ]}
-            >
-              <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-                {HANON_EXERCISE_NUMBERS.map((n) => (
-                  <TouchableOpacity
-                    key={n}
-                    onPress={() => handleExerciseChange(n)}
-                    hitSlop={4}
-                    style={{
-                      width: 44,
-                      height: 44,
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                    }}
-                  >
-                    <Text
-                      style={{
-                        fontSize: 13,
-                        fontWeight: '600',
-                        color: settings.exercise === n ? Colors.primary : Colors.iconMuted,
-                      }}
-                    >
-                      {n}
-                    </Text>
-                  </TouchableOpacity>
-                ))}
-              </ScrollView>
-            </Animated.View>
-          )}
-
-          {/* Speed panel */}
-          <Animated.View
-            pointerEvents={openPanel === 'speed' ? 'auto' : 'none'}
-            style={[
-              panelBase,
-              {
-                top: panelLayout.speed.top,
-                left: panelLayout.speed.left,
-                width: panelWidthInterp('speed', PANEL_WIDTH),
-              },
-            ]}
-          >
-            <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-              {WARMUP_BPMS.map((bpm) => (
-                <TouchableOpacity
-                  key={bpm}
-                  onPress={() => handleBpmChange(bpm)}
-                  hitSlop={4}
-                  style={{ width: 44, height: 44, alignItems: 'center', justifyContent: 'center' }}
-                >
-                  <Text
-                    style={{
-                      fontSize: 13,
-                      fontWeight: '600',
-                      color: settings.bpm === bpm ? Colors.primary : Colors.iconMuted,
-                    }}
-                  >
-                    {bpm}
-                  </Text>
-                </TouchableOpacity>
-              ))}
-            </ScrollView>
-          </Animated.View>
-
-          {/* Hand panel */}
-          {showHand && (
-            <Animated.View
-              pointerEvents={openPanel === 'hand' ? 'auto' : 'none'}
-              style={[
-                panelBase,
-                {
-                  top: panelLayout.hand.top,
-                  left: panelLayout.hand.left,
-                  width: panelWidthInterp('hand', HAND_PANEL_WIDTH),
-                },
-              ]}
-            >
-              {HAND_OPTIONS.map((hand) => (
-                <TouchableOpacity
-                  key={hand}
-                  onPress={() => handleHandChange(hand)}
-                  hitSlop={4}
-                  style={{ width: 44, height: 44, alignItems: 'center', justifyContent: 'center' }}
-                >
-                  <AppIcon
-                    path={HAND_ICON[hand]}
-                    size={22}
-                    color={settings.hand === hand ? Colors.primary : Colors.iconMuted}
-                  />
-                </TouchableOpacity>
-              ))}
-            </Animated.View>
-          )}
-
-          {/* Note panel */}
-          {showNoteName && (
-            <Animated.View
-              pointerEvents={openPanel === 'noteName' ? 'auto' : 'none'}
-              style={[
-                panelBase,
-                {
-                  top: panelLayout.noteName.top,
-                  left: panelLayout.noteName.left,
-                  width: panelWidthInterp('noteName', NOTE_PANEL_WIDTH),
-                },
-              ]}
-            >
-              <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-                {WARMUP_LONG_NOTE_NOTES.map((n) => (
-                  <TouchableOpacity
-                    key={n.label}
-                    onPress={() => handleNoteNameChange(n.label)}
-                    hitSlop={4}
-                    style={{
-                      width: 44,
-                      height: 44,
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                    }}
-                  >
-                    <Text
-                      style={{
-                        fontSize: 13,
-                        fontWeight: '600',
-                        color: noteName === n.label ? Colors.primary : Colors.iconMuted,
-                      }}
-                    >
-                      {n.label}
-                    </Text>
-                  </TouchableOpacity>
-                ))}
-              </ScrollView>
-            </Animated.View>
-          )}
-
-          {/* Note-octave panel */}
-          {showNoteOctave && (
-            <Animated.View
-              pointerEvents={openPanel === 'noteOctave' ? 'auto' : 'none'}
-              style={[
-                panelBase,
-                {
-                  top: panelLayout.noteOctave.top,
-                  left: panelLayout.noteOctave.left,
-                  width: panelWidthInterp('noteOctave', NOTE_OCTAVE_PANEL_WIDTH),
-                },
-              ]}
-            >
-              {noteOctaveOptions.map((n) => (
-                <TouchableOpacity
-                  key={n}
-                  onPress={() => handleNoteOctaveChange(n)}
-                  hitSlop={4}
-                  style={{ width: 44, height: 44, alignItems: 'center', justifyContent: 'center' }}
-                >
-                  <Text
-                    style={{
-                      fontSize: 13,
-                      fontWeight: '600',
-                      color: effectiveNoteOctave === n ? Colors.primary : Colors.iconMuted,
-                    }}
-                  >
-                    {n}
-                  </Text>
-                </TouchableOpacity>
-              ))}
-            </Animated.View>
-          )}
-
-          {/* Hold-length panel */}
-          {showLongMeasures && (
-            <Animated.View
-              pointerEvents={openPanel === 'longNoteMeasures' ? 'auto' : 'none'}
-              style={[
-                panelBase,
-                {
-                  top: panelLayout.longNoteMeasures.top,
-                  left: panelLayout.longNoteMeasures.left,
-                  width: panelWidthInterp('longNoteMeasures', LONG_MEASURES_PANEL_WIDTH),
-                },
-              ]}
-            >
-              <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-                {WARMUP_LONG_NOTE_MEASURES.map((n) => (
-                  <TouchableOpacity
-                    key={n}
-                    onPress={() => handleLongNoteMeasuresChange(n)}
-                    hitSlop={4}
-                    style={{
-                      width: 44,
-                      height: 44,
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                    }}
-                  >
-                    <Text
-                      style={{
-                        fontSize: 13,
-                        fontWeight: '600',
-                        color: longNoteMeasures === n ? Colors.primary : Colors.iconMuted,
-                      }}
-                    >
-                      {n}
-                    </Text>
-                  </TouchableOpacity>
-                ))}
-              </ScrollView>
-            </Animated.View>
-          )}
-
-          {/* Repeat-count panel */}
-          {showLongRepeats && (
-            <Animated.View
-              pointerEvents={openPanel === 'longNoteRepeats' ? 'auto' : 'none'}
-              style={[
-                panelBase,
-                {
-                  top: panelLayout.longNoteRepeats.top,
-                  left: panelLayout.longNoteRepeats.left,
-                  width: panelWidthInterp('longNoteRepeats', LONG_REPEATS_PANEL_WIDTH),
-                },
-              ]}
-            >
-              {WARMUP_LONG_NOTE_REPEATS.map((n) => (
-                <TouchableOpacity
-                  key={n}
-                  onPress={() => handleLongNoteRepeatsChange(n)}
-                  hitSlop={4}
-                  style={{ width: 44, height: 44, alignItems: 'center', justifyContent: 'center' }}
-                >
-                  <Text
-                    style={{
-                      fontSize: 13,
-                      fontWeight: '600',
-                      color: longNoteRepeats === n ? Colors.primary : Colors.iconMuted,
-                    }}
-                  >
-                    ×{n}
-                  </Text>
-                </TouchableOpacity>
-              ))}
-            </Animated.View>
-          )}
-
-          {/* Key panel */}
-          {showKey && (
-            <Animated.View
-              pointerEvents={openPanel === 'key' ? 'auto' : 'none'}
-              style={[
-                panelBase,
-                {
-                  top: panelLayout.key.top,
-                  left: panelLayout.key.left,
-                  width: panelWidthInterp('key', PANEL_WIDTH),
-                },
-              ]}
-            >
-              <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-                {WARMUP_KEYS.map((k) => {
-                  const isActive = k.pitchClass === settings.pitchClass && k.mode === settings.mode;
-                  return (
-                    <TouchableOpacity
-                      key={k.label}
-                      onPress={() => handleKeyChange(k.pitchClass, k.mode)}
-                      hitSlop={4}
-                      style={{
-                        width: 44,
-                        height: 44,
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                      }}
-                    >
-                      <Text
-                        style={{
-                          fontSize: 13,
-                          fontWeight: '600',
-                          color: isActive ? Colors.primary : Colors.iconMuted,
-                        }}
-                      >
-                        {k.label}
-                      </Text>
-                    </TouchableOpacity>
-                  );
-                })}
-              </ScrollView>
-            </Animated.View>
-          )}
-
-          {/* Peak repeats panel */}
-          {showPeak && (
-            <Animated.View
-              pointerEvents={openPanel === 'peak' ? 'auto' : 'none'}
-              style={[
-                panelBase,
-                {
-                  top: panelLayout.peak.top,
-                  left: panelLayout.peak.left,
-                  width: panelWidthInterp('peak', PEAK_PANEL_WIDTH),
-                },
-              ]}
-            >
-              {WARMUP_PEAK_REPEATS.map((n) => (
-                <TouchableOpacity
-                  key={n}
-                  onPress={() => handlePeakRepeatsChange(n)}
-                  hitSlop={4}
-                  style={{ width: 44, height: 44, alignItems: 'center', justifyContent: 'center' }}
-                >
-                  <Text
-                    style={{
-                      fontSize: 13,
-                      fontWeight: '600',
-                      color: settings.peakRepeats === n ? Colors.primary : Colors.iconMuted,
-                    }}
-                  >
-                    ×{n}
-                  </Text>
-                </TouchableOpacity>
-              ))}
-            </Animated.View>
-          )}
-
-          {/* Octave panel */}
-          {showOctave && (
-            <Animated.View
-              pointerEvents={openPanel === 'octave' ? 'auto' : 'none'}
-              style={[
-                panelBase,
-                {
-                  top: panelLayout.octave.top,
-                  left: panelLayout.octave.left,
-                  width: panelWidthInterp('octave', OCTAVE_PANEL_WIDTH),
-                },
-              ]}
-            >
-              {octaveOptions.map((n) => (
-                <TouchableOpacity
-                  key={n}
-                  onPress={() => handleOctaveChange(n)}
-                  hitSlop={4}
-                  style={{ width: 44, height: 44, alignItems: 'center', justifyContent: 'center' }}
-                >
-                  <Text
-                    style={{
-                      fontSize: 14,
-                      fontWeight: '600',
-                      color: effectiveOctaves === n ? Colors.primary : Colors.iconMuted,
-                    }}
-                  >
-                    {n}
-                  </Text>
-                </TouchableOpacity>
-              ))}
-            </Animated.View>
           )}
 
           {/* Overlay: WebView loading */}
@@ -1185,6 +802,32 @@ export default function WarmUpView() {
           )}
         </View>
       </View>
+    </>
+  );
+}
+
+/**
+ * A text-valued toolbar button: the current value over a small caption, teal while its
+ * panel is open.
+ */
+function ValueTrigger({
+  value,
+  label,
+  open,
+}: {
+  value: string | number;
+  label: string;
+  open: boolean;
+}) {
+  return (
+    <>
+      <Text
+        className="text-base font-semibold"
+        style={{ color: open ? Colors.primary : Colors.icon }}
+      >
+        {value}
+      </Text>
+      <Text className="text-[9px] text-black mt-0.5">{label}</Text>
     </>
   );
 }

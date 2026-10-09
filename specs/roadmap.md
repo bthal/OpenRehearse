@@ -49,6 +49,8 @@ Phases are **sequential**; within a phase, items can be parallelized when they d
 - [x] **Instruments** — piano and Bb clarinet, with per-piece part selection and transposition,
   bundled offline sample sets, and instrument-scoped warm-ups and routines. See
   `specs/features/instruments.md`.
+- **Guitar** (researching): TAB for picking, a strum lane for strumming, and import from
+  MusicXML and Guitar Pro, rendered by OSMD. See `specs/research/guitar-notation.md`.
 - **Accompaniment**: sound the parts you are not practising as a piano reduction. The part filter
   and the two-note-stream seam are in place; `Instrument.Audible` is the flag to use.
 - Multiple *simultaneous* loops / hierarchical practice decks (per original vision).
