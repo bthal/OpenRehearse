@@ -45,6 +45,7 @@ RN/OSMD/Tone imports. See `specs/architecture.md` for the authoritative version.
 | Instruments, transposition, part selection | `specs/features/instruments.md` |
 | Routines (build + playback) | `specs/features/warmup.md` (Routines section) |
 | Adding a persisted setting | `compound-docs/settings-persistence.md` |
+| Guitar: notations, renderers, where files come from | `specs/research/guitar-notation.md` |
 | Samples, sounding pitch, offline audio | `specs/features/instruments.md` § Audio, `compound-docs/tone-playback.md` |
 | Colours, typography, logo, icons | `specs/brand.md`, `compound-docs/brand-assets.md` |
 
