@@ -42,6 +42,8 @@ export interface Bit {
   tempoMultiplier: TempoMultiplier;
   /** Whether the metronome was on when the bit was saved; restored on entering it. */
   metronome: boolean;
+  /** Whether the notes were muted when the bit was saved; restored on entering it. */
+  muted: boolean;
 }
 
 /**
@@ -92,6 +94,7 @@ export function normaliseBits(raw: unknown): Bit[] {
       hand: coerceHand(entry.hand),
       tempoMultiplier: coerceTempoMultiplier(entry.tempoMultiplier),
       metronome: entry.metronome === true,
+      muted: entry.muted === true,
     });
   }
   return bits;
@@ -112,7 +115,8 @@ export function bitsEqual(a: readonly Bit[], b: readonly Bit[]): boolean {
       bit.endTicks === other.endTicks &&
       bit.hand === other.hand &&
       bit.tempoMultiplier === other.tempoMultiplier &&
-      bit.metronome === other.metronome
+      bit.metronome === other.metronome &&
+      bit.muted === other.muted
     );
   });
 }

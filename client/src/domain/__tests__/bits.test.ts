@@ -16,6 +16,7 @@ function bit(overrides: Partial<Bit> = {}): Bit {
     hand: 'both',
     tempoMultiplier: 1.0,
     metronome: false,
+    muted: false,
     ...overrides,
   };
 }
@@ -33,7 +34,7 @@ describe('normaliseBits', () => {
   });
 
   it('keeps a well-formed bit unchanged', () => {
-    const input = bit({ hand: 'left', tempoMultiplier: 0.5, metronome: true });
+    const input = bit({ hand: 'left', tempoMultiplier: 0.5, metronome: true, muted: true });
     expect(normaliseBits([input])).toEqual([input]);
   });
 
@@ -76,6 +77,7 @@ describe('normaliseBits', () => {
         hand: 'both',
         tempoMultiplier: 1.0,
         metronome: false,
+        muted: false,
       },
     ]);
   });
@@ -84,6 +86,15 @@ describe('normaliseBits', () => {
     expect(normaliseBits([{ ...bit(), metronome: 'yes' }])[0]?.metronome).toBe(false);
     expect(normaliseBits([{ ...bit(), metronome: 1 }])[0]?.metronome).toBe(false);
     expect(normaliseBits([{ ...bit(), metronome: true }])[0]?.metronome).toBe(true);
+  });
+
+  // Bits saved before mute existed carry no flag, and they always sounded.
+  it('treats a missing mute flag as unmuted, and only true as muted', () => {
+    const { muted: _omitted, ...legacy } = bit();
+    expect(normaliseBits([legacy])[0]?.muted).toBe(false);
+    expect(normaliseBits([{ ...bit(), muted: 'yes' }])[0]?.muted).toBe(false);
+    expect(normaliseBits([{ ...bit(), muted: 1 }])[0]?.muted).toBe(false);
+    expect(normaliseBits([{ ...bit(), muted: true }])[0]?.muted).toBe(true);
   });
 });
 
@@ -98,6 +109,7 @@ describe('bitsEqual', () => {
     expect(bitsEqual([bit()], [bit({ hand: 'right' })])).toBe(false);
     expect(bitsEqual([bit()], [bit({ tempoMultiplier: 0.75 })])).toBe(false);
     expect(bitsEqual([bit()], [bit({ metronome: true })])).toBe(false);
+    expect(bitsEqual([bit()], [bit({ muted: true })])).toBe(false);
     expect(bitsEqual([bit()], [])).toBe(false);
   });
 

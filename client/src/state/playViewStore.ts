@@ -28,6 +28,8 @@ interface PlayViewState {
   loopActive: boolean;
   /** Whether the metronome click is enabled. */
   metronomeOn: boolean;
+  /** Whether the notes are silenced; the cursor and metronome carry on regardless. */
+  muted: boolean;
   /** Which hand(s) are active for playback and score display. */
   activeHand: ActiveHand;
   /**
@@ -51,7 +53,7 @@ interface PlayViewState {
    */
   activeBitId: string | null;
   /**
-   * Hand, speed and metronome as they were just before the first bit was entered,
+   * Hand, speed, metronome and mute as they were just before the first bit was entered,
    * restored on leaving.
    *
    * A bit owns its practice settings, so entering one overwrites the live ones. Without
@@ -70,6 +72,7 @@ interface PlayViewState {
   setTempoMultiplier: (m: TempoMultiplier) => void;
   setLoopActive: (v: boolean) => void;
   setMetronomeOn: (v: boolean) => void;
+  setMuted: (v: boolean) => void;
   setActiveHand: (h: ActiveHand) => void;
   setCurrentSectionIndex: (index: number | null) => void;
   setScoreMoving: (moving: boolean) => void;
@@ -88,6 +91,7 @@ const initial = {
   tempoMultiplier: 1.0 as TempoMultiplier,
   loopActive: false,
   metronomeOn: false,
+  muted: false,
   activeHand: 'both' as ActiveHand,
   currentSectionIndex: null,
   scoreMoving: false,
@@ -106,6 +110,7 @@ export const usePlayViewStore = create<PlayViewState>()((set) => ({
   setTempoMultiplier: (m) => set({ tempoMultiplier: m }),
   setLoopActive: (v) => set({ loopActive: v }),
   setMetronomeOn: (v) => set({ metronomeOn: v }),
+  setMuted: (v) => set({ muted: v }),
   setActiveHand: (h) => set({ activeHand: h }),
   setCurrentSectionIndex: (index) => set({ currentSectionIndex: index }),
   setScoreMoving: (moving) => set({ scoreMoving: moving }),

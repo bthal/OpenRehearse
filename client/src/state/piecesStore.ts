@@ -90,7 +90,7 @@ interface PiecesState {
   setBits: (id: string, bits: Bit[]) => Promise<void>;
   /**
    * Records the practice settings the piece is being worked on with, so reopening it
-   * resumes at that speed and metronome setting. Separate from `updatePiece` for the
+   * resumes at that speed, metronome and mute setting. Separate from `updatePiece` for the
    * same reason `setBits` is: the PlayView changes these on its own, mid-practice, and
    * has no business restating the title and composer to do it.
    *
@@ -98,7 +98,7 @@ interface PiecesState {
    */
   setPracticeSettings: (
     id: string,
-    settings: { tempoMultiplier?: TempoMultiplier; metronome?: boolean },
+    settings: { tempoMultiplier?: TempoMultiplier; metronome?: boolean; muted?: boolean },
   ) => Promise<void>;
   touchPiece: (id: string) => Promise<void>;
   deletePiece: (id: string) => Promise<void>;

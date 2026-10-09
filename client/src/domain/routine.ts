@@ -57,6 +57,9 @@ export interface Routine {
   // Absent on routines saved before the metronome became part of the routine (treated as
   // off, which is how every such routine played by default).
   metronome?: boolean;
+  // Whether the notes are muted, so the routine scrolls with only the metronome. Absent on
+  // routines saved before mute existed (treated as audible, which is how they played).
+  muted?: boolean;
   createdAt: string;
   lastOpenedAt?: string; // ISO 8601; undefined for routines never opened after this field was added
 }

@@ -18,6 +18,8 @@
 - Optional: `metronome` — whether the metronome clicks for this piece, restored on open like
   `tempoMultiplier`; absent reads as off. The active hand is deliberately not stored — see
   `specs/features/playview.md` § "Playback & tempo"
+- Optional: `muted` — whether the notes are silenced for this piece (the metronome still
+  clicks), restored on open like `metronome`; absent reads as audible
 - Optional: `sections` — the piece's sections in score order, seeded by detection at import
   (`domain/sections.ts`) and editable by the user thereafter (`domain/sectionEditing.ts`; see
   `specs/features/section-detection.md`). A tiling: no gaps, no overlaps, every measure in
@@ -69,9 +71,10 @@ session. Stored as a JSON array on the piece (`Piece.bits`), normalised on read 
   - Transient on-screen loop placement stays pixel-based: the live region in `playback.ts`
     (`loopRegion`) deliberately holds both `aPx`/`bPx` and `aTicks`/`bTicks`, and the
     placement math in `domain/loop.ts` works in score pixels. Only the ticks are stored.
-- `hand`, `tempoMultiplier`, `metronome` — the practice settings the bit was saved with,
+- `hand`, `tempoMultiplier`, `metronome`, `muted` — the practice settings the bit was saved with,
   restored on entering it and written back when changed from inside it
-  (`domain/practiceSettings.ts`). Count-in stays global.
+  (`domain/practiceSettings.ts`). Count-in stays global. Bits saved before `muted`
+  existed read as audible.
 - **One bit per engraved span.** Duplicate detection compares the resolved *pixel* span,
   not ticks, so repeated bars — engraved once, played twice — hold at most one bit. Bits
   are nameless, and two markers on the same pixels would leave one unreachable.
@@ -85,7 +88,7 @@ session. Stored as a JSON array on the piece (`Piece.bits`), normalised on read 
 - Bits are written through a dedicated `piecesStore.setBits(id, bits)` rather than
   `updatePiece`: the PlayView creates, deletes and re-tunes bits on its own and has no
   business restating the title and composer to do it.
-- The piece's own practice settings — `tempoMultiplier` and `metronome`, restored on open —
+- The piece's own practice settings — `tempoMultiplier`, `metronome` and `muted`, restored on open —
   go through `piecesStore.setPracticeSettings(id, settings)` for the same reason. The
   active hand is not persisted; see `specs/features/playview.md`.
 

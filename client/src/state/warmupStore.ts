@@ -81,6 +81,8 @@ interface WarmUpState {
   isPlaying: boolean;
   loopActive: boolean;
   metronomeOn: boolean;
+  /** Whether the notes are silenced. Per visit, like the metronome: reset on open. */
+  muted: boolean;
   /**
    * Whether the score is moving under the cursor — panned, coasting or gliding.
    * Driven by SCORE_MOTION from the WebView; the centred play button hides while it
@@ -100,6 +102,7 @@ interface WarmUpState {
   setPlaying: (v: boolean) => void;
   setLoopActive: (v: boolean) => void;
   setMetronomeOn: (v: boolean) => void;
+  setMuted: (v: boolean) => void;
   setScoreMoving: (v: boolean) => void;
   resetPlayback: () => void;
 }
@@ -210,6 +213,7 @@ export const useWarmUpStore = create<WarmUpState>()((set, get) => ({
   isPlaying: false,
   loopActive: false,
   metronomeOn: false,
+  muted: false,
   scoreMoving: false,
 
   initSettings: async () => {
@@ -236,6 +240,7 @@ export const useWarmUpStore = create<WarmUpState>()((set, get) => ({
   setPlaying: (v) => set({ isPlaying: v }),
   setLoopActive: (v) => set({ loopActive: v }),
   setMetronomeOn: (v) => set({ metronomeOn: v }),
+  setMuted: (v) => set({ muted: v }),
   setScoreMoving: (v) => set({ scoreMoving: v }),
   resetPlayback: () =>
     set({
@@ -245,6 +250,7 @@ export const useWarmUpStore = create<WarmUpState>()((set, get) => ({
       isPlaying: false,
       loopActive: false,
       metronomeOn: false,
+      muted: false,
       scoreMoving: false,
     }),
 }));

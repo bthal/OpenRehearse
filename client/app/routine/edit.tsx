@@ -5,6 +5,8 @@ import {
   mdiMetronomeTick,
   mdiPlus,
   mdiSwapVertical,
+  mdiVolumeHigh,
+  mdiVolumeOff,
 } from '@mdi/js';
 import * as Crypto from 'expo-crypto';
 import { router, Stack, useLocalSearchParams } from 'expo-router';
@@ -259,6 +261,7 @@ export default function RoutineEditScreen() {
     () => existingRoutine?.blocks.map((b) => ({ ...b, _key: Crypto.randomUUID() })) ?? [],
   );
   const [metronome, setMetronome] = useState(() => existingRoutine?.metronome ?? false);
+  const [muted, setMuted] = useState(() => existingRoutine?.muted ?? false);
   const [isDirty, setIsDirty] = useState(false);
   const [picker, setPicker] = useState<PickerState | null>(null);
 
@@ -307,6 +310,7 @@ export default function RoutineEditScreen() {
       instrument,
       blocks: cleanBlocks,
       metronome,
+      muted,
       createdAt: existingRoutine?.createdAt ?? new Date().toISOString(),
     });
     router.back();
@@ -314,10 +318,15 @@ export default function RoutineEditScreen() {
 
   // ─── Block mutations ───────────────────────────────────────────────────────
 
-  // The metronome belongs to the routine as a whole, so it toggles straight from the
-  // header rather than going through the per-block picker.
+  // The metronome and mute belong to the routine as a whole, so they toggle straight from
+  // the header rather than going through the per-block picker.
   function toggleMetronome() {
     setMetronome((prev) => !prev);
+    setIsDirty(true);
+  }
+
+  function toggleMuted() {
+    setMuted((prev) => !prev);
     setIsDirty(true);
   }
 
@@ -691,6 +700,20 @@ export default function RoutineEditScreen() {
                       </View>
                     )}
                   </View>
+                  <Pressable
+                    onPress={toggleMuted}
+                    hitSlop={8}
+                    className="p-1.5"
+                    accessibilityRole="button"
+                    accessibilityLabel={t('routineEdit.mute')}
+                    accessibilityState={{ selected: muted }}
+                  >
+                    <AppIcon
+                      path={muted ? mdiVolumeOff : mdiVolumeHigh}
+                      size={26}
+                      color={muted ? Colors.primary : Colors.icon}
+                    />
+                  </Pressable>
                   <Pressable
                     onPress={toggleMetronome}
                     hitSlop={8}

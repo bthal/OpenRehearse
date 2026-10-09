@@ -96,6 +96,11 @@ export interface Piece {
    */
   metronome?: boolean;
   /**
+   * Whether the notes are muted for this piece, restored on open like `metronome`.
+   * Undefined for pieces imported before the field existed, which read as audible.
+   */
+  muted?: boolean;
+  /**
    * The piece's sections in score order, seeded by detection at import and editable
    * by the user thereafter. A tiling: no gaps, no overlaps, every measure in exactly
    * one section, so a section is described by where it starts and nothing else.

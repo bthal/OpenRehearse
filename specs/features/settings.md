@@ -32,6 +32,8 @@ player time to find the pulse.
   enters). A loop starting on a downbeat counts full measures.
 - The count-in is a metronome pre-roll regardless of whether the metronome toggle is on; once
   playback starts, the metronome only continues if it is enabled.
+- The count-in also clicks when the notes are **muted** — it is part of the pulse, not the music.
+  A prelude that sounds inside the last counted measure is music, so it is muted with the rest.
 - Count-in fires only on a **fresh start** (top of a piece/routine, or when a loop (re)starts from
   its A handle) — not when resuming a mid-piece/mid-loop pause.
 - **Tapping the score during the count-in cancels it.** The clicks stop, the toolbar and play button

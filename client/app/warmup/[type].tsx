@@ -8,6 +8,8 @@ import {
   mdiMetronomeTick,
   mdiMusicNoteOutline,
   mdiSpeedometer,
+  mdiVolumeHigh,
+  mdiVolumeOff,
 } from '@mdi/js';
 import { router, Stack, useLocalSearchParams } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -127,6 +129,7 @@ export default function WarmUpView() {
   const scoreError = useWarmUpStore((s) => s.scoreError);
   const isPlaying = useWarmUpStore((s) => s.isPlaying);
   const metronomeOn = useWarmUpStore((s) => s.metronomeOn);
+  const muted = useWarmUpStore((s) => s.muted);
   const scoreMoving = useWarmUpStore((s) => s.scoreMoving);
 
   const setWebViewReady = useWarmUpStore((s) => s.setWebViewReady);
@@ -135,6 +138,7 @@ export default function WarmUpView() {
   const setPlaying = useWarmUpStore((s) => s.setPlaying);
   const setLoopActive = useWarmUpStore((s) => s.setLoopActive);
   const setMetronomeOn = useWarmUpStore((s) => s.setMetronomeOn);
+  const setMuted = useWarmUpStore((s) => s.setMuted);
   const setScoreMoving = useWarmUpStore((s) => s.setScoreMoving);
   const resetPlayback = useWarmUpStore((s) => s.resetPlayback);
 
@@ -424,6 +428,15 @@ export default function WarmUpView() {
   }, [metronomeOn, setMetronomeOn]);
 
   const scoreReady = webViewReady && !isLoadingScore && !scoreError;
+
+  // Set from state rather than toggled in the WebView like the metronome above: changing
+  // an exercise parameter reloads the score, and a set re-asserted on every load cannot
+  // drift from the button the way a blind toggle can.
+  useEffect(() => {
+    if (!scoreReady) return;
+    webViewRef.current?.injectJavaScript(`window.__rn_set_muted(${muted});void 0;`);
+  }, [scoreReady, muted]);
+
   const showExercise = hasParam(warmUpType, 'exercise');
   const showKey = hasParam(warmUpType, 'key');
   const showOctave = hasParam(warmUpType, 'octaves');
@@ -614,6 +627,19 @@ export default function WarmUpView() {
               {/* Back */}
               <ToolbarSlot onPress={() => router.back()} accessibilityLabel={t('playView.back')}>
                 <AppIcon path={mdiExitToApp} size={24} color={Colors.icon} flip="vertical" />
+              </ToolbarSlot>
+
+              {/* Mute — silences the notes only; the metronome below still clicks */}
+              <ToolbarSlot
+                onPress={() => setMuted(!muted)}
+                accessibilityLabel={t('warmup.mute')}
+                accessibilityState={{ selected: muted }}
+              >
+                <AppIcon
+                  path={muted ? mdiVolumeOff : mdiVolumeHigh}
+                  size={26}
+                  color={muted ? Colors.primary : Colors.icon}
+                />
               </ToolbarSlot>
 
               {/* Metronome */}
