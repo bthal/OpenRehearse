@@ -94,6 +94,16 @@ plus a listener logging each frame. Renders absent between START and END, with a
 committed value, is this bug. Renders *present* mid-animation with stale values would be the
 different (and more commonly described) native-driver race.
 
+## Android drops touches outside a parent's bounds
+
+**LANDMINE:** a child positioned absolutely *outside* its parent's frame is drawn on Android but
+receives no touches — hit-testing never descends into a parent the touch did not land in.
+
+This is why `components/ToolbarShell.tsx` makes its sliding wrapper span the whole score area with
+`pointerEvents="box-none"` rather than shrink-wrapping the card: the fly-out panels live inside
+that wrapper (so they slide off with the toolbar), beside the card, and a card-wide wrapper would
+leave them visible but dead. `box-none` lets taps on the score pass through to the WebView.
+
 ## babel-preset-expo must be an explicit dependency
 
 The blank Expo TypeScript template does not list `babel-preset-expo` in `package.json` — it's a transitive dep of `expo`. After upgrading `expo-router` to `~56.x` the module resolution changes and it can no longer be found transitively, causing Metro to fail on first transform.

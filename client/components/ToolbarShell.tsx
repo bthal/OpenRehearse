@@ -1,13 +1,40 @@
-import { forwardRef, useEffect, useRef, useState, type ReactNode } from 'react';
-import { Animated, Easing, View, type LayoutChangeEvent } from 'react-native';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { Animated, Easing, View, type LayoutChangeEvent, type ViewStyle } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 interface ToolbarShellProps {
   /** True while playing: the toolbar slides off the left edge of the screen. */
   hidden: boolean;
-  /** The screen's own buttons, top to bottom. */
+  /** The screen's own buttons, top to bottom — each one a `ToolbarSlot`. */
   children: ReactNode;
+  /** The screen's fly-out `ToolbarPanel`s. Placed beside the card and slide with it. */
+  panels?: ReactNode;
 }
+
+/**
+ * One toolbar field. Every button in the card and every option in a fly-out panel is a
+ * square of this size, so the card's width never depends on what a button happens to be
+ * showing — the speed button swapping "×0.75" for a speedometer icon used to resize it.
+ */
+export const TOOLBAR_SLOT = 48;
+/** Space between neighbouring slots, in the card and in a panel alike. */
+export const TOOLBAR_SLOT_GAP = 4;
+/** The card's padding: along the run of slots, and across it. */
+export const TOOLBAR_PAD_ALONG = 12;
+export const TOOLBAR_PAD_ACROSS = 8;
+/** Space between the card's right edge and an open panel. */
+const PANEL_GAP = 8;
+
+/** The card's surface, shared with the panels so the two cannot drift apart. */
+export const toolbarCardStyle: ViewStyle = {
+  backgroundColor: '#ffffff',
+  borderRadius: 12,
+  elevation: 4,
+  shadowColor: '#000',
+  shadowOpacity: 0.12,
+  shadowRadius: 6,
+  shadowOffset: { width: 2, height: 0 },
+};
 
 const SLIDE_MS = 180;
 
@@ -18,23 +45,24 @@ const SHADOW_SLACK_PX = 16;
  * The floating toolbar's shell: where it sits, what it looks like, and how it leaves.
  *
  * Only the shell is shared. The play view and the warm-up screen hold different sets of
- * buttons and anchor different fly-out panels, and pulling those together would be a
- * refactor of working code rather than the visual change this is — so they stay in
- * their screens and pass them in.
+ * buttons and panels, so they stay in their screens and pass them in.
  *
  * Playing slides the whole card off the left edge, leaving nothing on screen but the
  * notation; pausing brings it back. Tapping the score is what pauses, so the toolbar is
  * always one tap away even while it is gone.
  *
- * The forwarded ref reaches the card itself, which both screens `measureLayout` to
- * anchor their panels. The transform lives on the wrapper above it, not the card, so
- * that measurement keeps returning layout coordinates — and panels only ever open while
- * paused, i.e. at rest with the card at its resting position.
+ * Panels are rendered here, beside the card and inside the sliding wrapper, so an open
+ * panel leaves with the toolbar instead of being stranded over the score. Their left edge
+ * comes from the card's own layout, which already includes the cutout inset. Vertically
+ * they are positioned by the screen (see `panelTopFor`), in the wrapper's coordinates —
+ * which are the score area's, since the wrapper spans it top to bottom.
+ *
+ * The wrapper spans the full width too, with `box-none` so the score underneath still
+ * gets its taps. That is not cosmetic: Android delivers no touches to a child drawn
+ * outside its parent's bounds, so a wrapper only as wide as the card would leave every
+ * panel visible but dead.
  */
-export const ToolbarShell = forwardRef<View, ToolbarShellProps>(function ToolbarShell(
-  { hidden, children },
-  ref,
-) {
+export function ToolbarShell({ hidden, children, panels }: ToolbarShellProps) {
   // The play surfaces run edge to edge so the notation can use the whole screen, which
   // means `left: 0` here is the physical edge — including the strip beside a landscape
   // phone's camera. The toolbar keeps clear of that itself, by padding at rest and by
@@ -45,14 +73,14 @@ export const ToolbarShell = forwardRef<View, ToolbarShellProps>(function Toolbar
   const [translateX] = useState(() => new Animated.Value(0));
   // Zero until the card has been laid out. There is no sensible distance to slide by
   // before then, so the first pass just holds still.
-  const [width, setWidth] = useState(0);
+  const [card, setCard] = useState({ x: 0, width: 0 });
   // Arriving already hidden is not a transition — a screen opened mid-playback should
   // find the toolbar away, not watch it leave.
   const settled = useRef(false);
 
   useEffect(() => {
-    if (width === 0) return;
-    const to = hidden ? -(width + insets.left + SHADOW_SLACK_PX) : 0;
+    if (card.width === 0) return;
+    const to = hidden ? -(card.width + insets.left + SHADOW_SLACK_PX) : 0;
 
     if (!settled.current) {
       settled.current = true;
@@ -73,36 +101,56 @@ export const ToolbarShell = forwardRef<View, ToolbarShellProps>(function Toolbar
       // same value React reads, so the two cannot disagree.
       useNativeDriver: false,
     }).start();
-  }, [hidden, width, insets.left, translateX]);
+  }, [hidden, card.width, insets.left, translateX]);
 
-  const onLayout = (e: LayoutChangeEvent) => setWidth(e.nativeEvent.layout.width);
+  const onLayout = (e: LayoutChangeEvent) => {
+    const { x, width } = e.nativeEvent.layout;
+    setCard({ x, width });
+  };
 
   return (
     <Animated.View
+      pointerEvents="box-none"
       style={{
         position: 'absolute',
         left: 0,
+        right: 0,
         top: 0,
         bottom: 0,
         paddingLeft: insets.left,
         justifyContent: 'center',
+        alignItems: 'flex-start',
         transform: [{ translateX }],
       }}
     >
       <View
-        ref={ref}
         onLayout={onLayout}
-        className="bg-white rounded-xl py-3 px-2 items-center gap-4"
-        style={{
-          elevation: 4,
-          shadowColor: '#000',
-          shadowOpacity: 0.12,
-          shadowRadius: 6,
-          shadowOffset: { width: 2, height: 0 },
-        }}
+        style={[
+          toolbarCardStyle,
+          {
+            paddingVertical: TOOLBAR_PAD_ALONG,
+            paddingHorizontal: TOOLBAR_PAD_ACROSS,
+            alignItems: 'center',
+            gap: TOOLBAR_SLOT_GAP,
+          },
+        ]}
       >
         {children}
       </View>
+      {panels && card.width > 0 ? (
+        <View
+          pointerEvents="box-none"
+          style={{
+            position: 'absolute',
+            left: card.x + card.width + PANEL_GAP,
+            right: 0,
+            top: 0,
+            bottom: 0,
+          }}
+        >
+          {panels}
+        </View>
+      ) : null}
     </Animated.View>
   );
-});
+}

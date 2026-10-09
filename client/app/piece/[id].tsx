@@ -15,7 +15,7 @@ import {
 import * as Crypto from 'expo-crypto';
 import { router, Stack, useLocalSearchParams } from 'expo-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Alert, Animated, ActivityIndicator, Text, TouchableOpacity, View } from 'react-native';
+import { Alert, ActivityIndicator, Text, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import WebView, { type WebViewMessageEvent } from 'react-native-webview';
 import { useTranslation } from 'react-i18next';
@@ -26,7 +26,14 @@ import { injectInstrumentAudio } from '@score-web/instrumentAudio';
 import { BitModeButtons } from '@components/BitModeButtons';
 import { CenterPlayButton } from '@components/CenterPlayButton';
 import { SectionLabel } from '@components/SectionLabel';
+import {
+  TOOLBAR_PANEL_ICON_SIZE,
+  ToolbarPanel,
+  ToolbarPanelText,
+  panelTopFor,
+} from '@components/ToolbarPanel';
 import { ToolbarShell } from '@components/ToolbarShell';
+import { ToolbarSlot } from '@components/ToolbarSlot';
 import { pieceRepository } from '@data/index';
 import { BIT_MAX_ROWS, type Bit } from '@domain/bits';
 import { DEFAULT_PRACTICE_SETTINGS } from '@domain/practiceSettings';
@@ -50,9 +57,6 @@ const MULTIPLIER_LABEL: Record<number, string> = {
   0.75: '×0.75',
   1: '×1.0',
 };
-
-const SPEED_PANEL_WIDTH = 132;
-const HAND_PANEL_WIDTH = 132; // 3 × 44 px
 
 const HAND_ICON: Record<ActiveHand, string> = {
   both: mdiHandClap,
@@ -99,20 +103,17 @@ export default function PlayView() {
   const reset = usePlayViewStore((s) => s.reset);
 
   const [speedOpen, setSpeedOpen] = useState(false);
-  const [speedAnim] = useState(() => new Animated.Value(0));
-  const [panelLayout, setPanelLayout] = useState({ top: 0, left: 0 });
+  const [speedPanelTop, setSpeedPanelTop] = useState(0);
 
   const [handOpen, setHandOpen] = useState(false);
   // Two until the score says otherwise, so the control does not flicker in on load
   // for the overwhelmingly common grand-staff case.
   const [staffCount, setStaffCount] = useState(2);
-  const [handAnim] = useState(() => new Animated.Value(0));
-  const [handPanelLayout, setHandPanelLayout] = useState({ top: 0, left: 0 });
+  const [handPanelTop, setHandPanelTop] = useState(0);
 
   const scoreAreaRef = useRef<View>(null);
   const speedTriggerRef = useRef<View>(null);
   const handTriggerRef = useRef<View>(null);
-  const toolbarRef = useRef<View>(null);
   const webViewRef = useRef<WebView>(null);
   // Refs so the message handler and multiplier handler always see the latest values
   // without recreating callbacks on every state change.
@@ -248,88 +249,42 @@ export default function PlayView() {
   const toggleSpeed = useCallback(() => {
     const opening = !speedOpen;
     if (opening) {
-      if (handOpen) {
-        setHandOpen(false);
-        Animated.spring(handAnim, {
-          toValue: 0,
-          useNativeDriver: false,
-          bounciness: 4,
-          speed: 18,
-        }).start();
-      }
+      setHandOpen(false);
       if (isPlaying) {
         webViewRef.current?.injectJavaScript('window.__rn_pause();void 0;');
       }
       speedTriggerRef.current?.measureLayout(
         scoreAreaRef.current as never,
-        (_tx, ty, _tw, th) => {
-          toolbarRef.current?.measureLayout(
-            scoreAreaRef.current as never,
-            (_bx, _by, bw) => setPanelLayout({ top: ty + th / 2 - 22, left: bw }),
-            () => {},
-          );
-        },
+        (_x, y, _w, h) => setSpeedPanelTop(panelTopFor(y, h)),
         () => {},
       );
     }
     setSpeedOpen(opening);
-    Animated.spring(speedAnim, {
-      toValue: opening ? 1 : 0,
-      useNativeDriver: false,
-      bounciness: 4,
-      speed: 18,
-    }).start();
-  }, [speedOpen, speedAnim, isPlaying, handOpen, handAnim]);
+  }, [speedOpen, isPlaying]);
 
   const toggleHand = useCallback(() => {
     const opening = !handOpen;
     if (opening) {
-      if (speedOpen) {
-        setSpeedOpen(false);
-        Animated.spring(speedAnim, {
-          toValue: 0,
-          useNativeDriver: false,
-          bounciness: 4,
-          speed: 18,
-        }).start();
-      }
+      setSpeedOpen(false);
       handTriggerRef.current?.measureLayout(
         scoreAreaRef.current as never,
-        (_tx, ty, _tw, th) => {
-          toolbarRef.current?.measureLayout(
-            scoreAreaRef.current as never,
-            (_bx, _by, bw) => setHandPanelLayout({ top: ty + th / 2 - 22, left: bw }),
-            () => {},
-          );
-        },
+        (_x, y, _w, h) => setHandPanelTop(panelTopFor(y, h)),
         () => {},
       );
     }
     setHandOpen(opening);
-    Animated.spring(handAnim, {
-      toValue: opening ? 1 : 0,
-      useNativeDriver: false,
-      bounciness: 4,
-      speed: 18,
-    }).start();
-  }, [handOpen, handAnim, speedOpen, speedAnim]);
+  }, [handOpen]);
 
   const handleHandChange = useCallback(
     (hand: ActiveHand) => {
       setActiveHand(hand);
       setHandOpen(false);
-      Animated.spring(handAnim, {
-        toValue: 0,
-        useNativeDriver: false,
-        bounciness: 4,
-        speed: 18,
-      }).start();
       webViewRef.current?.injectJavaScript(
         `window.__rn_set_active_hand(${JSON.stringify(hand)});void 0;`,
       );
       writeBackToActiveBit({ hand });
     },
-    [setActiveHand, handAnim, writeBackToActiveBit],
+    [setActiveHand, writeBackToActiveBit],
   );
 
   const sendXml = useCallback(async () => {
@@ -455,6 +410,12 @@ export default function PlayView() {
           break;
         case 'PLAYBACK_STATE':
           setPlaying(msg.payload === 'playing');
+          // The toolbar slides away on play and carries any open panel with it; closing
+          // it here means it is not still standing open when the toolbar comes back.
+          if (msg.payload === 'playing') {
+            setSpeedOpen(false);
+            setHandOpen(false);
+          }
           break;
         case 'PLAYBACK_END':
           setPlaying(false);
@@ -694,7 +655,42 @@ export default function PlayView() {
           {/* Toolbar — vertically centered, left-side overlay. Slides away while
             playing, leaving the notation alone; tapping the score brings it back. */}
           {scoreReady && (
-            <ToolbarShell ref={toolbarRef} hidden={isPlaying}>
+            <ToolbarShell
+              hidden={isPlaying}
+              panels={
+                <>
+                  <ToolbarPanel open={speedOpen} top={speedPanelTop}>
+                    {TEMPO_MULTIPLIERS.map((m) => (
+                      <ToolbarSlot
+                        key={m}
+                        onPress={() => {
+                          handleMultiplierChange(m);
+                          setSpeedOpen(false);
+                        }}
+                        accessibilityLabel={MULTIPLIER_LABEL[m]}
+                      >
+                        <ToolbarPanelText active={tempoMultiplier === m}>
+                          {MULTIPLIER_LABEL[m]}
+                        </ToolbarPanelText>
+                      </ToolbarSlot>
+                    ))}
+                  </ToolbarPanel>
+                  {staffCount > 1 ? (
+                    <ToolbarPanel open={handOpen} top={handPanelTop}>
+                      {ACTIVE_HANDS.map((hand) => (
+                        <ToolbarSlot key={hand} onPress={() => handleHandChange(hand)}>
+                          <AppIcon
+                            path={HAND_ICON[hand]}
+                            size={TOOLBAR_PANEL_ICON_SIZE}
+                            color={activeHand === hand ? Colors.primary : Colors.iconMuted}
+                          />
+                        </ToolbarSlot>
+                      ))}
+                    </ToolbarPanel>
+                  ) : null}
+                </>
+              }
+            >
               {/* Only the top of the toolbar swaps between modes. Metronome, hand and
                 speed are shared and keep their positions, because a bit owns those
                 three settings and editing them from inside it is the point. */}
@@ -703,22 +699,16 @@ export default function PlayView() {
               ) : (
                 <>
                   {/* Back */}
-                  <TouchableOpacity
+                  <ToolbarSlot
                     onPress={() => router.back()}
-                    hitSlop={12}
-                    className="p-1"
-                    accessibilityRole="button"
                     accessibilityLabel={t('playView.back')}
                   >
                     <AppIcon path={mdiExitToApp} size={24} color={Colors.icon} flip="vertical" />
-                  </TouchableOpacity>
+                  </ToolbarSlot>
 
                   {/* Loop select / clear */}
-                  <TouchableOpacity
+                  <ToolbarSlot
                     onPress={handleLoopToggle}
-                    hitSlop={8}
-                    className="p-1.5"
-                    accessibilityRole="button"
                     accessibilityLabel={
                       loopActive ? t('playView.clearLoop') : t('playView.createLoop')
                     }
@@ -728,31 +718,25 @@ export default function PlayView() {
                       size={26}
                       color={loopActive ? Colors.primary : Colors.icon}
                     />
-                  </TouchableOpacity>
+                  </ToolbarSlot>
 
                   {/* Save the loop as a bit. Present only while there is a loop to save,
                     so it takes a slot rather than replacing the loop button — clearing a
                     loop must stay possible without saving it first. */}
                   {loopActive && (
-                    <TouchableOpacity
+                    <ToolbarSlot
                       onPress={handleCreateBit}
-                      hitSlop={8}
-                      className="p-1.5"
-                      accessibilityRole="button"
                       accessibilityLabel={t('playView.createBit')}
                     >
                       <AppIcon path={mdiToyBrickPlus} size={26} color={Colors.icon} />
-                    </TouchableOpacity>
+                    </ToolbarSlot>
                   )}
                 </>
               )}
 
               {/* Metronome toggle */}
-              <TouchableOpacity
+              <ToolbarSlot
                 onPress={handleMetronomeToggle}
-                hitSlop={8}
-                className="p-1.5"
-                accessibilityRole="button"
                 accessibilityLabel={t('playView.metronome')}
               >
                 <AppIcon
@@ -760,52 +744,44 @@ export default function PlayView() {
                   size={26}
                   color={metronomeOn ? Colors.primary : Colors.icon}
                 />
-              </TouchableOpacity>
+              </ToolbarSlot>
 
               {/* Hand selector trigger — absent on a one-staff score, where left and
                 right mean nothing. Keyed off what actually rendered rather than the
                 instrument, so a single-line file imported as piano is handled too. */}
               {staffCount > 1 ? (
-                <View ref={handTriggerRef}>
-                  <TouchableOpacity
-                    onPress={toggleHand}
-                    hitSlop={8}
-                    className="p-1.5"
-                    accessibilityRole="button"
-                    accessibilityLabel={t('playView.handSelection')}
-                  >
-                    <AppIcon
-                      path={HAND_ICON[activeHand]}
-                      size={22}
-                      color={activeHand !== 'both' ? Colors.primary : Colors.icon}
-                    />
-                  </TouchableOpacity>
-                </View>
+                <ToolbarSlot
+                  ref={handTriggerRef}
+                  onPress={toggleHand}
+                  accessibilityLabel={t('playView.handSelection')}
+                >
+                  <AppIcon
+                    path={HAND_ICON[activeHand]}
+                    size={22}
+                    color={activeHand !== 'both' ? Colors.primary : Colors.icon}
+                  />
+                </ToolbarSlot>
               ) : null}
 
               {/* Speed trigger — icon when open, current speed label when closed */}
-              <View ref={speedTriggerRef}>
-                <TouchableOpacity
-                  onPress={toggleSpeed}
-                  hitSlop={8}
-                  className="items-center px-2 py-1"
-                  accessibilityRole="button"
-                  accessibilityLabel={t('playView.speed')}
-                >
-                  <View style={{ height: 22, justifyContent: 'center', alignItems: 'center' }}>
-                    {speedOpen ? (
-                      <AppIcon path={mdiSpeedometer} size={22} color={Colors.primary} />
-                    ) : (
-                      <Text className="text-base font-semibold text-gray-700">
-                        {MULTIPLIER_LABEL[tempoMultiplier]}
-                      </Text>
-                    )}
-                  </View>
-                  <Text className="text-[9px] text-black mt-0.5">
-                    {effectiveBpm} {t('common.bpm')}
-                  </Text>
-                </TouchableOpacity>
-              </View>
+              <ToolbarSlot
+                ref={speedTriggerRef}
+                onPress={toggleSpeed}
+                accessibilityLabel={t('playView.speed')}
+              >
+                <View style={{ height: 22, justifyContent: 'center', alignItems: 'center' }}>
+                  {speedOpen ? (
+                    <AppIcon path={mdiSpeedometer} size={22} color={Colors.primary} />
+                  ) : (
+                    <Text className="text-base font-semibold text-gray-700">
+                      {MULTIPLIER_LABEL[tempoMultiplier]}
+                    </Text>
+                  )}
+                </View>
+                <Text className="text-[9px] text-black mt-0.5">
+                  {effectiveBpm} {t('common.bpm')}
+                </Text>
+              </ToolbarSlot>
             </ToolbarShell>
           )}
 
@@ -848,97 +824,6 @@ export default function PlayView() {
               />
             </View>
           )}
-
-          {/* Speed panel — overlays the score, anchored to the speed trigger position */}
-          <Animated.View
-            pointerEvents={speedOpen ? 'auto' : 'none'}
-            style={{
-              position: 'absolute',
-              top: panelLayout.top,
-              left: panelLayout.left,
-              width: speedAnim.interpolate({
-                inputRange: [0, 1],
-                outputRange: [0, SPEED_PANEL_WIDTH],
-                extrapolate: 'clamp',
-              }),
-              overflow: 'hidden',
-              flexDirection: 'row',
-              backgroundColor: 'rgba(255,255,255,0.92)',
-              borderRadius: 10,
-              elevation: 4,
-              shadowColor: '#000',
-              shadowOpacity: 0.12,
-              shadowRadius: 6,
-              shadowOffset: { width: 2, height: 0 },
-            }}
-          >
-            {TEMPO_MULTIPLIERS.map((m) => {
-              const isActive = tempoMultiplier === m;
-              return (
-                <TouchableOpacity
-                  key={m}
-                  onPress={() => {
-                    handleMultiplierChange(m);
-                    toggleSpeed();
-                  }}
-                  hitSlop={4}
-                  style={{ width: 44, height: 44, alignItems: 'center', justifyContent: 'center' }}
-                >
-                  <Text
-                    style={{
-                      fontSize: 14,
-                      fontWeight: '600',
-                      color: isActive ? Colors.primary : Colors.iconMuted,
-                    }}
-                  >
-                    {MULTIPLIER_LABEL[m]}
-                  </Text>
-                </TouchableOpacity>
-              );
-            })}
-          </Animated.View>
-
-          {/* Hand panel — overlays the score, anchored to the hand trigger position */}
-          <Animated.View
-            pointerEvents={handOpen ? 'auto' : 'none'}
-            style={{
-              position: 'absolute',
-              top: handPanelLayout.top,
-              left: handPanelLayout.left,
-              width: handAnim.interpolate({
-                inputRange: [0, 1],
-                outputRange: [0, HAND_PANEL_WIDTH],
-                extrapolate: 'clamp',
-              }),
-              overflow: 'hidden',
-              flexDirection: 'row',
-              backgroundColor: 'rgba(255,255,255,0.92)',
-              borderRadius: 10,
-              elevation: 4,
-              shadowColor: '#000',
-              shadowOpacity: 0.12,
-              shadowRadius: 6,
-              shadowOffset: { width: 2, height: 0 },
-            }}
-          >
-            {ACTIVE_HANDS.map((hand) => {
-              const isActive = activeHand === hand;
-              return (
-                <TouchableOpacity
-                  key={hand}
-                  onPress={() => handleHandChange(hand)}
-                  hitSlop={4}
-                  style={{ width: 44, height: 44, alignItems: 'center', justifyContent: 'center' }}
-                >
-                  <AppIcon
-                    path={HAND_ICON[hand]}
-                    size={22}
-                    color={isActive ? Colors.primary : Colors.iconMuted}
-                  />
-                </TouchableOpacity>
-              );
-            })}
-          </Animated.View>
 
           {/* Overlay: WebView not yet loaded */}
           {!webViewReady && !scoreError && (

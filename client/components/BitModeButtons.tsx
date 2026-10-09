@@ -1,8 +1,8 @@
 import { mdiClose } from '@mdi/js';
-import { TouchableOpacity, View } from 'react-native';
 import { useTranslation } from 'react-i18next';
 
 import { AppIcon } from '@components/AppIcon';
+import { ToolbarSlot } from '@components/ToolbarSlot';
 import { Colors } from '@theme/colors';
 
 interface BitModeButtonsProps {
@@ -27,16 +27,8 @@ export function BitModeButtons({ onLeave }: BitModeButtonsProps) {
   const { t } = useTranslation();
 
   return (
-    <View className="items-center gap-4">
-      <TouchableOpacity
-        onPress={onLeave}
-        hitSlop={12}
-        className="p-1"
-        accessibilityRole="button"
-        accessibilityLabel={t('playView.leaveBit')}
-      >
-        <AppIcon path={mdiClose} size={24} color={Colors.icon} />
-      </TouchableOpacity>
-    </View>
+    <ToolbarSlot onPress={onLeave} accessibilityLabel={t('playView.leaveBit')}>
+      <AppIcon path={mdiClose} size={24} color={Colors.icon} />
+    </ToolbarSlot>
   );
 }
