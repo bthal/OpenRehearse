@@ -98,6 +98,53 @@ describe('nearestGridIndex', () => {
     expect(nearestGridIndex([], 400)).toBe(0);
     expect(nearestGridIndex([{ quarters: 0, pxLeft: 100 }], 400)).toBe(0);
   });
+
+  // The grid is in playback order, so a repeat visits the same engraving twice and the
+  // pixels drop back at the back-jump: an intro bar, a six-onset passage played twice,
+  // a coda and the terminal. A binary search over that resolves a repeated position to
+  // whichever pass its probes happen to land in — pass 2 for the later onsets here —
+  // which is how Julia Reeder's m.16 loops ended up spanning both passes.
+  describe('across a repeat', () => {
+    const PASS = [200, 300, 400, 500, 600, 700];
+    const REPEATED: GridPoint[] = [
+      { quarters: 0, pxLeft: 100 },
+      ...PASS.map((pxLeft, i) => ({ quarters: 1 + i, pxLeft })), // pass 1: indices 1–6
+      ...PASS.map((pxLeft, i) => ({ quarters: 7 + i, pxLeft })), // pass 2: indices 7–12
+      { quarters: 13, pxLeft: 800 }, // coda
+      { quarters: 14, pxLeft: 900 }, // terminal
+    ];
+
+    it('stays in the pass the hint is in', () => {
+      expect(nearestGridIndex(REPEATED, 600, 2)).toBe(5);
+      expect(nearestGridIndex(REPEATED, 600, 9)).toBe(11);
+      expect(nearestGridIndex(REPEATED, 610, 2)).toBe(5);
+    });
+
+    it('resolves to the first pass when given no hint', () => {
+      expect(nearestGridIndex(REPEATED, 600)).toBe(5);
+      expect(nearestGridIndex(REPEATED, 300)).toBe(2);
+    });
+
+    it('still prefers a closer onset over a farther one in the hinted pass', () => {
+      // The coda exists once; a hint in pass 1 must not drag the result back to
+      // pass 1's last onset.
+      expect(nearestGridIndex(REPEATED, 790, 2)).toBe(13);
+      expect(nearestGridIndex(REPEATED, 100, 9)).toBe(0);
+    });
+
+    it('keeps a loop ending at the repeat barline inside the pass its A is in', () => {
+      // The Reeder case: A in pass 1, B dragged onto the passage's last onset (there,
+      // the downbeat of m.17). B has to be pass 1's onset, or the loop runs on through
+      // the rest of pass 1 and all of pass 2 while the playhead sits clamped at B.
+      const aIndex = 2;
+      const bIndex = nearestGridIndex(REPEATED, 700, aIndex);
+      expect(bIndex).toBe(6);
+      expect(clampLoopIndices({ grid: REPEATED, aIndex, bIndex, moved: 'b' })).toEqual({
+        aIndex: 2,
+        bIndex: 6,
+      });
+    });
+  });
 });
 
 describe('clampLoopIndices', () => {

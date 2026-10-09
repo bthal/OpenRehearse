@@ -273,6 +273,22 @@ barline (max 22.8 where accidentals widen the entry). None of that is an engravi
 VexFlow's inset inside the stave and it cannot be configured away, which is why the note grid
 anchors measure starts explicitly instead.
 
+## LANDMINE: the note grid is not ascending in pixels — a repeat visits the engraving twice
+
+`cursorSteps` and `snapGrid` are in **playback** order, and the OSMD cursor follows repeats, so a
+repeated passage appears once per pass and the pixels drop back at every back-jump. One pixel is
+then several grid points. A plain binary search over pixels does not find "the" point — it lands
+in whichever pass its probes happen to hit. On Julia Reeder (m.5–17 repeated) that put everything
+up to m.16 beat 2 in pass 1 and everything after it in pass 2, so a loop drawn from m.13 to the
+end of m.16 got A in pass 1 and B in pass 2: the transport played on through pass 1's m.17 (and
+all of pass 2) while the playhead sat clamped at B. It hit "sometimes" because whether A landed in
+the same pass depended on where it was.
+
+`nearestGridIndex` now searches each ascending run separately and, where runs offer the same
+pixel, takes the one nearest a hint index: the other handle for a drag, the current step for
+the centre line. Any new pixel→step lookup must pass a hint for the same reason. Musical-time
+lookups (`nearestIndexByQuarters`, used to restore bits) are unaffected — quarters do ascend.
+
 ## Score-pixel overlays must be hidden **and** reset on dispose
 
 `#loop-handle-a`, `#loop-handle-b`, `#loop-shade`, `#section-marks` and `#snap-preview` are all
