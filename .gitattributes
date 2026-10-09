@@ -1,0 +1,6 @@
+# The repo is LF everywhere. Prettier enforces LF, so a CRLF checkout (Windows autocrlf)
+# fails format:check on every file. Pin it here so the OS default cannot decide.
+* text=auto eol=lf
+
+# Third-party reference kept byte-identical to its source (CC BY) — never normalise it.
+client/assets/brand/reference-piano.svg -text
